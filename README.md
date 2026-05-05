@@ -25,57 +25,47 @@ Each `openlock sandbox <path>` call:
 7. On exit, fetches the sandbox HEAD back into your repo as `remotes/sandbox/main`.
 8. Stops the gateway when no other `openshell-sandbox-*` containers remain.
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vessux/openlock/main/install.sh | sh
+```
+
+Drops `openlock` into `~/.local/bin`. Set `OPENLOCK_INSTALL_DIR` to override. The fork binaries (gateway, supervisor, openshell CLI) are fetched lazily on first run into `~/.cache/openlock/bin/`.
+
 ## Prerequisites
 
-Common:
-- [bun](https://bun.sh)
-- [podman](https://podman.io)
-- [cargo](https://rustup.rs)
+- [podman](https://podman.io) — `podman machine` started on macOS, or a reachable rootless socket on Linux (`systemctl --user enable --now podman.socket`)
 - `git`
-- `claude` CLI ([Claude Code](https://docs.claude.com/en/docs/claude-code))
-- An [openshell-fork](https://github.com/vessux/OpenShell) checkout on `feat/cred-inject` placed at `./openshell-fork` (sibling of `src/`)
-
-macOS only:
-- `podman machine` (`podman machine init && podman machine start`)
-- `cargo-zigbuild` (`cargo install cargo-zigbuild`) for cross-compiling the supervisor to Linux
-
-Linux only:
-- The Podman API socket enabled: `systemctl --user enable --now podman.socket` (rootless) or rootful equivalent. The gateway connects via this socket; `podman info` works without it but the gateway will not start.
+- `claude` CLI inside the sandbox is bundled into the container image — no host install needed
 
 Verify with `openlock doctor`.
 
-## Setup
+## Quick start
 
 ```bash
-git clone <this-repo> openlock
-cd openlock
-git clone -b feat/cred-inject https://github.com/vessux/OpenShell.git openshell-fork
-bun install
+podman machine start                # macOS
+# or: systemctl --user enable --now podman.socket   # Linux
 
-# macOS
-podman machine start
-
-# Linux
-systemctl --user enable --now podman.socket
-
-bun run src/cli.ts doctor
-bun run src/cli.ts login   # paste a Claude Code setup token
+openlock doctor
+openlock login                      # paste a Claude Code setup token
+openlock sandbox /path/to/your/repo
 ```
 
 ## Usage
 
 ```bash
 # launch a sandbox for a project
-bun run src/cli.ts sandbox /path/to/your/repo
+openlock sandbox /path/to/your/repo
 
 # keep the gateway running across cleanups
-bun run src/cli.ts sandbox /path/to/your/repo --keep-gateway
+openlock sandbox /path/to/your/repo --keep-gateway
 
 # rebuild sandbox images
-bun run src/cli.ts update-images
+openlock update-images
 
 # manage gateway directly
-bun run src/cli.ts gateway start|stop|status
+openlock gateway start|stop|status
 ```
 
 After the session exits, the sandbox's HEAD is in your repo at `remotes/sandbox/main`. Inspect with `git log remotes/sandbox/main` and merge or cherry-pick as needed.
@@ -106,15 +96,26 @@ Override with `--policy /abs/path/to/policy.yaml`.
 ## Repo layout
 
 ```
-containers/        Containerfiles for the four sandbox images
-policies/          YAML egress + trust policies
-providers/         Credential refresh config
-src/cli.ts         Entry point
-src/sandbox/       Sandbox orchestration
-src/cred-refresh/  Credential refresh service
+containers/           Containerfiles for the four sandbox images
+policies/             YAML egress + trust policies
+providers/            Credential refresh config
+src/cli.ts            Entry point
+src/sandbox/          Sandbox orchestration
+src/cred-refresh/     Credential refresh service
 src/validate-policy/  Policy linter
-openshell-fork/    Vendored OpenShell checkout (not tracked)
 ```
+
+## Development
+
+For working on openlock itself, clone the [openshell-fork](https://github.com/vessux/OpenShell) sibling at `./openshell-fork` and run from source:
+
+```bash
+git clone -b main https://github.com/vessux/OpenShell.git openshell-fork
+bun install
+bun run src/cli.ts <subcommand>
+```
+
+When `./openshell-fork/.git` exists, openlock auto-detects dev mode and builds the gateway / supervisor / `openshell` CLI from source instead of fetching the pinned release. Dev mode also requires `bun`, `cargo`, and on macOS `cargo-zigbuild`.
 
 ## License
 
