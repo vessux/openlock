@@ -1,0 +1,74 @@
+# openlock default-js-py sandbox policy — JavaScript/Node and Python.
+#
+# T1 threat model: assume the agent is malicious.
+# Default-deny egress. Only the endpoints below are reachable.
+# Per-binary credential scoping prevents cross-provider leakage.
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
+  read_write: [/sandbox, /tmp, /dev/null]
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  claude_code:
+    binaries:
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+      - { path: /usr/bin/python3 }
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: "/v1/**" }
+        cred_inject:
+          provider: anthropic
+          strip_headers: [Authorization, x-api-key, Cookie]
+          inject:
+            - { header: Authorization, from_credential: ANTHROPIC_BEARER_TOKEN }
+    allowed_secrets: [ANTHROPIC_BEARER_TOKEN, ANTHROPIC_AUTH_TOKEN]
+
+  pip_packages:
+    binaries:
+      - { path: /usr/bin/pip }
+      - { path: /usr/bin/pip3 }
+      - { path: /usr/bin/python3 }
+    endpoints:
+      - host: pypi.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        trust_check: { registry: pypi }
+      - host: files.pythonhosted.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        trust_check: { registry: pypi }
+    allowed_secrets: []
+
+  npm_packages:
+    binaries:
+      - { path: /usr/bin/npm }
+      - { path: /usr/bin/node }
+      - { path: /usr/bin/npx }
+      - { path: /usr/local/bin/bun }
+    endpoints:
+      - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        trust_check: { registry: npm }
+    allowed_secrets: []

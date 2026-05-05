@@ -1,0 +1,14 @@
+# Credential refresh configuration.
+#
+# The service reads credentials from host sources and pushes them
+# into the openshell gateway via `openshell provider update`.
+
+# endpoint: "localhost:9090"   # optional; falls back to OPENSHELL_ENDPOINT, then localhost:9090
+interval_secs: 60
+
+providers:
+  - name: anthropic
+    type: claude
+    credentials:
+      ANTHROPIC_API_KEY:
+        source: env

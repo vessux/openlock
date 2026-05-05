@@ -1,0 +1,16 @@
+# OpenShell fork lives here as a separate git repo; we don't track its contents.
+openshell-fork/
+
+.DS_Store
+
+node_modules/
+dist/
+bun.lock
+.cache/
+*.srl
+
+# Local-only project context — agent/editor configs and internal docs.
+# Not for the public repo.
+.claude/
+.mcp.json
+docs/

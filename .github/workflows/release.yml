@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to release (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            artifact: openlock-aarch64-apple-darwin
+          - target: bun-linux-x64
+            artifact: openlock-x86_64-unknown-linux-gnu
+          - target: bun-linux-arm64
+            artifact: openlock-aarch64-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Build single-binary
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bun build src/cli.ts \
+            --compile \
+            --target=${{ matrix.target }} \
+            --outfile=out/openlock
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cd out
+          tar -czf "${GITHUB_WORKSPACE}/artifacts/${{ matrix.artifact }}.tar.gz" openlock
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/*.tar.gz
+          retention-days: 5
+
+  release:
+    name: Release
+    needs: [build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release/
+          merge-multiple: true
+
+      - name: Compute checksums
+        working-directory: release
+        run: |
+          set -euo pipefail
+          ls -lh
+          sha256sum *.tar.gz > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: |
+            release/*.tar.gz
+            release/checksums-sha256.txt

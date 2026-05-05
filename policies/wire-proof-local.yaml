@@ -1,0 +1,44 @@
+# Wire proof policy using proxy echo mode.
+#
+# Usage:
+#   Terminal 1: just gateway-vm
+#   Terminal 2: just cli provider create --name anthropic --type claude --credential ANTHROPIC_API_KEY=sk-test-key
+#              just cli sandbox create --name wire-proof --provider anthropic \
+#                --policy policies/wire-proof-local.yaml -- /bin/bash
+#
+# The proxy's echo mode returns post-rewrite headers as JSON,
+# so you can verify cred_inject without hitting a real API.
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
+  read_write: [/sandbox, /tmp, /dev/null]
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  anthropic_echo:
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        echo: true
+        rules:
+          - allow: { method: POST, path: "/v1/**" }
+          - allow: { method: GET, path: "/v1/**" }
+        cred_inject:
+          provider: anthropic
+          strip_headers: [Authorization, x-api-key, Cookie]
+          inject:
+            - { header: Authorization, from_credential: ANTHROPIC_BEARER_TOKEN }
+    allowed_secrets: [ANTHROPIC_BEARER_TOKEN, ANTHROPIC_AUTH_TOKEN]
