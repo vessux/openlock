@@ -1,9 +1,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import yaml from "js-yaml";
-import type { Cap } from "./detect-caps";
-
-const VALID_CAPS: ReadonlyArray<Cap> = ["js", "py"];
+import { ALL_CAPS, type Cap } from "./detect-caps";
 
 export const FOLDER_NAME = ".openlock";
 export const CONFIG_FILENAME = "config.yaml";
@@ -38,8 +36,8 @@ export function readConfig(folderPath: string): OpenlockFolderConfig {
   const rawCaps = Array.isArray(doc.caps) ? doc.caps : [];
   const caps: Cap[] = [];
   for (const c of rawCaps) {
-    if (typeof c !== "string" || !VALID_CAPS.includes(c as Cap)) {
-      throw new Error(`unknown cap '${String(c)}' in ${path}; allowed: ${VALID_CAPS.join(", ")}`);
+    if (typeof c !== "string" || !ALL_CAPS.includes(c as Cap)) {
+      throw new Error(`unknown cap '${String(c)}' in ${path}; allowed: ${ALL_CAPS.join(", ")}`);
     }
     caps.push(c as Cap);
   }
