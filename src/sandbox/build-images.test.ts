@@ -1,39 +1,31 @@
-import { describe, it, expect } from "bun:test";
-import { buildImagesArgs } from "./build-images";
+import { describe, it, expect, mock } from "bun:test";
+import { updateImages } from "./build-images";
 
-describe("buildImagesArgs", () => {
-  it("produces podman build commands for core and language layers", () => {
-    const cmds = buildImagesArgs({ noCache: false });
-    expect(cmds.length).toBeGreaterThanOrEqual(4);
-    expect(cmds[0]).toContain("podman");
-    expect(cmds[0]).toContain("build");
-    expect(cmds[0]).toContain("openlock-core:latest");
-  });
-
-  it("includes --no-cache when requested", () => {
-    const cmds = buildImagesArgs({ noCache: true });
-    for (const cmd of cmds) {
-      expect(cmd).toContain("--no-cache");
-    }
-  });
-
-  it("omits --no-cache when not requested", () => {
-    const cmds = buildImagesArgs({ noCache: false });
-    for (const cmd of cmds) {
-      expect(cmd).not.toContain("--no-cache");
-    }
-  });
-
-  it("builds in dependency order: core, then language layers", () => {
-    const cmds = buildImagesArgs({ noCache: false });
-    const tags = cmds.map((argv) => {
-      const idx = argv.indexOf("-t");
-      return argv[idx + 1];
+describe("updateImages", () => {
+  it("calls ensureImage once per cap permutation (4 total)", async () => {
+    const calls: { tagPrefix: string; noCache: boolean }[] = [];
+    const fakeEnsure = mock(async (args: { containerfileContent: string; tagPrefix: string; noCache?: boolean }) => {
+      calls.push({ tagPrefix: args.tagPrefix, noCache: !!args.noCache });
+      return { tag: `${args.tagPrefix}:fake`, built: true };
     });
-    expect(tags[0]).toBe("openlock-core:latest");
-    const rest = tags.slice(1);
-    expect(rest).toContain("openlock-core-js:latest");
-    expect(rest).toContain("openlock-core-py:latest");
-    expect(rest).toContain("openlock-core-js-py:latest");
+    await updateImages({ noCache: false }, { ensureImage: fakeEnsure });
+    expect(calls.length).toBe(4);
+    const prefixes = calls.map((c) => c.tagPrefix).sort();
+    expect(prefixes).toEqual([
+      "openlock-core",
+      "openlock-core-js",
+      "openlock-core-js-py",
+      "openlock-core-py",
+    ]);
+  });
+
+  it("propagates noCache flag to ensureImage", async () => {
+    const calls: { noCache: boolean }[] = [];
+    const fakeEnsure = mock(async (args: { containerfileContent: string; tagPrefix: string; noCache?: boolean }) => {
+      calls.push({ noCache: !!args.noCache });
+      return { tag: `${args.tagPrefix}:fake`, built: true };
+    });
+    await updateImages({ noCache: true }, { ensureImage: fakeEnsure });
+    expect(calls.every((c) => c.noCache === true)).toBe(true);
   });
 });

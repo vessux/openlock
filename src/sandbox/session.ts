@@ -8,7 +8,8 @@ import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
 import { prepareGitIdentity } from "./git-identity";
 import { saveSession, sessionsDir } from "./session-store";
-import { podmanBuild, imageInfoForCaps } from "./build-images";
+import { ensureImage } from "./image-build";
+import { DEFAULT_CONTAINERFILES, containerfileKeyForCaps } from "./default-containerfiles";
 import { getCliInvocation } from "./fork-binaries";
 
 const SANDBOX_PREFIX = "openshell-sandbox-";
@@ -43,21 +44,18 @@ async function openshell(
 }
 
 async function buildSandboxImage(caps: Cap[]): Promise<string> {
-  // Build dependency layers in order so each FROM target exists before it's
-  // referenced. core-js-py inherits from openlock-core-js, so for caps=js,py
-  // we walk [], [js] and let the final step build core-js-py against it.
-  for (let i = 0; i < caps.length; i++) {
-    const sub = caps.slice(0, i);
-    const { tag, containerfile } = imageInfoForCaps(sub);
-    console.log(`Building ${tag}...`);
-    await podmanBuild(tag, containerfile);
+  const key = containerfileKeyForCaps(caps);
+  const content = DEFAULT_CONTAINERFILES[key];
+  const ref = await ensureImage({
+    containerfileContent: content,
+    tagPrefix: `openlock-${key}`,
+  });
+  if (ref.built) {
+    console.log(`Built image ${ref.tag}`);
+  } else {
+    console.log(`Using cached image ${ref.tag}`);
   }
-
-  const { containerfile } = imageInfoForCaps(caps);
-  const tag = `openlock/sandbox:${Math.floor(Date.now() / 1000)}`;
-  console.log(`Building image ${tag}...`);
-  await podmanBuild(tag, containerfile);
-  return tag;
+  return ref.tag;
 }
 
 export async function runSandbox(opts: SandboxOpts): Promise<void> {

@@ -19,7 +19,7 @@ describe("session-store", () => {
       name: "test-session",
       path: "/tmp/project",
       caps: ["js"],
-      image: "containers/core-js.Containerfile",
+      image: "openlock-core-js:abc123def456",
       policy: "policies/default-js.yaml",
       createdAt: "2026-05-03T12:00:00Z",
     };
