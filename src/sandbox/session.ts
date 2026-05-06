@@ -2,7 +2,7 @@ import { resolve, join, basename } from "path";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { detectCaps, type Cap } from "./detect-caps";
-import { selectPolicy } from "./select-policy";
+import { resolveOpenlockFolder } from "./openlock-folder";
 import { ensureGitRepo, createBundle, fetchBundle } from "./git-sync";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
@@ -64,13 +64,31 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const projectPath = resolve(opts.path);
   const sessionName = opts.name ?? `${basename(projectPath)}-${Date.now()}`;
 
-  const caps = detectCaps(projectPath);
+  let caps: Cap[];
+  let policy: string;
+  if (opts.policy) {
+    // Explicit --policy flag wins. Skip the .openlock/ folder logic
+    // entirely so the flag never has a side effect on repo files.
+    caps = detectCaps(projectPath);
+    policy = resolve(opts.policy);
+  } else {
+    const resolved = resolveOpenlockFolder(projectPath);
+    caps = resolved.caps;
+    policy = resolved.policyPath;
+    if (resolved.origin === "first-run") {
+      console.log("Created .openlock/. Review and commit before sharing.");
+    } else if (resolved.origin === "restored-config") {
+      console.log("Restored .openlock/config.yaml.");
+    } else if (resolved.origin === "restored-policy") {
+      const suffix = caps.length > 0 ? `-${caps.join("-")}` : "";
+      console.log(`Restored .openlock/policy.yaml from default${suffix}.yaml.`);
+    }
+  }
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
 
   await startGateway();
   await ensureProvider();
 
-  const policy = opts.policy ? resolve(opts.policy) : selectPolicy(caps);
   const imageTag = await buildSandboxImage(caps);
   console.log(`Policy: ${policy}`);
   console.log(`Image: ${imageTag}`);
