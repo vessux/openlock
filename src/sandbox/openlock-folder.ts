@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import yaml from "js-yaml";
 import { ALL_CAPS, type Cap } from "./detect-caps";
@@ -42,4 +42,10 @@ export function readConfig(folderPath: string): OpenlockFolderConfig {
     caps.push(c as Cap);
   }
   return { caps };
+}
+
+export function writeConfig(folderPath: string, config: OpenlockFolderConfig): void {
+  mkdirSync(folderPath, { recursive: true });
+  const doc = { caps: config.caps };
+  writeFileSync(configPath(folderPath), yaml.dump(doc), "utf-8");
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { readConfig } from "./openlock-folder";
+import { readConfig, writeConfig } from "./openlock-folder";
 
 let workDir: string;
 
@@ -40,5 +40,27 @@ describe("readConfig", () => {
     mkdirSync(folder);
     writeFileSync(join(folder, "config.yaml"), "caps: [rust]\n");
     expect(() => readConfig(folder)).toThrow(/unknown cap/);
+  });
+});
+
+describe("writeConfig", () => {
+  it("writes caps as a yaml mapping that readConfig can round-trip", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeConfig(folder, { caps: ["js"] });
+    expect(readConfig(folder)).toEqual({ caps: ["js"] });
+  });
+
+  it("writes empty caps as an empty list", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeConfig(folder, { caps: [] });
+    expect(readConfig(folder)).toEqual({ caps: [] });
+  });
+
+  it("creates the .openlock directory if it does not yet exist", () => {
+    const folder = join(workDir, ".openlock");
+    writeConfig(folder, { caps: ["py"] });
+    expect(readConfig(folder)).toEqual({ caps: ["py"] });
   });
 });
