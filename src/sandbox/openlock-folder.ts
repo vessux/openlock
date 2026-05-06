@@ -82,5 +82,10 @@ export function resolveOpenlockFolder(projectPath: string): ResolveResult {
     return { caps, policyPath: policyPath(folder), origin: "first-run" };
   }
 
-  throw new Error("not yet implemented: subsequent-run + recovery paths");
+  if (configExists && policyExists) {
+    const cfg = readConfig(folder);
+    return { caps: cfg.caps, policyPath: policyPath(folder), origin: "existing" };
+  }
+
+  throw new Error("not yet implemented: recovery paths");
 }

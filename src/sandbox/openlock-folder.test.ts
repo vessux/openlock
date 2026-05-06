@@ -113,4 +113,20 @@ describe("resolveOpenlockFolder", () => {
     const policySource = selectPolicy([]);
     expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(fsReadFileSync(policySource, "utf-8"));
   });
+
+  it("subsequent-run: both files present -> reads caps from config, leaves files untouched", () => {
+    writeFileSync(join(workDir, "package.json"), "{}\n");
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeConfig(folder, { caps: ["py"] });
+    copyDefaultPolicy(folder, ["py"]);
+    const policyMtimeBefore = require("fs").statSync(policyPath(folder)).mtimeMs;
+
+    const result = resolveOpenlockFolder(workDir);
+
+    expect(result.origin).toBe("existing");
+    expect(result.caps).toEqual(["py"]);
+    expect(result.policyPath).toBe(policyPath(folder));
+    expect(require("fs").statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
+  });
 });
