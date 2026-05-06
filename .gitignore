@@ -7,6 +7,7 @@ node_modules/
 dist/
 bun.lock
 .cache/
+.worktrees/
 *.srl
 
 # Local-only project context — agent/editor configs and internal docs.
