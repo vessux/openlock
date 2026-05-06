@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync as fsReadFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync as fsReadFileSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -48,6 +48,13 @@ describe("readConfig", () => {
     mkdirSync(folder);
     writeFileSync(join(folder, "config.yaml"), "caps: [rust]\n");
     expect(() => readConfig(folder)).toThrow(/unknown cap/);
+  });
+
+  it("throws when caps is a scalar instead of a list", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "config.yaml"), "caps: js\n");
+    expect(() => readConfig(folder)).toThrow(/must be a list/);
   });
 });
 
@@ -127,14 +134,14 @@ describe("resolveOpenlockFolder", () => {
     mkdirSync(folder);
     writeConfig(folder, { caps: ["py"] });
     copyDefaultPolicy(folder, ["py"]);
-    const policyMtimeBefore = require("fs").statSync(policyPath(folder)).mtimeMs;
+    const policyMtimeBefore = statSync(policyPath(folder)).mtimeMs;
 
     const result = resolveOpenlockFolder(workDir);
 
     expect(result.origin).toBe("existing");
     expect(result.caps).toEqual(["py"]);
     expect(result.policyPath).toBe(policyPath(folder));
-    expect(require("fs").statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
+    expect(statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
   });
 
   it("recovery: config missing, policy present -> re-detects caps and writes config; policy untouched", () => {
@@ -142,21 +149,21 @@ describe("resolveOpenlockFolder", () => {
     const folder = join(workDir, ".openlock");
     mkdirSync(folder);
     copyDefaultPolicy(folder, ["js", "py"]);
-    const policyMtimeBefore = require("fs").statSync(policyPath(folder)).mtimeMs;
+    const policyMtimeBefore = statSync(policyPath(folder)).mtimeMs;
 
     const result = resolveOpenlockFolder(workDir);
 
     expect(result.origin).toBe("restored-config");
     expect(result.caps).toEqual(["js"]);
     expect(readConfig(folder)).toEqual({ caps: ["js"] });
-    expect(require("fs").statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
+    expect(statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
   });
 
   it("recovery: policy missing, config present -> reads config caps, copies matching default; config untouched", () => {
     const folder = join(workDir, ".openlock");
     mkdirSync(folder);
     writeConfig(folder, { caps: ["py"] });
-    const configMtimeBefore = require("fs").statSync(configPath(folder)).mtimeMs;
+    const configMtimeBefore = statSync(configPath(folder)).mtimeMs;
 
     const result = resolveOpenlockFolder(workDir);
 
@@ -164,6 +171,17 @@ describe("resolveOpenlockFolder", () => {
     expect(result.caps).toEqual(["py"]);
     const source = selectPolicy(["py"]);
     expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
-    expect(require("fs").statSync(configPath(folder)).mtimeMs).toBe(configMtimeBefore);
+    expect(statSync(configPath(folder)).mtimeMs).toBe(configMtimeBefore);
+  });
+
+  it("first-run: empty .openlock folder (both files missing) -> first-run flow materializes both", () => {
+    writeFileSync(join(workDir, "package.json"), "{}\n");
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder); // empty .openlock dir, no files in it
+    const result = resolveOpenlockFolder(workDir);
+    expect(result.origin).toBe("first-run");
+    expect(result.caps).toEqual(["js"]);
+    expect(existsSync(join(folder, "config.yaml"))).toBe(true);
+    expect(existsSync(join(folder, "policy.yaml"))).toBe(true);
   });
 });

@@ -80,7 +80,8 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     } else if (resolved.origin === "restored-config") {
       console.log("Restored .openlock/config.yaml.");
     } else if (resolved.origin === "restored-policy") {
-      console.log(`Restored .openlock/policy.yaml from default-${caps.join("-") || "(none)"}.yaml.`);
+      const suffix = caps.length > 0 ? `-${caps.join("-")}` : "";
+      console.log(`Restored .openlock/policy.yaml from default${suffix}.yaml.`);
     }
   }
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);

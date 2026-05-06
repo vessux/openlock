@@ -34,6 +34,9 @@ export function readConfig(folderPath: string): OpenlockFolderConfig {
     throw new Error(`Invalid config.yaml: expected mapping at ${path}`);
   }
 
+  if (doc.caps !== undefined && !Array.isArray(doc.caps)) {
+    throw new Error(`Invalid config.yaml: 'caps' must be a list at ${path}`);
+  }
   const rawCaps = Array.isArray(doc.caps) ? doc.caps : [];
   const caps: Cap[] = [];
   for (const c of rawCaps) {
