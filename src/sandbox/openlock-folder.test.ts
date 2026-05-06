@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync as fsReadFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { readConfig, writeConfig, copyDefaultPolicy, policyPath } from "./openlock-folder";
+import { readConfig, writeConfig, copyDefaultPolicy, policyPath, resolveOpenlockFolder } from "./openlock-folder";
 import { selectPolicy } from "./select-policy";
 
 let workDir: string;
@@ -90,5 +90,27 @@ describe("copyDefaultPolicy", () => {
     copyDefaultPolicy(folder, ["js"]);
     const source = selectPolicy(["js"]);
     expect(fsReadFileSync(policyPath(folder), "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
+  });
+});
+
+describe("resolveOpenlockFolder", () => {
+  it("first-run: no .openlock, repo with package.json -> creates folder, writes config, copies policy", () => {
+    writeFileSync(join(workDir, "package.json"), "{}\n");
+    const result = resolveOpenlockFolder(workDir);
+    const folder = join(workDir, ".openlock");
+    expect(result.origin).toBe("first-run");
+    expect(result.caps).toEqual(["js"]);
+    expect(result.policyPath).toBe(join(folder, "policy.yaml"));
+    expect(existsSync(join(folder, "config.yaml"))).toBe(true);
+    expect(existsSync(join(folder, "policy.yaml"))).toBe(true);
+    expect(readConfig(folder)).toEqual({ caps: ["js"] });
+  });
+
+  it("first-run: empty repo -> caps = [] and uses default.yaml", () => {
+    const result = resolveOpenlockFolder(workDir);
+    expect(result.origin).toBe("first-run");
+    expect(result.caps).toEqual([]);
+    const policySource = selectPolicy([]);
+    expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(fsReadFileSync(policySource, "utf-8"));
   });
 });

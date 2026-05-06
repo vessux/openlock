@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from "fs";
 import { join } from "path";
 import yaml from "js-yaml";
-import { ALL_CAPS, type Cap } from "./detect-caps";
+import { ALL_CAPS, detectCaps, type Cap } from "./detect-caps";
 import { selectPolicy } from "./select-policy";
 
 export const FOLDER_NAME = ".openlock";
@@ -55,4 +55,32 @@ export function copyDefaultPolicy(folderPath: string, caps: Cap[]): void {
   mkdirSync(folderPath, { recursive: true });
   const source = selectPolicy(caps);
   copyFileSync(source, policyPath(folderPath));
+}
+
+export type ResolveOrigin = "first-run" | "restored-config" | "restored-policy" | "existing";
+
+export interface ResolveResult {
+  caps: Cap[];
+  policyPath: string;
+  origin: ResolveOrigin;
+}
+
+export function folderPathFor(projectPath: string): string {
+  return join(projectPath, FOLDER_NAME);
+}
+
+export function resolveOpenlockFolder(projectPath: string): ResolveResult {
+  const folder = folderPathFor(projectPath);
+  const folderExists = existsSync(folder);
+  const configExists = folderExists && existsSync(configPath(folder));
+  const policyExists = folderExists && existsSync(policyPath(folder));
+
+  if (!folderExists || (!configExists && !policyExists)) {
+    const caps = detectCaps(projectPath);
+    writeConfig(folder, { caps });
+    copyDefaultPolicy(folder, caps);
+    return { caps, policyPath: policyPath(folder), origin: "first-run" };
+  }
+
+  throw new Error("not yet implemented: subsequent-run + recovery paths");
 }
