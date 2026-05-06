@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync as fsReadFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { readConfig, writeConfig, copyDefaultPolicy, policyPath, resolveOpenlockFolder } from "./openlock-folder";
+import {
+  readConfig,
+  writeConfig,
+  copyDefaultPolicy,
+  resolveOpenlockFolder,
+  policyPath,
+  configPath,
+} from "./openlock-folder";
 import { selectPolicy } from "./select-policy";
 
 let workDir: string;
@@ -143,5 +150,20 @@ describe("resolveOpenlockFolder", () => {
     expect(result.caps).toEqual(["js"]);
     expect(readConfig(folder)).toEqual({ caps: ["js"] });
     expect(require("fs").statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
+  });
+
+  it("recovery: policy missing, config present -> reads config caps, copies matching default; config untouched", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeConfig(folder, { caps: ["py"] });
+    const configMtimeBefore = require("fs").statSync(configPath(folder)).mtimeMs;
+
+    const result = resolveOpenlockFolder(workDir);
+
+    expect(result.origin).toBe("restored-policy");
+    expect(result.caps).toEqual(["py"]);
+    const source = selectPolicy(["py"]);
+    expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
+    expect(require("fs").statSync(configPath(folder)).mtimeMs).toBe(configMtimeBefore);
   });
 });
