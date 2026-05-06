@@ -129,4 +129,19 @@ describe("resolveOpenlockFolder", () => {
     expect(result.policyPath).toBe(policyPath(folder));
     expect(require("fs").statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
   });
+
+  it("recovery: config missing, policy present -> re-detects caps and writes config; policy untouched", () => {
+    writeFileSync(join(workDir, "package.json"), "{}\n");
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    copyDefaultPolicy(folder, ["js", "py"]);
+    const policyMtimeBefore = require("fs").statSync(policyPath(folder)).mtimeMs;
+
+    const result = resolveOpenlockFolder(workDir);
+
+    expect(result.origin).toBe("restored-config");
+    expect(result.caps).toEqual(["js"]);
+    expect(readConfig(folder)).toEqual({ caps: ["js"] });
+    expect(require("fs").statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
+  });
 });

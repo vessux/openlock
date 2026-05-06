@@ -87,5 +87,11 @@ export function resolveOpenlockFolder(projectPath: string): ResolveResult {
     return { caps: cfg.caps, policyPath: policyPath(folder), origin: "existing" };
   }
 
-  throw new Error("not yet implemented: recovery paths");
+  if (!configExists && policyExists) {
+    const caps = detectCaps(projectPath);
+    writeConfig(folder, { caps });
+    return { caps, policyPath: policyPath(folder), origin: "restored-config" };
+  }
+
+  throw new Error("not yet implemented: restored-policy path");
 }
