@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync as fsReadFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { readConfig, writeConfig } from "./openlock-folder";
+import { readConfig, writeConfig, copyDefaultPolicy, policyPath } from "./openlock-folder";
+import { selectPolicy } from "./select-policy";
 
 let workDir: string;
 
@@ -62,5 +63,32 @@ describe("writeConfig", () => {
     const folder = join(workDir, ".openlock");
     writeConfig(folder, { caps: ["py"] });
     expect(readConfig(folder)).toEqual({ caps: ["py"] });
+  });
+});
+
+describe("copyDefaultPolicy", () => {
+  it("copies the shipped default for the given caps to .openlock/policy.yaml", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    copyDefaultPolicy(folder, ["js", "py"]);
+    const dest = policyPath(folder);
+    const source = selectPolicy(["js", "py"]);
+    expect(existsSync(dest)).toBe(true);
+    expect(fsReadFileSync(dest, "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
+  });
+
+  it("creates the folder if missing", () => {
+    const folder = join(workDir, ".openlock");
+    copyDefaultPolicy(folder, []);
+    expect(existsSync(policyPath(folder))).toBe(true);
+  });
+
+  it("overwrites an existing policy.yaml", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeFileSync(policyPath(folder), "stale: true\n");
+    copyDefaultPolicy(folder, ["js"]);
+    const source = selectPolicy(["js"]);
+    expect(fsReadFileSync(policyPath(folder), "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
   });
 });

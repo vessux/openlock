@@ -1,7 +1,8 @@
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from "fs";
 import { join } from "path";
 import yaml from "js-yaml";
 import { ALL_CAPS, type Cap } from "./detect-caps";
+import { selectPolicy } from "./select-policy";
 
 export const FOLDER_NAME = ".openlock";
 export const CONFIG_FILENAME = "config.yaml";
@@ -48,4 +49,10 @@ export function writeConfig(folderPath: string, config: OpenlockFolderConfig): v
   mkdirSync(folderPath, { recursive: true });
   const doc = { caps: config.caps };
   writeFileSync(configPath(folderPath), yaml.dump(doc), "utf-8");
+}
+
+export function copyDefaultPolicy(folderPath: string, caps: Cap[]): void {
+  mkdirSync(folderPath, { recursive: true });
+  const source = selectPolicy(caps);
+  copyFileSync(source, policyPath(folderPath));
 }
