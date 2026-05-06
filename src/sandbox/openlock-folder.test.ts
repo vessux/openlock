@@ -10,7 +10,7 @@ import {
   policyPath,
   configPath,
 } from "./openlock-folder";
-import { selectPolicy } from "./select-policy";
+import { defaultPolicyContent } from "./default-policies";
 
 let workDir: string;
 
@@ -86,9 +86,8 @@ describe("copyDefaultPolicy", () => {
     mkdirSync(folder);
     copyDefaultPolicy(folder, ["js", "py"]);
     const dest = policyPath(folder);
-    const source = selectPolicy(["js", "py"]);
     expect(existsSync(dest)).toBe(true);
-    expect(fsReadFileSync(dest, "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
+    expect(fsReadFileSync(dest, "utf-8")).toEqual(defaultPolicyContent(["js", "py"]));
   });
 
   it("creates the folder if missing", () => {
@@ -102,8 +101,7 @@ describe("copyDefaultPolicy", () => {
     mkdirSync(folder);
     writeFileSync(policyPath(folder), "stale: true\n");
     copyDefaultPolicy(folder, ["js"]);
-    const source = selectPolicy(["js"]);
-    expect(fsReadFileSync(policyPath(folder), "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
+    expect(fsReadFileSync(policyPath(folder), "utf-8")).toEqual(defaultPolicyContent(["js"]));
   });
 });
 
@@ -124,8 +122,7 @@ describe("resolveOpenlockFolder", () => {
     const result = resolveOpenlockFolder(workDir);
     expect(result.origin).toBe("first-run");
     expect(result.caps).toEqual([]);
-    const policySource = selectPolicy([]);
-    expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(fsReadFileSync(policySource, "utf-8"));
+    expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(defaultPolicyContent([]));
   });
 
   it("subsequent-run: both files present -> reads caps from config, leaves files untouched", () => {
@@ -169,8 +166,7 @@ describe("resolveOpenlockFolder", () => {
 
     expect(result.origin).toBe("restored-policy");
     expect(result.caps).toEqual(["py"]);
-    const source = selectPolicy(["py"]);
-    expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(fsReadFileSync(source, "utf-8"));
+    expect(fsReadFileSync(result.policyPath, "utf-8")).toEqual(defaultPolicyContent(["py"]));
     expect(statSync(configPath(folder)).mtimeMs).toBe(configMtimeBefore);
   });
 
