@@ -45,8 +45,8 @@ Verify with `openlock doctor`.
 ## Quick start
 
 ```bash
-podman machine start                # macOS only; openlock will prompt to start it for you on first run
-# or: systemctl --user enable --now podman.socket   # Linux
+# Linux only: enable the podman API socket once
+systemctl --user enable --now podman.socket
 
 openlock sandbox /path/to/your/repo   # path defaults to cwd
 ```
