@@ -138,6 +138,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
       stderr: "inherit",
     });
 
+    // @ts-expect-error rework in task 7
     saveSession(sessionsDir(), {
       name: sessionName,
       path: projectPath,
