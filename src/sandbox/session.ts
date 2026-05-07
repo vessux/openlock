@@ -157,8 +157,8 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
       );
       const cpCode = await cp.exited;
       if (cpCode === 0) {
-        await fetchBundle(projectPath, outBundle);
-        console.log("Sandbox commits synced to remotes/sandbox/*");
+        await fetchBundle(projectPath, outBundle, sessionName);
+        console.log(`Sandbox commits synced to refs/sandbox/${sessionName}/*`);
       } else {
         console.warn("No commits to sync (sandbox may not have made changes).");
       }
