@@ -69,27 +69,46 @@ export interface OpenshellCreateArgs {
   command: string[];
 }
 
-export async function openshellSandboxCreate(args: OpenshellCreateArgs): Promise<number> {
-  const cli = await getCliInvocation();
-  const argv = [
-    ...cli.argv,
-    "sandbox", "create",
-    "--name", args.sessionName,
-    "--from", args.imageTag,
-    "--upload", `${args.uploadDir}:/sandbox/`,
-    "--no-git-ignore",
-    "--policy", args.policy,
-    "--provider", "anthropic",
-    "--tty",
-    "--", ...args.command,
-  ];
-  const proc = Bun.spawn(argv, {
-    cwd: cli.cwd,
-    stdin: "ignore",
-    stdout: "inherit",
-    stderr: "inherit",
+export interface OpenshellHandle {
+  pid: number;
+  /** Resolves when the openshell process exits (typically when the container's foreground command — sleep infinity — terminates). */
+  exited: Promise<number>;
+}
+
+export function openshellSandboxCreateAsync(args: OpenshellCreateArgs): Promise<OpenshellHandle> {
+  return getCliInvocation().then((cli) => {
+    const argv = [
+      ...cli.argv,
+      "sandbox", "create",
+      "--name", args.sessionName,
+      "--from", args.imageTag,
+      "--upload", `${args.uploadDir}:/sandbox/`,
+      "--no-git-ignore",
+      "--policy", args.policy,
+      "--provider", "anthropic",
+      "--no-tty",
+      "--", ...args.command,
+    ];
+    const proc = Bun.spawn(argv, {
+      cwd: cli.cwd,
+      stdin: "ignore",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    return {
+      pid: proc.pid,
+      exited: proc.exited,
+    };
   });
-  return await proc.exited;
+}
+
+export async function waitForContainerRunning(name: string, timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await inspectContainerState(name)) === "running") return;
+    await Bun.sleep(500);
+  }
+  throw new Error(`container ${name} did not reach running state within ${timeoutMs}ms`);
 }
 
 export async function copyOutOfContainer(name: string, src: string, dest: string): Promise<boolean> {

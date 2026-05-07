@@ -19,7 +19,8 @@ import { ensureImage } from "./image-build";
 import { DEFAULT_CONTAINERFILES, containerfileKeyForCaps } from "./default-containerfiles";
 import { newSessionId, friendlyNameFromId } from "./identity";
 import {
-  openshellSandboxCreate,
+  openshellSandboxCreateAsync,
+  waitForContainerRunning,
   inspectContainerState,
   startContainer,
   execClaude,
@@ -113,14 +114,17 @@ async function createSession(projectPath: string, opts: SandboxOpts): Promise<Ne
     );
 
     console.log(`Creating sandbox "${name}"...`);
+    // Setup runs once at create + on every podman start (idempotent).
+    // Final `exec sleep infinity` keeps PID 1 alive so the container
+    // outlives the foreground command between attaches.
     const setupCmd = [
       "cd /sandbox",
-      "if [ -f .openlock/.gitconfig ]; then cp .openlock/.gitconfig .gitconfig; fi",
-      "git clone .openlock/repo.bundle repo",
+      "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
+      "[ -d repo ] || git clone .openlock/repo.bundle repo",
       "exec sleep infinity",
-    ].join(" && ");
+    ].join(" ; ");
 
-    const exitCode = await openshellSandboxCreate({
+    const handle = await openshellSandboxCreateAsync({
       sessionName: name,
       imageTag,
       uploadDir: staging,
@@ -128,9 +132,17 @@ async function createSession(projectPath: string, opts: SandboxOpts): Promise<Ne
       command: ["/bin/bash", "-c", setupCmd],
     });
 
-    if (exitCode !== 0) {
-      throw new Error(`openshell sandbox create exited ${exitCode}`);
+    // Don't await handle.exited — it blocks until the container stops.
+    // Do detect early failure so we don't write meta for a phantom session.
+    const earlyFail = await Promise.race([
+      handle.exited.then((code) => ({ early: true as const, code })),
+      Bun.sleep(2000).then(() => ({ early: false as const })),
+    ]);
+    if (earlyFail.early) {
+      throw new Error(`openshell sandbox create exited early with code ${earlyFail.code}`);
     }
+
+    await waitForContainerRunning(containerName);
 
     const meta: SessionMeta = {
       id,
