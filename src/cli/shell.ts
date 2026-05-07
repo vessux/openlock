@@ -1,5 +1,5 @@
 import { execBash, inspectContainerState, startContainer } from "../sandbox/container";
-import { SANDBOX_PREFIX } from "../sandbox/session";
+import { SANDBOX_PREFIX } from "../sandbox/constants";
 import { resolveSessionName } from "./_resolve";
 
 export async function shellCmd(args: string[]): Promise<number> {

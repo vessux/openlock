@@ -28,8 +28,7 @@ import {
 } from "./container";
 import { pidAlive } from "./proc";
 import { classifySession, type SessionWithState } from "./reap";
-
-export const SANDBOX_PREFIX = "openshell-sandbox-";
+import { SANDBOX_PREFIX } from "./constants";
 
 export interface SandboxOpts {
   path: string;
@@ -196,15 +195,9 @@ async function attachClaudeAndSync(
   sessionName: string,
   projectPath: string,
 ): Promise<number> {
-  const meta = findSessionByName(sessionName);
-  if (meta) {
-    updateSessionMeta(sessionsDir(), meta.id, {
-      attachedPid: process.pid,
-      lastAttachedAt: new Date().toISOString(),
-    });
-  }
   const exitCode = await execClaude(containerName);
   await syncBackToHost(projectPath, containerName, sessionName);
+  const meta = findSessionByName(sessionName);
   if (meta) {
     updateSessionMeta(sessionsDir(), meta.id, {
       attachedPid: null,
@@ -249,6 +242,10 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     const created = await createSession(projectPath, opts);
     containerName = created.containerName;
     sessionName = created.name;
+    updateSessionMeta(sessionsDir(), created.id, {
+      attachedPid: process.pid,
+      lastAttachedAt: new Date().toISOString(),
+    });
   } else {
     const m = matches[0]!;
     sessionName = m.name;
@@ -270,6 +267,10 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     }
     await startGateway();
     await ensureProvider();
+    updateSessionMeta(sessionsDir(), m.id, {
+      attachedPid: process.pid,
+      lastAttachedAt: new Date().toISOString(),
+    });
   }
 
   const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath);

@@ -19,7 +19,7 @@ import {
 import { pruneSandboxRefs } from "./git-sync";
 import { pidAlive } from "./proc";
 import { classifySession, type SessionWithState, type Classification } from "./reap";
-import { SANDBOX_PREFIX } from "./session";
+import { SANDBOX_PREFIX } from "./constants";
 
 export async function loadSessionByName(name: string): Promise<SessionMeta | null> {
   for (const m of listAllSessions(sessionsDir())) {

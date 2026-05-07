@@ -1,6 +1,6 @@
 import { stopContainer } from "../sandbox/container";
 import { classifyAll } from "../sandbox/session-ops";
-import { SANDBOX_PREFIX } from "../sandbox/session";
+import { SANDBOX_PREFIX } from "../sandbox/constants";
 
 export async function reapCmd(_args: string[]): Promise<number> {
   const rows = await classifyAll();
