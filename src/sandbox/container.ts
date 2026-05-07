@@ -39,7 +39,7 @@ export async function removeContainer(name: string, force = true): Promise<void>
 
 export async function execClaude(name: string): Promise<number> {
   const proc = Bun.spawn(
-    ["podman", "exec", "-it", name, "claude"],
+    ["podman", "exec", "-it", "-u", "sandbox", "-w", "/sandbox/repo", name, "claude"],
     { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
   );
   return await proc.exited;
@@ -47,7 +47,7 @@ export async function execClaude(name: string): Promise<number> {
 
 export async function execBash(name: string): Promise<number> {
   const proc = Bun.spawn(
-    ["podman", "exec", "-it", name, "/bin/bash"],
+    ["podman", "exec", "-it", "-u", "sandbox", "-w", "/sandbox/repo", name, "/bin/bash"],
     { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
   );
   return await proc.exited;
@@ -55,7 +55,7 @@ export async function execBash(name: string): Promise<number> {
 
 export async function execCmd(name: string, cmd: string[]): Promise<number> {
   const proc = Bun.spawn(
-    ["podman", "exec", "-it", name, ...cmd],
+    ["podman", "exec", "-it", "-u", "sandbox", "-w", "/sandbox/repo", name, ...cmd],
     { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
   );
   return await proc.exited;
