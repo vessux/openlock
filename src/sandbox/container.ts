@@ -1,0 +1,133 @@
+import { getCliInvocation } from "./fork-binaries";
+
+export type ContainerState = "running" | "exited" | "missing" | "other";
+
+export async function inspectContainerState(name: string): Promise<ContainerState> {
+  const proc = Bun.spawn(
+    ["podman", "inspect", name, "--format", "{{.State.Status}}"],
+    { stdout: "pipe", stderr: "ignore" },
+  );
+  const out = await new Response(proc.stdout).text();
+  const code = await proc.exited;
+  if (code !== 0) return "missing";
+  const status = out.trim();
+  if (status === "running") return "running";
+  if (status === "exited" || status === "stopped") return "exited";
+  return "other";
+}
+
+export async function startContainer(name: string): Promise<void> {
+  const proc = Bun.spawn(["podman", "start", name], { stdout: "ignore", stderr: "pipe" });
+  const stderr = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  if (code !== 0) throw new Error(`podman start ${name} failed: ${stderr}`);
+}
+
+export async function stopContainer(name: string, graceSeconds = 5): Promise<void> {
+  const proc = Bun.spawn(
+    ["podman", "stop", "--time", String(graceSeconds), name],
+    { stdout: "ignore", stderr: "pipe" },
+  );
+  await proc.exited;
+}
+
+export async function removeContainer(name: string, force = true): Promise<void> {
+  const args = ["podman", "rm", ...(force ? ["-f"] : []), name];
+  const proc = Bun.spawn(args, { stdout: "ignore", stderr: "ignore" });
+  await proc.exited;
+}
+
+export async function execClaude(name: string): Promise<number> {
+  const proc = Bun.spawn(
+    ["podman", "exec", "-it", name, "claude"],
+    { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
+  );
+  return await proc.exited;
+}
+
+export async function execBash(name: string): Promise<number> {
+  const proc = Bun.spawn(
+    ["podman", "exec", "-it", name, "/bin/bash"],
+    { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
+  );
+  return await proc.exited;
+}
+
+export async function execCmd(name: string, cmd: string[]): Promise<number> {
+  const proc = Bun.spawn(
+    ["podman", "exec", "-it", name, ...cmd],
+    { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
+  );
+  return await proc.exited;
+}
+
+export interface OpenshellCreateArgs {
+  sessionName: string;
+  imageTag: string;
+  uploadDir: string;
+  policy: string;
+  command: string[];
+}
+
+export async function openshellSandboxCreate(args: OpenshellCreateArgs): Promise<number> {
+  const cli = await getCliInvocation();
+  const argv = [
+    ...cli.argv,
+    "sandbox", "create",
+    "--name", args.sessionName,
+    "--from", args.imageTag,
+    "--upload", `${args.uploadDir}:/sandbox/`,
+    "--no-git-ignore",
+    "--policy", args.policy,
+    "--provider", "anthropic",
+    "--tty",
+    "--", ...args.command,
+  ];
+  const proc = Bun.spawn(argv, {
+    cwd: cli.cwd,
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  return await proc.exited;
+}
+
+export async function copyOutOfContainer(name: string, src: string, dest: string): Promise<boolean> {
+  const proc = Bun.spawn(
+    ["podman", "cp", `${name}:${src}`, dest],
+    { stdout: "ignore", stderr: "ignore" },
+  );
+  return (await proc.exited) === 0;
+}
+
+export async function removeSecretsByPrefix(prefix: string): Promise<void> {
+  const ls = Bun.spawn(["podman", "secret", "ls", "--format", "{{.Name}}"], { stdout: "pipe" });
+  const out = await new Response(ls.stdout).text();
+  await ls.exited;
+  for (const name of out.split("\n").map((s) => s.trim()).filter((s) => s.startsWith(prefix))) {
+    const rm = Bun.spawn(["podman", "secret", "rm", name], { stdout: "ignore", stderr: "ignore" });
+    await rm.exited;
+  }
+}
+
+export async function removeVolumesByMatch(prefix: string, suffix: string): Promise<void> {
+  const ls = Bun.spawn(["podman", "volume", "ls", "--format", "{{.Name}}"], { stdout: "pipe" });
+  const out = await new Response(ls.stdout).text();
+  await ls.exited;
+  for (const name of out.split("\n").map((s) => s.trim())) {
+    if (name.startsWith(prefix) && name.endsWith(suffix)) {
+      const rm = Bun.spawn(["podman", "volume", "rm", name], { stdout: "ignore", stderr: "ignore" });
+      await rm.exited;
+    }
+  }
+}
+
+export async function listSandboxContainers(prefix: string): Promise<string[]> {
+  const proc = Bun.spawn(
+    ["podman", "ps", "--all", "--format", "{{.Names}}", "--filter", `name=${prefix}`],
+    { stdout: "pipe", stderr: "ignore" },
+  );
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  return out.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+}
