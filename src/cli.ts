@@ -9,19 +9,31 @@ openlock - sandbox orchestration toolkit
 
 Usage: openlock <command>
 
-Commands:
+Session lifecycle:
+  sandbox <path>     Create or resume a sandbox session
+  list               List all sessions
+  status [name]      Show session metadata + container state
+  stop [name]        Stop session containers (preserves state)
+  clean [name]       Tear down session (rm container + state + host refs)
+  reap               Stop idle sessions (no removal)
+  shell [name]       Open bash inside the session container
+  exec [name] -- ... Run a command inside the session container
+
+Other:
   cred-refresh       Start the credential refresh service
   validate-policy    Validate a sandbox policy YAML file
-  echo-server        Start the HTTPS echo server for wire proof testing
-  sandbox            Manage sandboxes
   login              Authenticate with the gateway
   gateway            Manage the gateway
   doctor             Check system health and prerequisites
-  update-images      Rebuild sandbox container images (core + language layers)
+  update-images      Rebuild sandbox container images
 
-Options:
-  --config, -c    Config file path (default: providers/refresh.yaml)
-  --help, -h      Show this help
+Common flags:
+  --policy PATH      Override .openlock/policy.yaml (sandbox)
+  --keep-gateway     Don't stop gateway when last sandbox exits (sandbox)
+  --all / --stale    Batch operations (stop, clean)
+  --copy DIR         Extract /sandbox/repo before teardown (clean)
+  --json             Machine-readable output (list, status)
+  --help, -h         Show this help
 `.trim();
 
 function main(): void {
@@ -35,6 +47,27 @@ function main(): void {
   const command = args[0];
 
   switch (command) {
+    case "list":
+      import("./cli/list").then(({ listCmd }) => listCmd(args.slice(1)).then(processExit));
+      return;
+    case "status":
+      import("./cli/status").then(({ statusCmd }) => statusCmd(args.slice(1)).then(processExit));
+      return;
+    case "stop":
+      import("./cli/stop").then(({ stopCmd }) => stopCmd(args.slice(1)).then(processExit));
+      return;
+    case "clean":
+      import("./cli/clean").then(({ cleanCmd }) => cleanCmd(args.slice(1)).then(processExit));
+      return;
+    case "reap":
+      import("./cli/reap").then(({ reapCmd }) => reapCmd(args.slice(1)).then(processExit));
+      return;
+    case "shell":
+      import("./cli/shell").then(({ shellCmd }) => shellCmd(args.slice(1)).then(processExit));
+      return;
+    case "exec":
+      import("./cli/exec").then(({ execCmd }) => execCmd(args.slice(1)).then(processExit));
+      return;
     case "cred-refresh":
       return credRefresh(args.slice(1));
     case "validate-policy":
@@ -110,17 +143,15 @@ function validatePolicy(args: string[]): void {
 function sandboxCmd(args: string[]): void {
   const path = args.find((a) => !a.startsWith("-"));
   if (!path) {
-    console.error("Usage: openlock sandbox <path> [--name NAME] [--policy PATH] [--keep-gateway]");
+    console.error("Usage: openlock sandbox <path> [--policy PATH] [--keep-gateway]");
     process.exit(1);
   }
 
-  const nameIdx = args.indexOf("--name");
   const policyIdx = args.indexOf("--policy");
 
   import("./sandbox/session").then(({ runSandbox }) =>
     runSandbox({
       path,
-      name: nameIdx !== -1 ? args[nameIdx + 1] : undefined,
       policy: policyIdx !== -1 ? args[policyIdx + 1] : undefined,
       keepGateway: args.includes("--keep-gateway"),
     }),
@@ -161,6 +192,10 @@ function updateImagesCmd(args: string[]): void {
       process.exit(1);
     }),
   );
+}
+
+function processExit(code: number): void {
+  process.exit(code);
 }
 
 main();
