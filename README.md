@@ -45,13 +45,15 @@ Verify with `openlock doctor`.
 ## Quick start
 
 ```bash
-podman machine start                # macOS
+podman machine start                # macOS only; openlock will prompt to start it for you on first run
 # or: systemctl --user enable --now podman.socket   # Linux
 
-openlock doctor
-openlock login                      # paste a Claude Code setup token
-openlock sandbox /path/to/your/repo
+openlock sandbox /path/to/your/repo   # path defaults to cwd
 ```
+
+The first run prompts for `claude setup-token` if you don't already have credentials,
+runs `git init` for you if the path isn't a git repo yet, and creates `.openlock/`
+with a policy + capability file you can review and commit.
 
 ## Usage
 
@@ -110,7 +112,7 @@ If `[name]` is omitted and exactly one session exists, it is selected. Multiple 
 |---|---|
 | `doctor` | Check prerequisites |
 | `login` | Store a Claude Code setup token |
-| `sandbox <path>` | Create or resume a Claude Code session for a repo |
+| `sandbox [path]` | Create or resume a Claude Code session for a repo (path defaults to cwd; runs preflight, auto-inits the repo, prompts for login if needed) |
 | `list` | List all sessions |
 | `status [name]` | Session metadata + container state (`--json`) |
 | `stop [name]` | Stop the container (preserves state, refs) |
