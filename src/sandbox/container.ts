@@ -122,11 +122,10 @@ export async function removeVolumesByMatch(prefix: string, suffix: string): Prom
   }
 }
 
-export async function listSandboxContainers(prefix: string): Promise<string[]> {
-  const proc = Bun.spawn(
-    ["podman", "ps", "--all", "--format", "{{.Names}}", "--filter", `name=${prefix}`],
-    { stdout: "pipe", stderr: "ignore" },
-  );
+export async function listSandboxContainers(prefix: string, includeExited = false): Promise<string[]> {
+  const args = ["podman", "ps", "--format", "{{.Names}}", "--filter", `name=${prefix}`];
+  if (includeExited) args.splice(2, 0, "--all");
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
   return out.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);

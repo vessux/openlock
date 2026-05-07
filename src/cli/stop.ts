@@ -6,8 +6,16 @@ export async function stopCmd(args: string[]): Promise<number> {
     const stale = args.includes("--stale");
     const rows = await classifyAll();
     const targets = rows.filter((r) =>
-      stale ? (r.classification === "idle-stale") : (r.state.containerState === "running")
+      stale
+        ? (r.classification === "idle-stale")
+        : (r.state.containerState === "running" && r.classification !== "attached")
     );
+    const skippedAttached = rows.filter((r) =>
+      !stale && r.classification === "attached"
+    );
+    if (skippedAttached.length > 0) {
+      console.warn(`skipped ${skippedAttached.length} attached session(s) (use openlock stop <name> to force)`);
+    }
     await Promise.all(targets.map((r) =>
       stopSession(r.meta.name).catch((e) =>
         console.error(`stop ${r.meta.name}: ${(e as Error).message}`)

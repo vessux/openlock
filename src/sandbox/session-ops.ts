@@ -1,7 +1,5 @@
 import { resolve } from "path";
-import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { rmSync } from "fs";
 import {
   listAllSessions,
   removeSessionDir,
@@ -73,22 +71,17 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
   if (opts.copyDir) {
     const dest = resolve(opts.copyDir);
     rmSync(dest, { recursive: true, force: true });
-    const tmp = mkdtempSync(join(tmpdir(), "openlock-copy-"));
-    try {
-      const regen = Bun.spawn(
-        ["podman", "exec", containerName, "bash", "-c",
-          "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all"],
-        { stdout: "ignore", stderr: "ignore" },
-      );
-      await regen.exited;
-      const ok = await copyOutOfContainer(containerName, "/sandbox/repo", dest);
-      if (!ok) {
-        console.warn(`failed to copy /sandbox/repo from ${containerName}; continuing teardown`);
-      } else {
-        console.log(`copied workspace to ${dest}`);
-      }
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
+    const regen = Bun.spawn(
+      ["podman", "exec", containerName, "bash", "-c",
+        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all"],
+      { stdout: "ignore", stderr: "ignore" },
+    );
+    await regen.exited;
+    const ok = await copyOutOfContainer(containerName, "/sandbox/repo", dest);
+    if (!ok) {
+      console.warn(`failed to copy /sandbox/repo from ${containerName}; continuing teardown`);
+    } else {
+      console.log(`copied workspace to ${dest}`);
     }
   }
 
