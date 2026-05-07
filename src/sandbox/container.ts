@@ -1,4 +1,5 @@
 import { getCliInvocation } from "./fork-binaries";
+import { filterOpenshellStderr } from "./openshell-stderr";
 
 export type ContainerState = "running" | "exited" | "missing" | "other";
 
@@ -93,13 +94,39 @@ export function openshellSandboxCreateAsync(args: OpenshellCreateArgs): Promise<
       cwd: cli.cwd,
       stdin: "ignore",
       stdout: "inherit",
-      stderr: "inherit",
+      stderr: "pipe",
     });
+    void pipeFilteredStderr(proc.stderr);
     return {
       pid: proc.pid,
       exited: proc.exited,
     };
   });
+}
+
+async function pipeFilteredStderr(stream: ReadableStream<Uint8Array>): Promise<void> {
+  const decoder = new TextDecoder();
+  const reader = stream.getReader();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const idx = buffer.lastIndexOf("\n");
+      if (idx === -1) continue;
+      const flushable = buffer.slice(0, idx + 1);
+      buffer = buffer.slice(idx + 1);
+      const filtered = filterOpenshellStderr(flushable);
+      if (filtered.length > 0) process.stderr.write(filtered);
+    }
+    if (buffer.length > 0) {
+      const filtered = filterOpenshellStderr(buffer);
+      if (filtered.length > 0) process.stderr.write(filtered);
+    }
+  } catch {
+    // stream errors are non-fatal; openshell child exit is observed via exited promise
+  }
 }
 
 export async function waitForContainerRunning(name: string, timeoutMs = 60_000): Promise<void> {
