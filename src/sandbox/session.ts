@@ -7,16 +7,32 @@ import { ensureGitRepo, createBundle, fetchBundle } from "./git-sync";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
 import { prepareGitIdentity } from "./git-identity";
-import { saveSession, sessionsDir } from "./session-store";
+import {
+  saveSession,
+  sessionsDir,
+  findSessionsByPath,
+  listAllSessions,
+  updateSessionMeta,
+  type SessionMeta,
+} from "./session-store";
 import { ensureImage } from "./image-build";
 import { DEFAULT_CONTAINERFILES, containerfileKeyForCaps } from "./default-containerfiles";
-import { getCliInvocation } from "./fork-binaries";
+import { newSessionId, friendlyNameFromId } from "./identity";
+import {
+  openshellSandboxCreate,
+  inspectContainerState,
+  startContainer,
+  execClaude,
+  copyOutOfContainer,
+  listSandboxContainers,
+} from "./container";
+import { pidAlive } from "./proc";
+import { classifySession, type SessionWithState } from "./reap";
 
-const SANDBOX_PREFIX = "openshell-sandbox-";
+export const SANDBOX_PREFIX = "openshell-sandbox-";
 
-interface SandboxOpts {
+export interface SandboxOpts {
   path: string;
-  name?: string;
   policy?: string;
   keepGateway?: boolean;
 }
@@ -26,23 +42,6 @@ export function shouldStopGateway(args: { keepGateway?: boolean; otherSandboxes:
   return args.otherSandboxes === 0;
 }
 
-async function openshell(
-  args: string[],
-  opts?: { stdin?: "inherit"; stdout?: "inherit"; stderr?: "inherit" },
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const cli = await getCliInvocation();
-  const proc = Bun.spawn([...cli.argv, ...args], {
-    cwd: cli.cwd,
-    stdin: opts?.stdin ?? "ignore",
-    stdout: opts?.stdout ?? "pipe",
-    stderr: opts?.stderr ?? "pipe",
-  });
-  const exitCode = await proc.exited;
-  const stdout = opts?.stdout === "inherit" ? "" : await new Response(proc.stdout).text();
-  const stderr = opts?.stderr === "inherit" ? "" : await new Response(proc.stderr).text();
-  return { exitCode, stdout, stderr };
-}
-
 async function buildSandboxImage(caps: Cap[]): Promise<string> {
   const key = containerfileKeyForCaps(caps);
   const content = DEFAULT_CONTAINERFILES[key];
@@ -50,38 +49,42 @@ async function buildSandboxImage(caps: Cap[]): Promise<string> {
     containerfileContent: content,
     tagPrefix: `openlock-${key}`,
   });
-  if (ref.built) {
-    console.log(`Built image ${ref.tag}`);
-  } else {
-    console.log(`Using cached image ${ref.tag}`);
-  }
+  console.log(ref.built ? `Built image ${ref.tag}` : `Using cached image ${ref.tag}`);
   return ref.tag;
 }
 
-export async function runSandbox(opts: SandboxOpts): Promise<void> {
-  const projectPath = resolve(opts.path);
-  const sessionName = opts.name ?? `${basename(projectPath)}-${Date.now()}`;
+interface ResolvedRepo {
+  caps: Cap[];
+  policy: string;
+}
 
-  let caps: Cap[];
-  let policy: string;
-  if (opts.policy) {
-    // Explicit --policy flag wins. Skip the .openlock/ folder logic
-    // entirely so the flag never has a side effect on repo files.
-    caps = detectCaps(projectPath);
-    policy = resolve(opts.policy);
-  } else {
-    const resolved = resolveOpenlockFolder(projectPath);
-    caps = resolved.caps;
-    policy = resolved.policyPath;
-    if (resolved.origin === "first-run") {
-      console.log("Created .openlock/. Review and commit before sharing.");
-    } else if (resolved.origin === "restored-config") {
-      console.log("Restored .openlock/config.yaml.");
-    } else if (resolved.origin === "restored-policy") {
-      const suffix = caps.length > 0 ? `-${caps.join("-")}` : "";
-      console.log(`Restored .openlock/policy.yaml from default${suffix}.yaml.`);
-    }
+function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string): ResolvedRepo {
+  if (policyOverride) {
+    return { caps: detectCaps(projectPath), policy: resolve(policyOverride) };
   }
+  const folder = resolveOpenlockFolder(projectPath);
+  if (folder.origin === "first-run") {
+    console.log("Created .openlock/. Review and commit before sharing.");
+  } else if (folder.origin === "restored-config") {
+    console.log("Restored .openlock/config.yaml.");
+  } else if (folder.origin === "restored-policy") {
+    const suffix = folder.caps.length > 0 ? `-${folder.caps.join("-")}` : "";
+    console.log(`Restored .openlock/policy.yaml from default${suffix}.yaml.`);
+  }
+  return { caps: folder.caps, policy: folder.policyPath };
+}
+
+interface NewSession {
+  id: string;
+  name: string;
+  containerName: string;
+  policy: string;
+  caps: Cap[];
+  image: string;
+}
+
+async function createSession(projectPath: string, opts: SandboxOpts): Promise<NewSession> {
+  const { caps, policy } = resolveRepoPolicyAndCaps(projectPath, opts.policy);
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
 
   await startGateway();
@@ -91,16 +94,16 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   console.log(`Policy: ${policy}`);
   console.log(`Image: ${imageTag}`);
 
-  // openshell sandbox create accepts only one --upload. Stage everything
-  // into a single dir whose basename becomes the destination subdir on the
-  // sandbox side. ".openlock" lands at /sandbox/.openlock.
+  const id = newSessionId();
+  const name = friendlyNameFromId(basename(projectPath), id);
+  const containerName = `${SANDBOX_PREFIX}${name}`;
+
   await ensureGitRepo(projectPath);
   const tmp = mkdtempSync(join(tmpdir(), "openlock-"));
   try {
     const staging = join(tmp, ".openlock");
     mkdirSync(staging);
-    const bundlePath = join(staging, "repo.bundle");
-    await createBundle(projectPath, bundlePath);
+    await createBundle(projectPath, join(staging, "repo.bundle"));
     console.log("Git bundle created.");
 
     const gitconfigPath = await prepareGitIdentity(staging);
@@ -110,95 +113,178 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
         : "No host git identity found; using sandbox default.",
     );
 
-    console.log(`Creating sandbox "${sessionName}"...`);
-    const containerName = `${SANDBOX_PREFIX}${sessionName}`;
-    const entryCmd = [
-      `cd /sandbox`,
-      `if [ -f .openlock/.gitconfig ]; then cp .openlock/.gitconfig .gitconfig; fi`,
-      `git clone .openlock/repo.bundle repo`,
-      `cd repo`,
-      `claude`,
-      `git bundle create /sandbox/out.bundle --all 2>/dev/null || true`,
+    console.log(`Creating sandbox "${name}"...`);
+    const setupCmd = [
+      "cd /sandbox",
+      "if [ -f .openlock/.gitconfig ]; then cp .openlock/.gitconfig .gitconfig; fi",
+      "git clone .openlock/repo.bundle repo",
+      "exec sleep infinity",
     ].join(" && ");
-    const createArgs = [
-      "sandbox", "create",
-      "--name", sessionName,
-      "--from", imageTag,
-      "--upload", `${staging}:/sandbox/`,
-      "--no-git-ignore",
-      "--policy", policy,
-      "--provider", "anthropic",
-      "--tty",
-      "--", "/bin/bash", "-c", entryCmd,
-    ];
 
-    const { exitCode } = await openshell(createArgs, {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
+    const exitCode = await openshellSandboxCreate({
+      sessionName: name,
+      imageTag,
+      uploadDir: staging,
+      policy,
+      command: ["/bin/bash", "-c", setupCmd],
     });
 
-    // @ts-expect-error rework in task 7
-    saveSession(sessionsDir(), {
-      name: sessionName,
+    if (exitCode !== 0) {
+      throw new Error(`openshell sandbox create exited ${exitCode}`);
+    }
+
+    const meta: SessionMeta = {
+      id,
+      name,
       path: projectPath,
       caps,
       image: imageTag,
       policy,
       createdAt: new Date().toISOString(),
-    });
-
-    console.log("\nSyncing sandbox commits back...");
-    const outBundle = join(tmp, "out.bundle");
-    try {
-      const cp = Bun.spawn(
-        ["podman", "cp", `${containerName}:/sandbox/out.bundle`, outBundle],
-        { stdout: "pipe", stderr: "pipe" },
-      );
-      const cpCode = await cp.exited;
-      if (cpCode === 0) {
-        await fetchBundle(projectPath, outBundle, sessionName);
-        console.log(`Sandbox commits synced to refs/sandbox/${sessionName}/*`);
-      } else {
-        console.warn("No commits to sync (sandbox may not have made changes).");
-      }
-    } catch (e) {
-      console.warn(`Sync failed: ${(e as Error).message}`);
-    }
-
-    const run = async (cmd: string[]): Promise<string> => {
-      const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
-      const out = await new Response(p.stdout).text();
-      await p.exited;
-      return out.trim();
+      lastAttachedAt: null,
+      attachedPid: null,
     };
-    await run(["podman", "rm", "-f", containerName]);
-    const secrets = (await run(["podman", "secret", "ls", "--format", "{{.Name}}"])).split("\n");
-    for (const s of secrets) {
-      if (s.startsWith("openshell-handshake-")) await run(["podman", "secret", "rm", s]);
-    }
-    const volumes = (await run(["podman", "volume", "ls", "--format", "{{.Name}}"])).split("\n");
-    for (const v of volumes) {
-      if (v.startsWith(SANDBOX_PREFIX) && v.endsWith("-workspace")) await run(["podman", "volume", "rm", v]);
-    }
+    saveSession(sessionsDir(), meta);
 
-    const stillRunning = (await run([
-      "podman", "ps",
-      "--format", "{{.Names}}",
-      "--filter", `name=${SANDBOX_PREFIX}`,
-    ])).split("\n").filter((n) => n.length > 0);
-    if (shouldStopGateway({ keepGateway: opts.keepGateway, otherSandboxes: stillRunning.length })) {
-      stopGateway();
-    } else if (stillRunning.length > 0) {
-      console.log(`Gateway kept running (${stillRunning.length} other sandbox(es) active).`);
-    } else {
-      console.log("Gateway kept running (--keep-gateway).");
-    }
-
-    if (exitCode !== 0) {
-      process.exit(exitCode);
-    }
+    return { id, name, containerName, policy, caps, image: imageTag };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+async function syncBackToHost(projectPath: string, containerName: string, sessionName: string): Promise<void> {
+  const tmp = mkdtempSync(join(tmpdir(), "openlock-syncback-"));
+  try {
+    const outBundle = join(tmp, "out.bundle");
+    const ok = await copyOutOfContainer(containerName, "/sandbox/out.bundle", outBundle);
+    if (ok) {
+      await fetchBundle(projectPath, outBundle, sessionName);
+      console.log(`Sandbox commits synced to refs/sandbox/${sessionName}/*`);
+      return;
+    }
+    const regen = Bun.spawn(
+      ["podman", "exec", containerName, "bash", "-c",
+        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all"],
+      { stdout: "ignore", stderr: "ignore" },
+    );
+    const regenCode = await regen.exited;
+    if (regenCode !== 0) {
+      console.warn("No commits to sync.");
+      return;
+    }
+    const ok2 = await copyOutOfContainer(containerName, "/sandbox/out.bundle", outBundle);
+    if (!ok2) {
+      console.warn("No commits to sync.");
+      return;
+    }
+    await fetchBundle(projectPath, outBundle, sessionName);
+    console.log(`Sandbox commits synced to refs/sandbox/${sessionName}/*`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function findSessionByName(name: string): SessionMeta | null {
+  for (const m of listAllSessions(sessionsDir())) {
+    if (m.name === name) return m;
+  }
+  return null;
+}
+
+async function attachClaudeAndSync(
+  containerName: string,
+  sessionName: string,
+  projectPath: string,
+): Promise<number> {
+  const meta = findSessionByName(sessionName);
+  if (meta) {
+    updateSessionMeta(sessionsDir(), meta.id, {
+      attachedPid: process.pid,
+      lastAttachedAt: new Date().toISOString(),
+    });
+  }
+  const exitCode = await execClaude(containerName);
+  await syncBackToHost(projectPath, containerName, sessionName);
+  if (meta) {
+    updateSessionMeta(sessionsDir(), meta.id, {
+      attachedPid: null,
+      lastAttachedAt: new Date().toISOString(),
+    });
+  }
+  return exitCode;
+}
+
+async function reportPostRunIdleHint(): Promise<void> {
+  const all = listAllSessions(sessionsDir());
+  const now = Date.now();
+  let stale = 0;
+  for (const m of all) {
+    const state = await inspectContainerState(`${SANDBOX_PREFIX}${m.name}`);
+    const enriched: SessionWithState = {
+      ...m,
+      containerState: state,
+      pidAlive: pidAlive(m.attachedPid),
+    };
+    if (classifySession(enriched, now) === "idle-stale") stale += 1;
+  }
+  if (stale > 0) {
+    console.log(`\n${stale} idle session(s) detected. Reap with: openlock reap`);
+  }
+}
+
+export async function runSandbox(opts: SandboxOpts): Promise<void> {
+  const projectPath = resolve(opts.path);
+
+  const matches = findSessionsByPath(sessionsDir(), projectPath);
+  if (matches.length > 1) {
+    console.error(`Multiple sessions found for ${projectPath}:`);
+    for (const m of matches) console.error(`  ${m.name}  (created ${m.createdAt})`);
+    console.error("Run `openlock clean <name>` to remove unused sessions.");
+    process.exit(2);
+  }
+
+  let containerName: string;
+  let sessionName: string;
+  if (matches.length === 0) {
+    const created = await createSession(projectPath, opts);
+    containerName = created.containerName;
+    sessionName = created.name;
+  } else {
+    const m = matches[0]!;
+    sessionName = m.name;
+    containerName = `${SANDBOX_PREFIX}${m.name}`;
+    const state = await inspectContainerState(containerName);
+    if (state === "missing") {
+      console.error(`Session ${m.name} has no container; run \`openlock clean ${m.name}\` to reclaim.`);
+      process.exit(1);
+    }
+    if (pidAlive(m.attachedPid) && m.attachedPid !== process.pid) {
+      console.error(`Session ${m.name} is in use by pid ${m.attachedPid}.`);
+      process.exit(1);
+    }
+    if (state === "exited") {
+      console.log(`Resuming session ${m.name} (container was stopped)...`);
+      await startContainer(containerName);
+    } else {
+      console.log(`Attaching to running session ${m.name}...`);
+    }
+    await startGateway();
+    await ensureProvider();
+  }
+
+  const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath);
+
+  const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX))
+    .filter((n) => n !== containerName);
+  if (shouldStopGateway({ keepGateway: opts.keepGateway, otherSandboxes: stillRunning.length })) {
+    stopGateway();
+  } else if (stillRunning.length > 0) {
+    console.log(`Gateway kept running (${stillRunning.length} other sandbox(es) active).`);
+  } else {
+    console.log("Gateway kept running (--keep-gateway).");
+  }
+
+  await reportPostRunIdleHint();
+
+  if (exitCode !== 0) process.exit(exitCode);
 }
