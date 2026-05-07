@@ -8,7 +8,7 @@ import { runDoctorChecks, podmanMachineRunning, podmanSocketActive } from "../do
 import { readToken } from "../tokens";
 import { login } from "../login";
 import { resolveOpenlockFolder } from "./openlock-folder";
-import { ensureGitRepo, createBundle, fetchBundle } from "./git-sync";
+import { createBundle, fetchBundle } from "./git-sync";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
 import { prepareGitIdentity } from "./git-identity";
@@ -103,7 +103,6 @@ async function createSession(projectPath: string, opts: SandboxOpts): Promise<Ne
   const name = friendlyNameFromId(basename(projectPath), id);
   const containerName = `${SANDBOX_PREFIX}${name}`;
 
-  await ensureGitRepo(projectPath);
   const tmp = mkdtempSync(join(tmpdir(), "openlock-"));
   try {
     const staging = join(tmp, ".openlock");
