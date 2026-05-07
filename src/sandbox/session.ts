@@ -2,6 +2,11 @@ import { resolve, join, basename } from "path";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { detectCaps, type Cap } from "./detect-caps";
+import { ensureRepoIsGit } from "./ensure-repo";
+import { preflight, type PreflightDeps } from "./preflight";
+import { runDoctorChecks } from "../doctor";
+import { readToken } from "../tokens";
+import { login } from "../login";
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { ensureGitRepo, createBundle, fetchBundle } from "./git-sync";
 import { startGateway, stopGateway } from "./ensure-gateway";
@@ -237,8 +242,76 @@ async function reportPostRunIdleHint(): Promise<void> {
   }
 }
 
+function realPreflightDeps(): PreflightDeps {
+  return {
+    runDoctorChecks,
+    readToken,
+    isMac: process.platform === "darwin",
+    podmanMachineRunning: async () => {
+      const proc = Bun.spawn(["podman", "machine", "info"], {
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      const out = await new Response(proc.stdout).text();
+      return (await proc.exited) === 0 && /machinestate:\s*Running/i.test(out);
+    },
+    confirmStartMachine: async () => {
+      process.stdout.write("podman machine is not running. Start it now? [Y/n] ");
+      const reader = Bun.stdin.stream().getReader();
+      const { value } = await reader.read();
+      reader.releaseLock();
+      const answer = new TextDecoder().decode(value ?? new Uint8Array()).trim().toLowerCase();
+      return answer === "" || answer === "y" || answer === "yes";
+    },
+    startPodmanMachine: async () => {
+      const proc = Bun.spawn(["podman", "machine", "start"], {
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      return (await proc.exited) === 0;
+    },
+    podmanSocketActive: async () => {
+      const info = Bun.spawn(
+        ["podman", "info", "--format", "{{.Host.RemoteSocket.Path}}"],
+        { stdout: "pipe", stderr: "ignore" },
+      );
+      const out = await new Response(info.stdout).text();
+      if ((await info.exited) !== 0) return false;
+      const socketPath = out.trim().replace(/^unix:\/\//, "");
+      const ping = Bun.spawn(
+        ["curl", "-fsS", "--unix-socket", socketPath, "http://d/_ping"],
+        { stdout: "ignore", stderr: "ignore" },
+      );
+      return (await ping.exited) === 0;
+    },
+    login,
+  };
+}
+
 export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const projectPath = resolve(opts.path);
+
+  const tty = Boolean(process.stdin.isTTY);
+  const pre = await preflight({ tty, deps: realPreflightDeps() });
+  if (!pre.ok) {
+    console.error(pre.reason ?? "preflight failed");
+    process.exit(1);
+  }
+
+  const repoResult = await ensureRepoIsGit(projectPath);
+  switch (repoResult.action) {
+    case "created":
+      console.log(`Created new project at ${projectPath}`);
+      break;
+    case "inited":
+      console.log(`Initialized git repository at ${projectPath}`);
+      break;
+    case "ensured-commit":
+      console.log(`Landed empty initial commit in ${projectPath}`);
+      break;
+    case "existed":
+      break;
+  }
 
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   if (matches.length > 1) {
