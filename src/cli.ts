@@ -10,7 +10,7 @@ openlock - sandbox orchestration toolkit
 Usage: openlock <command>
 
 Session lifecycle:
-  sandbox <path>     Create or resume a sandbox session
+  sandbox [path]     Create or resume a sandbox session (path defaults to cwd; runs preflight + auto-inits the repo)
   list               List all sessions
   status [name]      Show session metadata + container state
   stop [name]        Stop session containers (preserves state)
@@ -141,12 +141,7 @@ function validatePolicy(args: string[]): void {
 }
 
 function sandboxCmd(args: string[]): void {
-  const path = args.find((a) => !a.startsWith("-"));
-  if (!path) {
-    console.error("Usage: openlock sandbox <path> [--policy PATH] [--keep-gateway]");
-    process.exit(1);
-  }
-
+  const path = args.find((a) => !a.startsWith("-")) ?? process.cwd();
   const policyIdx = args.indexOf("--policy");
 
   import("./sandbox/session").then(({ runSandbox }) =>
