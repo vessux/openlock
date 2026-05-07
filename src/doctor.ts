@@ -53,7 +53,12 @@ async function podmanSocketActive(): Promise<boolean> {
   }
 }
 
-export async function doctor(): Promise<void> {
+export interface DoctorResult {
+  name: string;
+  ok: boolean;
+}
+
+export async function runDoctorChecks(): Promise<DoctorResult[]> {
   const isMac = process.platform === "darwin";
   const dev = isDevMode();
   const checks: Check[] = [
@@ -81,12 +86,20 @@ export async function doctor(): Promise<void> {
     },
   ];
 
+  const results: DoctorResult[] = [];
+  for (const c of checks) {
+    results.push({ name: c.name, ok: await c.test() });
+  }
+  return results;
+}
+
+export async function doctor(): Promise<void> {
+  const results = await runDoctorChecks();
   let failures = 0;
-  for (const check of checks) {
-    const ok = await check.test();
-    const icon = ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
-    console.log(`  ${icon} ${check.name}`);
-    if (!ok) failures++;
+  for (const r of results) {
+    const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
+    console.log(`  ${icon} ${r.name}`);
+    if (!r.ok) failures++;
   }
 
   console.log();
