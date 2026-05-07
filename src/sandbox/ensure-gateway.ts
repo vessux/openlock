@@ -4,6 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { ensureSupervisorImage } from "./build-supervisor-image";
 import { getGatewayBinary } from "./fork-binaries";
+import { pidAlive } from "./proc";
 
 const STATE_DIR = join(homedir(), ".local", "state", "openlock");
 const PID_FILE = join(STATE_DIR, "gateway.pid");
@@ -11,15 +12,6 @@ const LOG_FILE = join(STATE_DIR, "gateway.log");
 const HANDSHAKE_SECRET_FILE = join(STATE_DIR, "handshake-secret");
 const GATEWAY_PORT = 18081;
 const GATEWAY_NAME = "podman-dev";
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function readPid(): number | null {
   if (!existsSync(PID_FILE)) return null;
@@ -30,7 +22,7 @@ function readPid(): number | null {
 export function gatewayStatus(): { running: boolean; pid: number | null } {
   const pid = readPid();
   if (pid === null) return { running: false, pid: null };
-  if (isProcessAlive(pid)) return { running: true, pid };
+  if (pidAlive(pid)) return { running: true, pid };
   unlinkSync(PID_FILE);
   return { running: false, pid: null };
 }
@@ -143,7 +135,7 @@ export async function startGateway(): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     await Bun.sleep(1000);
-    if (!isProcessAlive(proc.pid)) {
+    if (!pidAlive(proc.pid)) {
       const tail = existsSync(LOG_FILE)
         ? readFileSync(LOG_FILE, "utf-8").split("\n").slice(-20).join("\n")
         : "(no log)";
