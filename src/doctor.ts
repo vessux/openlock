@@ -18,7 +18,7 @@ async function commandExists(cmd: string): Promise<boolean> {
   }
 }
 
-async function podmanMachineRunning(): Promise<boolean> {
+export async function podmanMachineRunning(): Promise<boolean> {
   try {
     const proc = Bun.spawn(["podman", "machine", "info"], { stdout: "pipe", stderr: "ignore" });
     const code = await proc.exited;
@@ -30,7 +30,7 @@ async function podmanMachineRunning(): Promise<boolean> {
   }
 }
 
-async function podmanSocketActive(): Promise<boolean> {
+export async function podmanSocketActive(): Promise<boolean> {
   // `podman info` succeeds even when the API socket is inactive (the CLI
   // talks to libpod directly), and a stale socket *file* can linger after
   // `systemctl stop`. The only reliable check is to actually open a

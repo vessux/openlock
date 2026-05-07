@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { detectCaps, type Cap } from "./detect-caps";
 import { ensureRepoIsGit } from "./ensure-repo";
 import { preflight, type PreflightDeps } from "./preflight";
-import { runDoctorChecks } from "../doctor";
+import { runDoctorChecks, podmanMachineRunning, podmanSocketActive } from "../doctor";
 import { readToken } from "../tokens";
 import { login } from "../login";
 import { resolveOpenlockFolder } from "./openlock-folder";
@@ -247,14 +247,7 @@ function realPreflightDeps(): PreflightDeps {
     runDoctorChecks,
     readToken,
     isMac: process.platform === "darwin",
-    podmanMachineRunning: async () => {
-      const proc = Bun.spawn(["podman", "machine", "info"], {
-        stdout: "pipe",
-        stderr: "ignore",
-      });
-      const out = await new Response(proc.stdout).text();
-      return (await proc.exited) === 0 && /machinestate:\s*Running/i.test(out);
-    },
+    podmanMachineRunning,
     confirmStartMachine: async () => {
       process.stdout.write("podman machine is not running. Start it now? [Y/n] ");
       const reader = Bun.stdin.stream().getReader();
@@ -270,20 +263,7 @@ function realPreflightDeps(): PreflightDeps {
       });
       return (await proc.exited) === 0;
     },
-    podmanSocketActive: async () => {
-      const info = Bun.spawn(
-        ["podman", "info", "--format", "{{.Host.RemoteSocket.Path}}"],
-        { stdout: "pipe", stderr: "ignore" },
-      );
-      const out = await new Response(info.stdout).text();
-      if ((await info.exited) !== 0) return false;
-      const socketPath = out.trim().replace(/^unix:\/\//, "");
-      const ping = Bun.spawn(
-        ["curl", "-fsS", "--unix-socket", socketPath, "http://d/_ping"],
-        { stdout: "ignore", stderr: "ignore" },
-      );
-      return (await ping.exited) === 0;
-    },
+    podmanSocketActive,
     login,
   };
 }
