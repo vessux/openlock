@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { createBundle, ensureGitRepo } from "./git-sync";
+import { createBundle, ensureGitRepo, fetchBundle, pruneSandboxRefs } from "./git-sync";
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -56,6 +56,57 @@ describe("git-sync", () => {
       const bundlePath = join(testDir, "test.bundle");
       await createBundle(dir, bundlePath);
       expect(existsSync(bundlePath)).toBe(true);
+    });
+  });
+
+  describe("git-sync namespaced", () => {
+    it("fetchBundle writes to refs/sandbox/<sessionName>/*", async () => {
+      const hostDir = join(testDir, "host");
+      const workDir = join(testDir, "work");
+      mkdirSync(hostDir);
+      mkdirSync(workDir);
+      await ensureGitRepo(hostDir);
+      await ensureGitRepo(workDir);
+      await run(["git", "checkout", "-b", "feature"], workDir);
+      await run(["git", "commit", "--allow-empty", "-m", "feature work"], workDir);
+      const bundle = join(testDir, "out.bundle");
+      await createBundle(workDir, bundle);
+
+      await fetchBundle(hostDir, bundle, "openlock-abc123");
+
+      const p = Bun.spawn(
+        ["git", "for-each-ref", "--format=%(refname)"],
+        { cwd: hostDir, stdout: "pipe", stderr: "pipe" },
+      );
+      const refs = await new Response(p.stdout).text();
+      await p.exited;
+      expect(refs).toContain("refs/sandbox/openlock-abc123/feature");
+    });
+
+    it("pruneSandboxRefs deletes refs/sandbox/<sessionName>/* and leaves others", async () => {
+      const hostDir = join(testDir, "host-prune");
+      mkdirSync(hostDir);
+      await ensureGitRepo(hostDir);
+      await run(["git", "update-ref", "refs/sandbox/sess-a/main", "HEAD"], hostDir);
+      await run(["git", "update-ref", "refs/sandbox/sess-b/main", "HEAD"], hostDir);
+
+      await pruneSandboxRefs(hostDir, "sess-a");
+
+      const p = Bun.spawn(
+        ["git", "for-each-ref", "--format=%(refname)"],
+        { cwd: hostDir, stdout: "pipe", stderr: "pipe" },
+      );
+      const refs = await new Response(p.stdout).text();
+      await p.exited;
+      expect(refs).not.toContain("refs/sandbox/sess-a/main");
+      expect(refs).toContain("refs/sandbox/sess-b/main");
+    });
+
+    it("pruneSandboxRefs no-ops when session has no refs", async () => {
+      const hostDir = join(testDir, "host-ghost");
+      mkdirSync(hostDir);
+      await ensureGitRepo(hostDir);
+      await pruneSandboxRefs(hostDir, "ghost");
     });
   });
 });
