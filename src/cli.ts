@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { join } from "node:path";
+import pkg from "../package.json" with { type: "json" };
 import { loadConfig, resolveEndpoint } from "./cred-refresh/config";
 import { runRefreshLoop } from "./cred-refresh/loop";
 import { formatErrors, validatePolicyFile } from "./validate-policy";
@@ -34,10 +35,16 @@ Common flags:
   --copy DIR         Extract /sandbox/repo before teardown (clean)
   --json             Machine-readable output (list, status)
   --help, -h         Show this help
+  --version, -v      Show version
 `.trim();
 
 function main(): void {
   const args = process.argv.slice(2);
+
+  if (args.includes("--version") || args.includes("-v") || args[0] === "version") {
+    console.log(pkg.version);
+    process.exit(0);
+  }
 
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     console.log(USAGE);
