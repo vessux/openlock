@@ -25,8 +25,20 @@ async function gitInit(dir: string): Promise<void> {
 }
 
 async function landEmptyCommit(dir: string): Promise<void> {
+  // Inline identity so we never depend on host git config; avoids
+  // "Author identity unknown" on fresh VMs / CI runners.
   const { exitCode, stderr } = await spawn(
-    ["git", "commit", "--allow-empty", "-m", "initial commit"],
+    [
+      "git",
+      "-c",
+      "user.email=openlock@local",
+      "-c",
+      "user.name=openlock",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "initial commit",
+    ],
     dir,
   );
   if (exitCode !== 0) throw new Error(`git commit failed in ${dir}: ${stderr}`);
