@@ -9,7 +9,7 @@ export async function listCmd(args: string[]): Promise<number> {
         {
           sessions: rows.map((r) => ({
             name: r.meta.name,
-            path: r.meta.path,
+            repoPath: r.meta.repoPath,
             createdAt: r.meta.createdAt,
             lastAttachedAt: r.meta.lastAttachedAt,
             containerState: r.state.containerState,
@@ -31,7 +31,7 @@ export async function listCmd(args: string[]): Promise<number> {
     .sort((a, b) => a.meta.createdAt.localeCompare(b.meta.createdAt))
     .map((r) => [
       r.meta.name,
-      r.meta.path,
+      r.meta.repoPath,
       r.meta.createdAt,
       r.state.containerState,
       r.classification === "idle-stale"
