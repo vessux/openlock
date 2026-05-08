@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prepareGitIdentity } from "./git-identity";
 
-const tmpRoot = join(tmpdir(), "openlock-git-identity-test");
-
 describe("prepareGitIdentity", () => {
+  let tmpRoot: string;
   let tmpDir: string;
   let fakeHome: string;
 
   beforeEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
-    mkdirSync(tmpRoot, { recursive: true });
+    // mkdtempSync gives an unpredictable suffix, avoiding the race-on-fixed-path
+    // pattern that CodeQL flags as "insecure temporary file".
+    tmpRoot = mkdtempSync(join(tmpdir(), "openlock-git-identity-"));
     tmpDir = join(tmpRoot, "out");
     fakeHome = join(tmpRoot, "home");
     mkdirSync(tmpDir, { recursive: true });
