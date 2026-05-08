@@ -35,6 +35,7 @@ export async function podmanSocketActive(): Promise<boolean> {
   // talks to libpod directly), and a stale socket *file* can linger after
   // `systemctl stop`. The only reliable check is to actually open a
   // connection and ping the API — which is what the gateway does.
+  // Bound the curl call with --max-time so a stale socket can't hang us.
   try {
     const proc = Bun.spawn(
       ["podman", "info", "--format", "{{.Host.RemoteSocket.Path}}"],
@@ -44,7 +45,15 @@ export async function podmanSocketActive(): Promise<boolean> {
     if ((await proc.exited) !== 0) return false;
     const socketPath = out.trim().replace(/^unix:\/\//, "");
     const ping = Bun.spawn(
-      ["curl", "-fsS", "--unix-socket", socketPath, "http://d/_ping"],
+      [
+        "curl",
+        "-fsS",
+        "--max-time",
+        "2",
+        "--unix-socket",
+        socketPath,
+        "http://d/_ping",
+      ],
       { stdout: "ignore", stderr: "ignore" },
     );
     return (await ping.exited) === 0;
