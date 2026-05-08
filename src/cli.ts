@@ -99,6 +99,12 @@ function main(): void {
     case "update-images":
       updateImagesCmd(args.slice(1));
       return;
+    case "__list-sessions":
+      import("./sandbox/session-store").then(({ listAllSessions, sessionsDir }) => {
+        for (const m of listAllSessions(sessionsDir())) console.log(m.name);
+        process.exit(0);
+      });
+      return;
     default:
       console.error(`Unknown command: ${command}`);
       console.log(USAGE);
