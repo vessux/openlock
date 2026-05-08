@@ -11,7 +11,22 @@ async function spawn(cmd: string[], cwd: string): Promise<{ exitCode: number; st
 export async function ensureGitRepo(dir: string): Promise<void> {
   if (existsSync(join(dir, ".git"))) return;
   await spawn(["git", "init"], dir);
-  await spawn(["git", "commit", "--allow-empty", "-m", "initial commit"], dir);
+  // Inline identity so we never depend on host git config; matches
+  // the same fix in ensure-repo.ts (landEmptyCommit).
+  await spawn(
+    [
+      "git",
+      "-c",
+      "user.email=openlock@local",
+      "-c",
+      "user.name=openlock",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "initial commit",
+    ],
+    dir,
+  );
 }
 
 export async function createBundle(repoDir: string, bundlePath: string): Promise<void> {
