@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { completionScript as bashScript } from "./bash";
+import { completionScript as fishScript } from "./fish";
 import { completionScript as zshScript } from "./zsh";
 
 describe("bash completion script", () => {
@@ -60,5 +61,32 @@ describe("zsh completion script", () => {
 
   it("invokes openlock __list-sessions for dynamic session names", () => {
     expect(zshScript()).toContain("openlock __list-sessions");
+  });
+});
+
+describe("fish completion script", () => {
+  it("contains all top-level subcommands", () => {
+    const s = fishScript();
+    for (const cmd of [
+      "sandbox",
+      "list",
+      "status",
+      "stop",
+      "clean",
+      "reap",
+      "shell",
+      "exec",
+      "complete",
+    ]) {
+      expect(s).toContain(cmd);
+    }
+  });
+
+  it("invokes openlock __list-sessions for dynamic session names", () => {
+    expect(fishScript()).toContain("openlock __list-sessions");
+  });
+
+  it("uses fish complete -c openlock", () => {
+    expect(fishScript()).toContain("complete -c openlock");
   });
 });
