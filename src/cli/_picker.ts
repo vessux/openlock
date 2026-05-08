@@ -24,5 +24,39 @@ export async function pickSession(
     return sessions.find((s) => s.name === name) ?? null;
   }
 
-  return null;
+  return promptNumbered(sessions, action, io);
+}
+
+async function promptNumbered(
+  sessions: SessionMeta[],
+  action: string,
+  io: PickerIO,
+): Promise<SessionMeta | null> {
+  const printList = (): void => {
+    io.writeStderr(`Pick one for ${action}:\n`);
+    sessions.forEach((s, i) => {
+      io.writeStderr(`  ${i + 1}) ${s.name}  (${s.repoPath})\n`);
+    });
+    io.writeStderr("> ");
+  };
+
+  printList();
+  let line = await io.readLine();
+  let picked = parseChoice(line, sessions.length);
+  if (picked === null && line !== null && line.trim() !== "") {
+    printList();
+    line = await io.readLine();
+    picked = parseChoice(line, sessions.length);
+  }
+  if (picked === null) return null;
+  return sessions[picked - 1] ?? null;
+}
+
+function parseChoice(line: string | null, max: number): number | null {
+  if (line === null) return null;
+  const trimmed = line.trim();
+  if (trimmed === "") return null;
+  const n = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(n) || n < 1 || n > max) return null;
+  return n;
 }

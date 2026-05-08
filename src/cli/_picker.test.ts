@@ -70,4 +70,59 @@ describe("pickSession", () => {
     const result = await pickSession([meta("a")], "stop", io);
     expect(result).toBeNull();
   });
+
+  it("numbered fallback returns the chosen session on a valid index", async () => {
+    const sessions = [meta("alpha"), meta("beta"), meta("gamma")];
+    let capturedStderr = "";
+    const lines = ["2"];
+    const io = fakeIO({
+      detectFzf: () => false,
+      readLine: async () => lines.shift() ?? null,
+      writeStderr: (s) => {
+        capturedStderr += s;
+      },
+    });
+    const result = await pickSession(sessions, "stop", io);
+    expect(result).toEqual(sessions[1]);
+    expect(capturedStderr).toContain("1) alpha  (/tmp/alpha)");
+    expect(capturedStderr).toContain("2) beta  (/tmp/beta)");
+    expect(capturedStderr).toContain("3) gamma  (/tmp/gamma)");
+    expect(capturedStderr).toContain("Pick one for stop");
+  });
+
+  it("numbered fallback returns null on empty input", async () => {
+    const lines = [""];
+    const io = fakeIO({
+      detectFzf: () => false,
+      readLine: async () => lines.shift() ?? null,
+    });
+    const result = await pickSession([meta("a")], "stop", io);
+    expect(result).toBeNull();
+  });
+
+  it("numbered fallback reprompts once on out-of-range, then returns null", async () => {
+    const sessions = [meta("alpha"), meta("beta")];
+    const lines = ["99", ""];
+    let promptCount = 0;
+    const io = fakeIO({
+      detectFzf: () => false,
+      readLine: async () => {
+        promptCount++;
+        return lines.shift() ?? null;
+      },
+    });
+    const result = await pickSession(sessions, "stop", io);
+    expect(result).toBeNull();
+    expect(promptCount).toBe(2);
+  });
+
+  it("numbered fallback returns null on non-numeric input", async () => {
+    const lines = ["abc", ""];
+    const io = fakeIO({
+      detectFzf: () => false,
+      readLine: async () => lines.shift() ?? null,
+    });
+    const result = await pickSession([meta("a")], "stop", io);
+    expect(result).toBeNull();
+  });
 });
