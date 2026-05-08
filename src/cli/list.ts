@@ -1,4 +1,4 @@
-import { type GatewayStatus, gatewayStatus } from "../sandbox/ensure-gateway";
+import { GATEWAY_NAME, type GatewayStatus, gatewayStatus } from "../sandbox/ensure-gateway";
 import { formatBytes, formatDuration } from "../sandbox/format";
 import { classifyAll } from "../sandbox/session-ops";
 
@@ -12,7 +12,7 @@ interface GatewayJson {
 
 function gatewayJson(status: GatewayStatus): GatewayJson {
   return {
-    name: "podman-dev",
+    name: GATEWAY_NAME,
     state: status.running ? "running" : "stopped",
     pid: status.pid,
     rssKb: status.rssKb ?? null,
@@ -22,14 +22,14 @@ function gatewayJson(status: GatewayStatus): GatewayJson {
 
 function renderGatewayHeader(status: GatewayStatus): string {
   if (!status.running) {
-    return "GATEWAY        STATE    PID    RSS     UPTIME\npodman-dev     stopped  -      -       -\n";
+    return `GATEWAY        STATE    PID    RSS       UPTIME\n${GATEWAY_NAME.padEnd(10)}     stopped  -      -         -\n`;
   }
   const pid = status.pid === null ? "-" : String(status.pid);
   const rss = status.rssKb === undefined ? "-" : formatBytes(status.rssKb);
   const uptime = status.uptimeMs === undefined ? "-" : formatDuration(status.uptimeMs);
   return [
     "GATEWAY        STATE    PID    RSS       UPTIME",
-    `podman-dev     running  ${pid.padEnd(6)} ${rss.padEnd(9)} ${uptime}`,
+    `${GATEWAY_NAME.padEnd(10)}     running  ${pid.padEnd(6)} ${rss.padEnd(9)} ${uptime}`,
     "",
   ].join("\n");
 }
@@ -95,3 +95,6 @@ export async function listCmd(args: string[]): Promise<number> {
   }
   return 0;
 }
+
+export const renderGatewayHeaderForTest = renderGatewayHeader;
+export const gatewayJsonForTest = gatewayJson;
