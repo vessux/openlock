@@ -11,7 +11,7 @@ const PID_FILE = join(STATE_DIR, "gateway.pid");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
 const HANDSHAKE_SECRET_FILE = join(STATE_DIR, "handshake-secret");
 const GATEWAY_PORT = 18081;
-const GATEWAY_NAME = "podman-dev";
+export const GATEWAY_NAME = "podman-dev";
 
 function readPid(): number | null {
   if (!existsSync(PID_FILE)) return null;
