@@ -39,15 +39,6 @@ import {
 export interface SandboxOpts {
   path: string;
   policy?: string;
-  keepGateway?: boolean;
-}
-
-export function shouldStopGateway(args: {
-  keepGateway?: boolean;
-  otherSandboxes: number;
-}): boolean {
-  if (args.keepGateway) return false;
-  return args.otherSandboxes === 0;
 }
 
 async function buildSandboxImage(caps: Cap[]): Promise<string> {
@@ -357,16 +348,12 @@ async function resolveOrCreateSession(
   return reattachSession(matches[0]!);
 }
 
-function handleGatewayShutdown(opts: SandboxOpts, otherCount: number): void {
-  if (shouldStopGateway({ keepGateway: opts.keepGateway, otherSandboxes: otherCount })) {
+function handleGatewayShutdown(otherCount: number): void {
+  if (otherCount === 0) {
     stopGateway();
     return;
   }
-  if (otherCount > 0) {
-    console.log(`Gateway kept running (${otherCount} other sandbox(es) active).`);
-  } else {
-    console.log("Gateway kept running (--keep-gateway).");
-  }
+  console.log(`Gateway kept running (${otherCount} other sandbox(es) active).`);
 }
 
 export async function runSandbox(opts: SandboxOpts): Promise<void> {
@@ -380,7 +367,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
     (n) => n !== containerName,
   );
-  handleGatewayShutdown(opts, stillRunning.length);
+  handleGatewayShutdown(stillRunning.length);
   await reportPostRunIdleHint();
   if (exitCode !== 0) process.exit(exitCode);
 }

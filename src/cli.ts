@@ -30,7 +30,6 @@ Other:
 
 Common flags:
   --policy PATH      Override .openlock/policy.yaml (sandbox)
-  --keep-gateway     Don't stop gateway when last sandbox exits (sandbox)
   --all / --stale    Batch operations (stop, clean)
   --copy DIR         Extract /sandbox/repo before teardown (clean)
   --json             Machine-readable output (list, status)
@@ -159,7 +158,6 @@ function sandboxCmd(args: string[]): void {
     runSandbox({
       path,
       policy: policyIdx !== -1 ? args[policyIdx + 1] : undefined,
-      keepGateway: args.includes("--keep-gateway"),
     }),
   );
 }
