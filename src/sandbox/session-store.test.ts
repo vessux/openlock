@@ -19,7 +19,7 @@ describe("session-store", () => {
     const meta: SessionMeta = {
       id: "existing-test-1",
       name: "test-session",
-      path: "/tmp/project",
+      repoPath: "/tmp/project",
       caps: ["js"],
       image: "openlock-core-js:abc123def456",
       policy: "policies/default-js.yaml",
@@ -55,7 +55,7 @@ describe("session-store v2", () => {
     return {
       id: "0190a2d5-7c6a-7b3e-8f4d-abcdef123456",
       name: "openlock-123456",
-      path: "/tmp/repo",
+      repoPath: "/tmp/repo",
       caps: [],
       image: "openlock-core:abc123",
       policy: "/abs/policy.yaml",
@@ -90,10 +90,30 @@ describe("session-store v2", () => {
     expect(listAllSessions(base)).toEqual([]);
   });
 
+  it("loadSession migrates legacy `path` field to `repoPath`", () => {
+    const id = "legacy-1";
+    mkdirSync(join(base, id));
+    const legacy = {
+      id,
+      name: "n-legacy",
+      path: "/repo/legacy",
+      caps: [],
+      image: "img",
+      policy: "/p",
+      createdAt: "2026-05-07T10:00:00Z",
+      lastAttachedAt: null,
+      attachedPid: null,
+    };
+    writeFileSync(join(base, id, "meta.json"), JSON.stringify(legacy));
+    const loaded = loadSession(base, id);
+    expect(loaded?.repoPath).toBe("/repo/legacy");
+    expect((loaded as unknown as { path?: string }).path).toBeUndefined();
+  });
+
   it("findSessionsByPath filters by canonical path", () => {
-    saveSession(base, fixture({ id: "a", path: "/repo/x" }));
-    saveSession(base, fixture({ id: "b", path: "/repo/y" }));
-    saveSession(base, fixture({ id: "c", path: "/repo/x" }));
+    saveSession(base, fixture({ id: "a", repoPath: "/repo/x" }));
+    saveSession(base, fixture({ id: "b", repoPath: "/repo/y" }));
+    saveSession(base, fixture({ id: "c", repoPath: "/repo/x" }));
     const ids = findSessionsByPath(base, "/repo/x")
       .map((m) => m.id)
       .sort();

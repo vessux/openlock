@@ -89,7 +89,7 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
   await removeContainer(containerName);
   await removeSecretsByPrefix("openshell-handshake-");
   await removeVolumesByMatch(SANDBOX_PREFIX, "-workspace");
-  await pruneSandboxRefs(opts.hostRepoForRefs ?? m.path, m.name);
+  await pruneSandboxRefs(opts.hostRepoForRefs ?? m.repoPath, m.name);
   removeSessionDir(sessionsDir(), m.id);
   console.log(`cleaned ${name}`);
 }

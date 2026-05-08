@@ -7,7 +7,7 @@ function meta(o: Partial<SessionWithState> = {}): SessionWithState {
   return {
     id: "id",
     name: "n",
-    path: "/r",
+    repoPath: "/r",
     caps: [],
     image: "i",
     policy: "p",

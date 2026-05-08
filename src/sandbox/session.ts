@@ -154,7 +154,7 @@ async function createSession(projectPath: string, opts: SandboxOpts): Promise<Ne
     const meta: SessionMeta = {
       id,
       name,
-      path: projectPath,
+      repoPath: projectPath,
       caps,
       image: imageTag,
       policy,

@@ -6,13 +6,27 @@ import type { Cap } from "./detect-caps";
 export interface SessionMeta {
   id: string;
   name: string;
-  path: string;
+  repoPath: string;
   caps: Cap[];
   image: string;
   policy: string;
   createdAt: string;
   lastAttachedAt: string | null;
   attachedPid: number | null;
+}
+
+interface LegacyMeta extends Omit<SessionMeta, "repoPath"> {
+  repoPath?: string;
+  path?: string;
+}
+
+function migrateMeta(raw: LegacyMeta): SessionMeta {
+  if (raw.repoPath === undefined && typeof raw.path === "string") {
+    const { path, ...rest } = raw;
+    return { ...rest, repoPath: path };
+  }
+  const { path: _legacy, ...rest } = raw;
+  return rest as SessionMeta;
 }
 
 export function sessionsDir(): string {
@@ -30,10 +44,10 @@ export function saveSession(baseDir: string, meta: SessionMeta): void {
 }
 
 export function loadSession(baseDir: string, id: string): SessionMeta | null {
-  const path = join(sessionDirById(baseDir, id), "meta.json");
-  if (!existsSync(path)) return null;
+  const metaPath = join(sessionDirById(baseDir, id), "meta.json");
+  if (!existsSync(metaPath)) return null;
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as SessionMeta;
+    return migrateMeta(JSON.parse(readFileSync(metaPath, "utf-8")) as LegacyMeta);
   } catch {
     return null;
   }
@@ -50,8 +64,8 @@ export function listAllSessions(baseDir: string): SessionMeta[] {
   return out;
 }
 
-export function findSessionsByPath(baseDir: string, path: string): SessionMeta[] {
-  return listAllSessions(baseDir).filter((m) => m.path === path);
+export function findSessionsByPath(baseDir: string, repoPath: string): SessionMeta[] {
+  return listAllSessions(baseDir).filter((m) => m.repoPath === repoPath);
 }
 
 export function removeSessionDir(baseDir: string, id: string): void {
