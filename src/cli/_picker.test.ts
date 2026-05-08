@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { SessionMeta } from "../sandbox/session-store";
-import { pickSession, type PickerIO } from "./_picker";
+import { type PickerIO, pickSession } from "./_picker";
 
 function meta(name: string, repoPath = `/tmp/${name}`): SessionMeta {
   return {
