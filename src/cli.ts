@@ -27,6 +27,7 @@ Other:
   gateway            Manage the gateway
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
+  complete <shell>   Print shell completion script (bash|zsh|fish)
 
 Common flags:
   --policy PATH      Override .openlock/policy.yaml (sandbox)
@@ -98,6 +99,11 @@ function main(): void {
       return;
     case "update-images":
       updateImagesCmd(args.slice(1));
+      return;
+    case "complete":
+      import("./cli/complete").then(({ completeCmd }) =>
+        completeCmd(args.slice(1)).then(processExit),
+      );
       return;
     case "__list-sessions":
       import("./sandbox/session-store").then(({ listAllSessions, sessionsDir }) => {
