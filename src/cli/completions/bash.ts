@@ -1,10 +1,9 @@
 export function completionScript(): string {
   return `# bash completion for openlock
 _openlock() {
-  local cur prev cmd
+  local cur cmd
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
-  prev="\${COMP_WORDS[COMP_CWORD-1]}"
   cmd="\${COMP_WORDS[1]}"
 
   local subcommands="sandbox list status stop clean reap shell exec cred-refresh validate-policy login gateway doctor update-images complete"
