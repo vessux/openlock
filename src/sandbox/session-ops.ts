@@ -1,23 +1,18 @@
-import { resolve } from "path";
-import { rmSync } from "fs";
+import { rmSync } from "node:fs";
+import { resolve } from "node:path";
+import { SANDBOX_PREFIX } from "./constants";
 import {
-  listAllSessions,
-  removeSessionDir,
-  sessionsDir,
-  type SessionMeta,
-} from "./session-store";
-import {
-  inspectContainerState,
-  stopContainer,
-  removeContainer,
   copyOutOfContainer,
+  inspectContainerState,
+  removeContainer,
   removeSecretsByPrefix,
   removeVolumesByMatch,
+  stopContainer,
 } from "./container";
 import { pruneSandboxRefs } from "./git-sync";
 import { pidAlive } from "./proc";
-import { classifySession, type SessionWithState, type Classification } from "./reap";
-import { SANDBOX_PREFIX } from "./constants";
+import { type Classification, classifySession, type SessionWithState } from "./reap";
+import { listAllSessions, removeSessionDir, type SessionMeta, sessionsDir } from "./session-store";
 
 export async function loadSessionByName(name: string): Promise<SessionMeta | null> {
   for (const m of listAllSessions(sessionsDir())) {
@@ -72,8 +67,14 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
     const dest = resolve(opts.copyDir);
     rmSync(dest, { recursive: true, force: true });
     const regen = Bun.spawn(
-      ["podman", "exec", containerName, "bash", "-c",
-        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all"],
+      [
+        "podman",
+        "exec",
+        containerName,
+        "bash",
+        "-c",
+        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all",
+      ],
       { stdout: "ignore", stderr: "ignore" },
     );
     await regen.exited;

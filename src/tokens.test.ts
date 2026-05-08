@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { readToken, writeToken, credentialsPath } from "./tokens";
-import { mkdirSync, rmSync, existsSync } from "fs";
-import { join } from "path";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { credentialsPath, readToken, writeToken } from "./tokens";
 
 const testDir = join(import.meta.dir, "../.test-config-openlock");
 

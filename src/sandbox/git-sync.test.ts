@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { createBundle, ensureGitRepo, fetchBundle, pruneSandboxRefs } from "./git-sync";
-import { mkdirSync, rmSync, existsSync } from "fs";
-import { join } from "path";
 
 const testDir = join(import.meta.dir, "../../.test-git-sync");
 
@@ -74,10 +74,11 @@ describe("git-sync", () => {
 
       await fetchBundle(hostDir, bundle, "openlock-abc123");
 
-      const p = Bun.spawn(
-        ["git", "for-each-ref", "--format=%(refname)"],
-        { cwd: hostDir, stdout: "pipe", stderr: "pipe" },
-      );
+      const p = Bun.spawn(["git", "for-each-ref", "--format=%(refname)"], {
+        cwd: hostDir,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const refs = await new Response(p.stdout).text();
       await p.exited;
       expect(refs).toContain("refs/sandbox/openlock-abc123/feature");
@@ -92,10 +93,11 @@ describe("git-sync", () => {
 
       await pruneSandboxRefs(hostDir, "sess-a");
 
-      const p = Bun.spawn(
-        ["git", "for-each-ref", "--format=%(refname)"],
-        { cwd: hostDir, stdout: "pipe", stderr: "pipe" },
-      );
+      const p = Bun.spawn(["git", "for-each-ref", "--format=%(refname)"], {
+        cwd: hostDir,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const refs = await new Response(p.stdout).text();
       await p.exited;
       expect(refs).not.toContain("refs/sandbox/sess-a/main");

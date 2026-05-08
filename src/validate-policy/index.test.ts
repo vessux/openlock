@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { validatePolicyYaml, validatePolicyFile, formatErrors } from "./index";
-import { writeFileSync, mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { formatErrors, validatePolicyFile, validatePolicyYaml } from "./index";
 
 const tmpDir = join(import.meta.dir, "../../.test-tmp");
 
@@ -79,10 +79,7 @@ describe("validatePolicyFile", () => {
 
 describe("formatErrors", () => {
   test("formats with file path", () => {
-    const output = formatErrors(
-      [{ path: "version", message: "missing" }],
-      "test.yaml",
-    );
+    const output = formatErrors([{ path: "version", message: "missing" }], "test.yaml");
     expect(output).toContain("test.yaml");
     expect(output).toContain("version");
     expect(output).toContain("missing");

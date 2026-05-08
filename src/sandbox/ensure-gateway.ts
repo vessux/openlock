@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
-import { randomBytes } from "crypto";
-import { join } from "path";
-import { homedir } from "os";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { ensureSupervisorImage } from "./build-supervisor-image";
 import { getGatewayBinary } from "./fork-binaries";
 import { pidAlive } from "./proc";
@@ -16,7 +16,7 @@ const GATEWAY_NAME = "podman-dev";
 function readPid(): number | null {
   if (!existsSync(PID_FILE)) return null;
   const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-  return isNaN(pid) ? null : pid;
+  return Number.isNaN(pid) ? null : pid;
 }
 
 export function gatewayStatus(): { running: boolean; pid: number | null } {
@@ -26,7 +26,6 @@ export function gatewayStatus(): { running: boolean; pid: number | null } {
   unlinkSync(PID_FILE);
   return { running: false, pid: null };
 }
-
 
 function registerGatewayMetadata(): void {
   const configHome = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
@@ -64,10 +63,10 @@ async function resolvePodmanSocket(): Promise<string> {
   // `podman machine inspect`. On Linux podman runs directly on the host, so
   // `podman info` returns the real socket path.
   if (process.platform === "linux") {
-    const proc = Bun.spawn(
-      ["podman", "info", "--format", "{{.Host.RemoteSocket.Path}}"],
-      { stdout: "pipe", stderr: "pipe" },
-    );
+    const proc = Bun.spawn(["podman", "info", "--format", "{{.Host.RemoteSocket.Path}}"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const out = await new Response(proc.stdout).text();
     const code = await proc.exited;
     if (code !== 0) {
@@ -106,28 +105,38 @@ export async function startGateway(): Promise<void> {
   const dbPath = join(STATE_DIR, "gateway.db");
   const args = [
     gatewayBin,
-    "--drivers", "podman",
+    "--drivers",
+    "podman",
     "--disable-tls",
-    "--port", String(GATEWAY_PORT),
-    "--db-url", `sqlite:${dbPath}?mode=rwc`,
-    "--sandbox-namespace", "podman-dev",
-    "--sandbox-image", "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
-    "--grpc-endpoint", `http://host.containers.internal:${GATEWAY_PORT}`,
-    "--ssh-handshake-secret", handshakeSecret,
+    "--port",
+    String(GATEWAY_PORT),
+    "--db-url",
+    `sqlite:${dbPath}?mode=rwc`,
+    "--sandbox-namespace",
+    "podman-dev",
+    "--sandbox-image",
+    "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
+    "--grpc-endpoint",
+    `http://host.containers.internal:${GATEWAY_PORT}`,
+    "--ssh-handshake-secret",
+    handshakeSecret,
   ];
 
   const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...(process.env as Record<string, string>),
     OPENSHELL_PODMAN_SOCKET: podmanSocket,
     OPENSHELL_SUPERVISOR_IMAGE: supervisorImage,
   };
 
-  const proc = Bun.spawn(["bash", "-c", `exec ${args.map(a => `'${a}'`).join(" ")} >> "${LOG_FILE}" 2>&1`], {
-    cwd: STATE_DIR,
-    stdout: "ignore",
-    stderr: "ignore",
-    env,
-  });
+  const proc = Bun.spawn(
+    ["bash", "-c", `exec ${args.map((a) => `'${a}'`).join(" ")} >> "${LOG_FILE}" 2>&1`],
+    {
+      cwd: STATE_DIR,
+      stdout: "ignore",
+      stderr: "ignore",
+      env,
+    },
+  );
 
   writeFileSync(PID_FILE, String(proc.pid));
   console.log(`Gateway starting (pid ${proc.pid}), log: ${LOG_FILE}`);

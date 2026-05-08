@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 export type EnsureRepoAction = "existed" | "created" | "inited" | "ensured-commit";
 

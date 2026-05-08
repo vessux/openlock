@@ -1,5 +1,3 @@
-import type { PolicyFile } from "./types";
-
 const QUERY_MATCHER_KEYS = new Set(["any"]);
 
 const L7_ALLOW_KEYS = new Set(["method", "path", "command", "query"]);
@@ -29,12 +27,7 @@ const ENDPOINT_KEYS = new Set([
 
 const BINARY_KEYS = new Set(["path", "harness"]);
 
-const NETWORK_POLICY_KEYS = new Set([
-  "name",
-  "endpoints",
-  "binaries",
-  "allowed_secrets",
-]);
+const NETWORK_POLICY_KEYS = new Set(["name", "endpoints", "binaries", "allowed_secrets"]);
 
 const FILESYSTEM_KEYS = new Set(["include_workdir", "read_only", "read_write"]);
 const LANDLOCK_KEYS = new Set(["compatibility"]);
@@ -66,11 +59,7 @@ function unknownKeys(
   return errors;
 }
 
-function checkType(
-  val: unknown,
-  expected: string,
-  path: string,
-): ValidationError | null {
+function checkType(val: unknown, expected: string, path: string): ValidationError | null {
   if (expected === "array") {
     return Array.isArray(val) ? null : { path, message: `expected array, got ${typeof val}` };
   }
@@ -79,7 +68,9 @@ function checkType(
       ? null
       : { path, message: `expected object, got ${Array.isArray(val) ? "array" : typeof val}` };
   }
-  return typeof val === expected ? null : { path, message: `expected ${expected}, got ${typeof val}` };
+  return typeof val === expected
+    ? null
+    : { path, message: `expected ${expected}, got ${typeof val}` };
 }
 
 function validateQueryMatcher(val: unknown, path: string): ValidationError[] {
@@ -471,12 +462,8 @@ export function validateSchema(doc: unknown): ValidationError[] {
     const t2 = checkType(obj.network_policies, "object", "network_policies");
     if (t2) errors.push(t2);
     else {
-      for (const [key, val] of Object.entries(
-        obj.network_policies as Record<string, unknown>,
-      )) {
-        errors.push(
-          ...validateNetworkPolicy(val, `network_policies.${key}`),
-        );
+      for (const [key, val] of Object.entries(obj.network_policies as Record<string, unknown>)) {
+        errors.push(...validateNetworkPolicy(val, `network_policies.${key}`));
       }
     }
   }

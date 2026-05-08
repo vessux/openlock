@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { saveSession, loadSession, type SessionMeta } from "./session-store";
-import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadSession, type SessionMeta, saveSession } from "./session-store";
 
 const testDir = join(import.meta.dir, "../../.test-sessions");
 
@@ -38,10 +38,10 @@ describe("session-store", () => {
 });
 
 import {
-  listAllSessions,
   findSessionsByPath,
-  sessionDirById,
+  listAllSessions,
   removeSessionDir,
+  sessionDirById,
   updateSessionMeta,
 } from "./session-store";
 
@@ -73,7 +73,9 @@ describe("session-store v2", () => {
   it("listAllSessions returns metas keyed by id-dir", () => {
     saveSession(base, fixture({ id: "a", name: "n-a" }));
     saveSession(base, fixture({ id: "b", name: "n-b" }));
-    const all = listAllSessions(base).map((m) => m.id).sort();
+    const all = listAllSessions(base)
+      .map((m) => m.id)
+      .sort();
     expect(all).toEqual(["a", "b"]);
   });
 
@@ -92,7 +94,9 @@ describe("session-store v2", () => {
     saveSession(base, fixture({ id: "a", path: "/repo/x" }));
     saveSession(base, fixture({ id: "b", path: "/repo/y" }));
     saveSession(base, fixture({ id: "c", path: "/repo/x" }));
-    const ids = findSessionsByPath(base, "/repo/x").map((m) => m.id).sort();
+    const ids = findSessionsByPath(base, "/repo/x")
+      .map((m) => m.id)
+      .sort();
     expect(ids).toEqual(["a", "c"]);
   });
 

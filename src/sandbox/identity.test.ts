@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test";
-import { newSessionId, friendlyNameFromId } from "./identity";
+import { describe, expect, it } from "bun:test";
+import { friendlyNameFromId, newSessionId } from "./identity";
 
 describe("identity", () => {
   it("newSessionId returns a UUIDv7-shaped string", () => {

@@ -1,8 +1,8 @@
-import { existsSync } from "fs";
-import { join } from "path";
-import { readToken } from "./tokens";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { forkDir } from "./paths";
 import { isDevMode } from "./sandbox/fork-binaries";
+import { readToken } from "./tokens";
 
 interface Check {
   name: string;
@@ -37,23 +37,15 @@ export async function podmanSocketActive(): Promise<boolean> {
   // connection and ping the API — which is what the gateway does.
   // Bound the curl call with --max-time so a stale socket can't hang us.
   try {
-    const proc = Bun.spawn(
-      ["podman", "info", "--format", "{{.Host.RemoteSocket.Path}}"],
-      { stdout: "pipe", stderr: "ignore" },
-    );
+    const proc = Bun.spawn(["podman", "info", "--format", "{{.Host.RemoteSocket.Path}}"], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
     const out = await new Response(proc.stdout).text();
     if ((await proc.exited) !== 0) return false;
     const socketPath = out.trim().replace(/^unix:\/\//, "");
     const ping = Bun.spawn(
-      [
-        "curl",
-        "-fsS",
-        "--max-time",
-        "2",
-        "--unix-socket",
-        socketPath,
-        "http://d/_ping",
-      ],
+      ["curl", "-fsS", "--max-time", "2", "--unix-socket", socketPath, "http://d/_ping"],
       { stdout: "ignore", stderr: "ignore" },
     );
     return (await ping.exited) === 0;

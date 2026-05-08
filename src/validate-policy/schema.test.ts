@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { validateSchema } from "./schema";
 
 describe("validateSchema", () => {
@@ -256,7 +256,9 @@ describe("validateSchema", () => {
       version: 1,
       network_policies: {
         test: {
-          endpoints: [{ host: "pypi.org", port: 443, trust_check: { registry: "pypi", extra: true } }],
+          endpoints: [
+            { host: "pypi.org", port: 443, trust_check: { registry: "pypi", extra: true } },
+          ],
         },
       },
     });

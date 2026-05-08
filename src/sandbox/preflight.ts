@@ -69,8 +69,7 @@ export async function preflight(opts: PreflightOpts): Promise<PreflightResult> {
     if (!active) {
       return {
         ok: false,
-        reason:
-          "podman API socket inactive. Run: systemctl --user enable --now podman.socket",
+        reason: "podman API socket inactive. Run: systemctl --user enable --now podman.socket",
       };
     }
   }

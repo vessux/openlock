@@ -1,5 +1,5 @@
-import type { SessionMeta } from "./session-store";
 import type { ContainerState } from "./container";
+import type { SessionMeta } from "./session-store";
 
 export const REAP_IDLE_MS_DEFAULT = 30 * 60 * 1000;
 
@@ -9,12 +9,7 @@ export function reapIdleMs(): number {
   return REAP_IDLE_MS_DEFAULT;
 }
 
-export type Classification =
-  | "attached"
-  | "idle-recent"
-  | "idle-stale"
-  | "exited"
-  | "missing";
+export type Classification = "attached" | "idle-recent" | "idle-stale" | "exited" | "missing";
 
 export interface SessionWithState extends SessionMeta {
   containerState: ContainerState;

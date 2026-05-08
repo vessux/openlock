@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test";
-import { shouldDropOpenshellStderrLine, filterOpenshellStderr } from "./openshell-stderr";
+import { describe, expect, it } from "bun:test";
+import { filterOpenshellStderr, shouldDropOpenshellStderrLine } from "./openshell-stderr";
 
 describe("shouldDropOpenshellStderrLine", () => {
   it("drops the literal ssh-255 line", () => {
@@ -19,18 +19,18 @@ describe("shouldDropOpenshellStderrLine", () => {
   it("keeps other ssh exit codes so real failures still surface", () => {
     expect(shouldDropOpenshellStderrLine("ssh exited with status 1")).toBe(false);
     expect(shouldDropOpenshellStderrLine("ssh exited with status 130")).toBe(false);
-    expect(
-      shouldDropOpenshellStderrLine("Error:   × ssh exited with status exit status: 1"),
-    ).toBe(false);
+    expect(shouldDropOpenshellStderrLine("Error:   × ssh exited with status exit status: 1")).toBe(
+      false,
+    );
   });
 
   it("drops OpenSSH client connection-closed message", () => {
     expect(shouldDropOpenshellStderrLine("Connection to sandbox closed by remote host.")).toBe(
       true,
     );
-    expect(
-      shouldDropOpenshellStderrLine("Connection to 127.0.0.1 closed by remote host."),
-    ).toBe(true);
+    expect(shouldDropOpenshellStderrLine("Connection to 127.0.0.1 closed by remote host.")).toBe(
+      true,
+    );
   });
 
   it("drops OpenSSH client_loop disconnect", () => {

@@ -1,6 +1,6 @@
+import { SANDBOX_PREFIX } from "../sandbox/constants";
 import { stopContainer } from "../sandbox/container";
 import { classifyAll } from "../sandbox/session-ops";
-import { SANDBOX_PREFIX } from "../sandbox/constants";
 
 export async function reapCmd(_args: string[]): Promise<number> {
   const rows = await classifyAll();
@@ -13,8 +13,8 @@ export async function reapCmd(_args: string[]): Promise<number> {
   await Promise.all(
     targets.map((r) =>
       stopContainer(`${SANDBOX_PREFIX}${r.meta.name}`).catch((e) =>
-        console.error(`stop ${r.meta.name}: ${(e as Error).message}`)
-      )
+        console.error(`stop ${r.meta.name}: ${(e as Error).message}`),
+      ),
     ),
   );
   console.log(`reaped ${targets.length} idle session(s) (${Date.now() - start}ms)`);

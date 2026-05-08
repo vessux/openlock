@@ -1,7 +1,7 @@
-import { createHash } from "crypto";
-import { createSource, type CredentialSource } from "./sources";
-import { resolveOpenshellBin, runProviderUpdate, type OpenshellCmd } from "./openshell";
-import type { RefreshConfig, ProviderConfig } from "./config";
+import { createHash } from "node:crypto";
+import type { ProviderConfig, RefreshConfig } from "./config";
+import { type OpenshellCmd, resolveOpenshellBin, runProviderUpdate } from "./openshell";
+import { type CredentialSource, createSource } from "./sources";
 
 export function hashCredentials(creds: Record<string, string>): string {
   const keys = Object.keys(creds).sort();
@@ -78,7 +78,9 @@ async function refreshProvider(cmd: OpenshellCmd, provider: ProviderState): Prom
   }
 
   const credKeys = Object.keys(resolved).join(", ");
-  console.log(`[cred-refresh] provider '${provider.name}': credentials changed (${credKeys}), pushing update`);
+  console.log(
+    `[cred-refresh] provider '${provider.name}': credentials changed (${credKeys}), pushing update`,
+  );
 
   const result = await runProviderUpdate(cmd, provider.name, resolved);
   if (result.ok) {

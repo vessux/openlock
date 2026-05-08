@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test";
-import { DEFAULT_POLICIES, policyKeyForCaps, defaultPolicyContent } from "./default-policies";
+import { describe, expect, it } from "bun:test";
+import { DEFAULT_POLICIES, defaultPolicyContent, policyKeyForCaps } from "./default-policies";
 
 describe("DEFAULT_POLICIES", () => {
   it("contains all 4 cap permutations", () => {

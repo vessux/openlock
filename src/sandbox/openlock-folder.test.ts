@@ -1,16 +1,24 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync as fsReadFileSync, statSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
-  readConfig,
-  writeConfig,
-  copyDefaultPolicy,
-  resolveOpenlockFolder,
-  policyPath,
-  configPath,
-} from "./openlock-folder";
+  existsSync,
+  readFileSync as fsReadFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { defaultPolicyContent } from "./default-policies";
+import {
+  configPath,
+  copyDefaultPolicy,
+  policyPath,
+  readConfig,
+  resolveOpenlockFolder,
+  writeConfig,
+} from "./openlock-folder";
 
 let workDir: string;
 

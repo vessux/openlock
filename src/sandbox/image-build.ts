@@ -1,7 +1,7 @@
-import { createHash } from "crypto";
-import { join } from "path";
-import { homedir } from "os";
-import { mkdirSync, writeFileSync } from "fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export interface ImageRef {
   tag: string;

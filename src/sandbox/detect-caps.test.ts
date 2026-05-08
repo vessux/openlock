@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { detectCaps, type Cap } from "./detect-caps";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { detectCaps } from "./detect-caps";
 
 const testDir = join(import.meta.dir, "../../.test-detect-caps");
 

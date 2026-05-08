@@ -1,8 +1,8 @@
-import { existsSync } from "fs";
-import { join } from "path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 export const ALL_CAPS = ["js", "py"] as const;
-export type Cap = typeof ALL_CAPS[number];
+export type Cap = (typeof ALL_CAPS)[number];
 
 const JS_MARKERS = ["package.json"];
 const PY_MARKERS = ["pyproject.toml", "requirements.txt", "poetry.lock"];

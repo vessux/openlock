@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { classifySession, REAP_IDLE_MS_DEFAULT, type SessionWithState } from "./reap";
 
 const NOW = new Date("2026-05-07T12:00:00Z").getTime();
@@ -23,7 +23,7 @@ function meta(o: Partial<SessionWithState> = {}): SessionWithState {
 describe("classifySession", () => {
   it("running + alive pid → 'attached'", () => {
     expect(
-      classifySession(meta({ containerState: "running", attachedPid: 1, pidAlive: true }), NOW)
+      classifySession(meta({ containerState: "running", attachedPid: 1, pidAlive: true }), NOW),
     ).toBe("attached");
   });
 

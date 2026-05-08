@@ -1,5 +1,9 @@
-import { DEFAULT_CONTAINERFILES, type ContainerfileKey } from "./default-containerfiles";
-import { ensureImage as defaultEnsureImage, type ImageRef, type EnsureImageArgs } from "./image-build";
+import { type ContainerfileKey, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
+import {
+  ensureImage as defaultEnsureImage,
+  type EnsureImageArgs,
+  type ImageRef,
+} from "./image-build";
 
 export interface UpdateImagesOpts {
   noCache: boolean;

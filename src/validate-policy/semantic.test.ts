@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { validateSemantics } from "./semantic";
 import type { PolicyFile } from "./types";
 
@@ -52,24 +52,18 @@ describe("validateSemantics", () => {
   });
 
   test("rejects root as read-write", () => {
-    const errors = validateSemantics(
-      minimal({ filesystem_policy: { read_write: ["/"] } }),
-    );
+    const errors = validateSemantics(minimal({ filesystem_policy: { read_write: ["/"] } }));
     expect(errors.some((e) => e.message.includes("overly broad"))).toBe(true);
   });
 
   test("rejects root variants (trailing slashes)", () => {
-    const errors = validateSemantics(
-      minimal({ filesystem_policy: { read_write: ["///"] } }),
-    );
+    const errors = validateSemantics(minimal({ filesystem_policy: { read_write: ["///"] } }));
     expect(errors.some((e) => e.message.includes("overly broad"))).toBe(true);
   });
 
   test("rejects too many filesystem paths", () => {
     const paths = Array.from({ length: 257 }, (_, i) => `/path${i}`);
-    const errors = validateSemantics(
-      minimal({ filesystem_policy: { read_only: paths } }),
-    );
+    const errors = validateSemantics(minimal({ filesystem_policy: { read_only: paths } }));
     expect(errors.some((e) => e.message.includes("too many"))).toBe(true);
   });
 
@@ -173,9 +167,7 @@ describe("validateSemantics", () => {
       minimal({
         network_policies: {
           test: {
-            endpoints: [
-              { host: "example.com", port: 443, trust_check: { registry: "maven" } },
-            ],
+            endpoints: [{ host: "example.com", port: 443, trust_check: { registry: "maven" } }],
           },
         },
       }),
@@ -188,9 +180,7 @@ describe("validateSemantics", () => {
       minimal({
         network_policies: {
           pip: {
-            endpoints: [
-              { host: "pypi.org", port: 443, trust_check: { registry: "pypi" } },
-            ],
+            endpoints: [{ host: "pypi.org", port: 443, trust_check: { registry: "pypi" } }],
           },
           npm: {
             endpoints: [

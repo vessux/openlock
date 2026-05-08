@@ -1,9 +1,10 @@
-import { readFileSync } from "fs";
+import { readFileSync } from "node:fs";
 import * as yaml from "js-yaml";
-import { validateSchema, type ValidationError } from "./schema";
+import { type ValidationError, validateSchema } from "./schema";
 import { validateSemantics } from "./semantic";
+import type { PolicyFile } from "./types";
 
-export { type ValidationError } from "./schema";
+export type { ValidationError } from "./schema";
 
 export function validatePolicyYaml(content: string): ValidationError[] {
   let doc: unknown;
@@ -20,7 +21,8 @@ export function validatePolicyYaml(content: string): ValidationError[] {
   const schemaErrors = validateSchema(doc);
   if (schemaErrors.length > 0) return schemaErrors;
 
-  return validateSemantics(doc as any);
+  // doc has been validated by validateSchema above, so it conforms to PolicyFile.
+  return validateSemantics(doc as PolicyFile);
 }
 
 export function validatePolicyFile(path: string): ValidationError[] {

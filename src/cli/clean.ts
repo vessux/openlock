@@ -1,4 +1,4 @@
-import { cleanSession, classifyAll } from "../sandbox/session-ops";
+import { classifyAll, cleanSession } from "../sandbox/session-ops";
 import { resolveSessionName } from "./_resolve";
 
 function copyDirArg(args: string[]): string | undefined {
@@ -13,8 +13,7 @@ export async function cleanCmd(args: string[]): Promise<number> {
     const stale = args.includes("--stale");
     const rows = await classifyAll();
     const targets = rows.filter((r) =>
-      stale ? (r.classification === "exited" || r.classification === "missing")
-            : true
+      stale ? r.classification === "exited" || r.classification === "missing" : true,
     );
     for (const r of targets) {
       try {

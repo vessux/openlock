@@ -23,8 +23,14 @@ jobs:
 
       - run: bun install
 
+      - name: Lint (biome)
+        run: bun run lint
+
       - name: Typecheck
-        run: bun run tsc --noEmit
+        run: bun run typecheck
 
       - name: Tests
         run: bun test
+
+      - name: Dead code (knip, advisory)
+        run: bun run knip || echo "::warning::knip reported unused exports/dependencies (advisory, not blocking)"

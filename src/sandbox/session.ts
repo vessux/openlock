@@ -1,40 +1,40 @@
-import { resolve, join, basename } from "path";
-import { mkdtempSync, mkdirSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import { detectCaps, type Cap } from "./detect-caps";
-import { ensureRepoIsGit } from "./ensure-repo";
-import { preflight, type PreflightDeps } from "./preflight";
-import { runDoctorChecks, podmanMachineRunning, podmanSocketActive } from "../doctor";
-import { readToken } from "../tokens";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { podmanMachineRunning, podmanSocketActive, runDoctorChecks } from "../doctor";
 import { login } from "../login";
-import { resolveOpenlockFolder } from "./openlock-folder";
-import { createBundle, fetchBundle } from "./git-sync";
+import { readToken } from "../tokens";
+import { SANDBOX_PREFIX } from "./constants";
+import {
+  copyOutOfContainer,
+  execClaude,
+  inspectContainerState,
+  listSandboxContainers,
+  openshellSandboxCreateAsync,
+  startContainer,
+  waitForContainerRunning,
+} from "./container";
+import { containerfileKeyForCaps, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
+import { type Cap, detectCaps } from "./detect-caps";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
+import { ensureRepoIsGit } from "./ensure-repo";
 import { prepareGitIdentity } from "./git-identity";
-import {
-  saveSession,
-  sessionsDir,
-  findSessionsByPath,
-  listAllSessions,
-  updateSessionMeta,
-  type SessionMeta,
-} from "./session-store";
+import { createBundle, fetchBundle } from "./git-sync";
+import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureImage } from "./image-build";
-import { DEFAULT_CONTAINERFILES, containerfileKeyForCaps } from "./default-containerfiles";
-import { newSessionId, friendlyNameFromId } from "./identity";
-import {
-  openshellSandboxCreateAsync,
-  waitForContainerRunning,
-  inspectContainerState,
-  startContainer,
-  execClaude,
-  copyOutOfContainer,
-  listSandboxContainers,
-} from "./container";
+import { resolveOpenlockFolder } from "./openlock-folder";
+import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
 import { classifySession, type SessionWithState } from "./reap";
-import { SANDBOX_PREFIX } from "./constants";
+import {
+  findSessionsByPath,
+  listAllSessions,
+  type SessionMeta,
+  saveSession,
+  sessionsDir,
+  updateSessionMeta,
+} from "./session-store";
 
 export interface SandboxOpts {
   path: string;
@@ -42,7 +42,10 @@ export interface SandboxOpts {
   keepGateway?: boolean;
 }
 
-export function shouldStopGateway(args: { keepGateway?: boolean; otherSandboxes: number }): boolean {
+export function shouldStopGateway(args: {
+  keepGateway?: boolean;
+  otherSandboxes: number;
+}): boolean {
   if (args.keepGateway) return false;
   return args.otherSandboxes === 0;
 }
@@ -167,7 +170,11 @@ async function createSession(projectPath: string, opts: SandboxOpts): Promise<Ne
   }
 }
 
-async function syncBackToHost(projectPath: string, containerName: string, sessionName: string): Promise<void> {
+async function syncBackToHost(
+  projectPath: string,
+  containerName: string,
+  sessionName: string,
+): Promise<void> {
   const tmp = mkdtempSync(join(tmpdir(), "openlock-syncback-"));
   try {
     const outBundle = join(tmp, "out.bundle");
@@ -178,8 +185,14 @@ async function syncBackToHost(projectPath: string, containerName: string, sessio
       return;
     }
     const regen = Bun.spawn(
-      ["podman", "exec", containerName, "bash", "-c",
-        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all"],
+      [
+        "podman",
+        "exec",
+        containerName,
+        "bash",
+        "-c",
+        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all",
+      ],
       { stdout: "ignore", stderr: "ignore" },
     );
     const regenCode = await regen.exited;
@@ -252,7 +265,10 @@ function realPreflightDeps(): PreflightDeps {
       const reader = Bun.stdin.stream().getReader();
       const { value } = await reader.read();
       reader.releaseLock();
-      const answer = new TextDecoder().decode(value ?? new Uint8Array()).trim().toLowerCase();
+      const answer = new TextDecoder()
+        .decode(value ?? new Uint8Array())
+        .trim()
+        .toLowerCase();
       return answer === "" || answer === "y" || answer === "yes";
     },
     startPodmanMachine: async () => {
@@ -316,7 +332,9 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     containerName = `${SANDBOX_PREFIX}${m.name}`;
     const state = await inspectContainerState(containerName);
     if (state === "missing") {
-      console.error(`Session ${m.name} has no container; run \`openlock clean ${m.name}\` to reclaim.`);
+      console.error(
+        `Session ${m.name} has no container; run \`openlock clean ${m.name}\` to reclaim.`,
+      );
       process.exit(1);
     }
     if (pidAlive(m.attachedPid) && m.attachedPid !== process.pid) {
@@ -339,8 +357,9 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
 
   const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath);
 
-  const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX))
-    .filter((n) => n !== containerName);
+  const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
+    (n) => n !== containerName,
+  );
   if (shouldStopGateway({ keepGateway: opts.keepGateway, otherSandboxes: stillRunning.length })) {
     stopGateway();
   } else if (stillRunning.length > 0) {
