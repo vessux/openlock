@@ -63,7 +63,7 @@ jobs:
           cd out
           tar -czf "${GITHUB_WORKSPACE}/artifacts/${{ matrix.artifact }}.tar.gz" openlock
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: artifacts/*.tar.gz
