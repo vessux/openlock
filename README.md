@@ -62,7 +62,7 @@ with a policy + capability file you can review and commit.
 openlock sandbox /path/to/your/repo
 
 # keep the gateway running across cleanups
-openlock sandbox /path/to/your/repo --keep-gateway
+openlock gateway start
 
 # rebuild sandbox images
 openlock update-images

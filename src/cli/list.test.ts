@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { renderGatewayHeaderForTest, gatewayJsonForTest } from "./list";
+import { gatewayJsonForTest, renderGatewayHeaderForTest } from "./list";
 
 describe("renderGatewayHeader", () => {
   it("renders stopped gateway with consistent column positions", () => {
