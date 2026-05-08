@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureSupervisorImage } from "./build-supervisor-image";
@@ -19,12 +19,42 @@ function readPid(): number | null {
   return Number.isNaN(pid) ? null : pid;
 }
 
-export function gatewayStatus(): { running: boolean; pid: number | null } {
+export interface GatewayStatus {
+  running: boolean;
+  pid: number | null;
+  rssKb?: number;
+  uptimeMs?: number;
+}
+
+export function readGatewayRssKb(pid: number): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const proc = Bun.spawnSync(["ps", "-o", "rss=", "-p", String(pid)], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (proc.exitCode !== 0) return null;
+  const out = new TextDecoder().decode(proc.stdout).trim();
+  if (out.length === 0) return null;
+  const kb = parseInt(out, 10);
+  return Number.isNaN(kb) ? null : kb;
+}
+
+export function gatewayStatus(): GatewayStatus {
   const pid = readPid();
   if (pid === null) return { running: false, pid: null };
-  if (pidAlive(pid)) return { running: true, pid };
-  unlinkSync(PID_FILE);
-  return { running: false, pid: null };
+  if (!pidAlive(pid)) {
+    unlinkSync(PID_FILE);
+    return { running: false, pid: null };
+  }
+  const rssKb = readGatewayRssKb(pid) ?? undefined;
+  let uptimeMs: number | undefined;
+  try {
+    const stat = statSync(PID_FILE);
+    uptimeMs = Date.now() - stat.mtimeMs;
+  } catch {
+    uptimeMs = undefined;
+  }
+  return { running: true, pid, rssKb, uptimeMs };
 }
 
 function registerGatewayMetadata(): void {
