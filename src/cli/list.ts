@@ -1,12 +1,49 @@
+import { type GatewayStatus, gatewayStatus } from "../sandbox/ensure-gateway";
+import { formatBytes, formatDuration } from "../sandbox/format";
 import { classifyAll } from "../sandbox/session-ops";
+
+interface GatewayJson {
+  name: string;
+  state: "running" | "stopped";
+  pid: number | null;
+  rssKb: number | null;
+  uptimeMs: number | null;
+}
+
+function gatewayJson(status: GatewayStatus): GatewayJson {
+  return {
+    name: "podman-dev",
+    state: status.running ? "running" : "stopped",
+    pid: status.pid,
+    rssKb: status.rssKb ?? null,
+    uptimeMs: status.uptimeMs ?? null,
+  };
+}
+
+function renderGatewayHeader(status: GatewayStatus): string {
+  if (!status.running) {
+    return "GATEWAY        STATE    PID    RSS     UPTIME\npodman-dev     stopped  -      -       -\n";
+  }
+  const pid = status.pid === null ? "-" : String(status.pid);
+  const rss = status.rssKb === undefined ? "-" : formatBytes(status.rssKb);
+  const uptime = status.uptimeMs === undefined ? "-" : formatDuration(status.uptimeMs);
+  return [
+    "GATEWAY        STATE    PID    RSS       UPTIME",
+    `podman-dev     running  ${pid.padEnd(6)} ${rss.padEnd(9)} ${uptime}`,
+    "",
+  ].join("\n");
+}
 
 export async function listCmd(args: string[]): Promise<number> {
   const json = args.includes("--json");
+  const gw = gatewayStatus();
   const rows = await classifyAll();
+
   if (json) {
     process.stdout.write(
       `${JSON.stringify(
         {
+          gateway: gatewayJson(gw),
           sessions: rows.map((r) => ({
             name: r.meta.name,
             repoPath: r.meta.repoPath,
@@ -22,11 +59,15 @@ export async function listCmd(args: string[]): Promise<number> {
     );
     return 0;
   }
+
+  process.stdout.write(renderGatewayHeader(gw));
+
   if (rows.length === 0) {
-    console.log("no sessions");
+    process.stdout.write("no sessions\n");
     return 0;
   }
-  const headers = ["NAME", "PATH", "CREATED", "STATE", "FLAG"];
+
+  const headers = ["SESSION", "PATH", "CREATED", "STATE", "FLAG"];
   const data = rows
     .sort((a, b) => a.meta.createdAt.localeCompare(b.meta.createdAt))
     .map((r) => [
@@ -45,5 +86,12 @@ export async function listCmd(args: string[]): Promise<number> {
   const widths = headers.map((h, i) => Math.max(h.length, ...data.map((row) => row[i]!.length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
   process.stdout.write(`${[fmt(headers), ...data.map(fmt)].join("\n")}\n`);
+
+  const reapable = rows.filter((r) => r.classification === "idle-stale").length;
+  if (reapable > 0) {
+    process.stdout.write(
+      `\n${rows.length} sessions, ${reapable} reapable. Run \`openlock reap\`.\n`,
+    );
+  }
   return 0;
 }
