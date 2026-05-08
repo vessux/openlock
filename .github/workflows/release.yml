@@ -92,7 +92,7 @@ jobs:
           sha256sum *.tar.gz > checksums-sha256.txt
           cat checksums-sha256.txt
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_TAG }}
