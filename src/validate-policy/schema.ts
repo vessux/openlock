@@ -45,6 +45,12 @@ export interface ValidationError {
   message: string;
 }
 
+type Validator = (val: unknown, path: string) => ValidationError[];
+
+function joinPath(parent: string, key: string): string {
+  return parent === "" ? key : `${parent}.${key}`;
+}
+
 function unknownKeys(
   obj: Record<string, unknown>,
   allowed: Set<string>,
@@ -53,7 +59,7 @@ function unknownKeys(
   const errors: ValidationError[] = [];
   for (const key of Object.keys(obj)) {
     if (!allowed.has(key)) {
-      errors.push({ path: `${path}.${key}`, message: `unknown field "${key}"` });
+      errors.push({ path: joinPath(path, key), message: `unknown field "${key}"` });
     }
   }
   return errors;
@@ -73,400 +79,305 @@ function checkType(val: unknown, expected: string, path: string): ValidationErro
     : { path, message: `expected ${expected}, got ${typeof val}` };
 }
 
+function pushType(errors: ValidationError[], val: unknown, expected: string, path: string): void {
+  const e = checkType(val, expected, path);
+  if (e) errors.push(e);
+}
+
+function expectObject(
+  val: unknown,
+  path: string,
+  allowed: Set<string>,
+): { obj: Record<string, unknown> | null; errors: ValidationError[] } {
+  const e = checkType(val, "object", path);
+  if (e) return { obj: null, errors: [e] };
+  const obj = val as Record<string, unknown>;
+  return { obj, errors: unknownKeys(obj, allowed, path) };
+}
+
+function optionalScalar(
+  errors: ValidationError[],
+  obj: Record<string, unknown>,
+  key: string,
+  type: string,
+  path: string,
+): void {
+  if (obj[key] !== undefined) pushType(errors, obj[key], type, joinPath(path, key));
+}
+
+function requireScalar(
+  errors: ValidationError[],
+  obj: Record<string, unknown>,
+  key: string,
+  type: string,
+  path: string,
+): void {
+  if (obj[key] === undefined) {
+    errors.push({ path, message: `missing required field "${key}"` });
+    return;
+  }
+  pushType(errors, obj[key], type, joinPath(path, key));
+}
+
+function optionalScalarArray(
+  errors: ValidationError[],
+  obj: Record<string, unknown>,
+  key: string,
+  type: string,
+  path: string,
+): void {
+  if (obj[key] === undefined) return;
+  const arrPath = joinPath(path, key);
+  const e = checkType(obj[key], "array", arrPath);
+  if (e) {
+    errors.push(e);
+    return;
+  }
+  for (const [i, v] of (obj[key] as unknown[]).entries()) {
+    pushType(errors, v, type, `${arrPath}[${i}]`);
+  }
+}
+
+function optionalArrayOf(
+  errors: ValidationError[],
+  obj: Record<string, unknown>,
+  key: string,
+  path: string,
+  validator: Validator,
+): void {
+  if (obj[key] === undefined) return;
+  const arrPath = joinPath(path, key);
+  const e = checkType(obj[key], "array", arrPath);
+  if (e) {
+    errors.push(e);
+    return;
+  }
+  for (const [i, v] of (obj[key] as unknown[]).entries()) {
+    errors.push(...validator(v, `${arrPath}[${i}]`));
+  }
+}
+
+function optionalRecordOf(
+  errors: ValidationError[],
+  obj: Record<string, unknown>,
+  key: string,
+  path: string,
+  validator: Validator,
+): void {
+  if (obj[key] === undefined) return;
+  const subPath = joinPath(path, key);
+  const e = checkType(obj[key], "object", subPath);
+  if (e) {
+    errors.push(e);
+    return;
+  }
+  for (const [k, v] of Object.entries(obj[key] as Record<string, unknown>)) {
+    errors.push(...validator(v, joinPath(subPath, k)));
+  }
+}
+
+function optionalSubobject(
+  errors: ValidationError[],
+  obj: Record<string, unknown>,
+  key: string,
+  path: string,
+  validator: Validator,
+): void {
+  if (obj[key] !== undefined) {
+    errors.push(...validator(obj[key], joinPath(path, key)));
+  }
+}
+
+function requireSubobject(
+  errors: ValidationError[],
+  obj: Record<string, unknown>,
+  key: string,
+  path: string,
+  validator: Validator,
+): void {
+  if (obj[key] === undefined) {
+    errors.push({ path, message: `missing required field "${key}"` });
+    return;
+  }
+  errors.push(...validator(obj[key], joinPath(path, key)));
+}
+
+function validatePortNumber(
+  val: unknown,
+  path: string,
+  typeMessage: string,
+): ValidationError | null {
+  if (typeof val !== "number" || !Number.isInteger(val)) {
+    return { path, message: typeMessage };
+  }
+  if (val < 1 || val > 65535) {
+    return { path, message: `port must be 1-65535, got ${val}` };
+  }
+  return null;
+}
+
 function validateQueryMatcher(val: unknown, path: string): ValidationError[] {
   if (typeof val === "string") return [];
-  if (val !== null && typeof val === "object" && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    const errors = unknownKeys(obj, QUERY_MATCHER_KEYS, path);
-    if (obj.any !== undefined) {
-      const t = checkType(obj.any, "array", `${path}.any`);
-      if (t) errors.push(t);
-      else {
-        for (const [i, v] of (obj.any as unknown[]).entries()) {
-          const t2 = checkType(v, "string", `${path}.any[${i}]`);
-          if (t2) errors.push(t2);
-        }
-      }
-    }
-    return errors;
+  if (val === null || typeof val !== "object" || Array.isArray(val)) {
+    return [{ path, message: `expected string or object with "any", got ${typeof val}` }];
   }
-  return [{ path, message: `expected string or object with "any", got ${typeof val}` }];
+  const obj = val as Record<string, unknown>;
+  const errors = unknownKeys(obj, QUERY_MATCHER_KEYS, path);
+  optionalScalarArray(errors, obj, "any", "string", path);
+  return errors;
 }
 
 function validateL7Allow(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, L7_ALLOW_KEYS, path));
+  const { obj, errors } = expectObject(val, path, L7_ALLOW_KEYS);
+  if (!obj) return errors;
   for (const f of ["method", "path", "command"] as const) {
-    if (obj[f] !== undefined) {
-      const t2 = checkType(obj[f], "string", `${path}.${f}`);
-      if (t2) errors.push(t2);
-    }
+    optionalScalar(errors, obj, f, "string", path);
   }
-  if (obj.query !== undefined) {
-    const t2 = checkType(obj.query, "object", `${path}.query`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [k, v] of Object.entries(obj.query as Record<string, unknown>)) {
-        errors.push(...validateQueryMatcher(v, `${path}.query.${k}`));
-      }
-    }
-  }
+  optionalRecordOf(errors, obj, "query", path, validateQueryMatcher);
   return errors;
 }
 
 function validateL7Rule(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, L7_RULE_KEYS, path));
-  if (obj.allow === undefined) {
-    errors.push({ path, message: `missing required field "allow"` });
-  } else {
-    errors.push(...validateL7Allow(obj.allow, `${path}.allow`));
-  }
+  const { obj, errors } = expectObject(val, path, L7_RULE_KEYS);
+  if (!obj) return errors;
+  requireSubobject(errors, obj, "allow", path, validateL7Allow);
   return errors;
 }
 
 function validateL7Deny(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, L7_DENY_KEYS, path));
+  const { obj, errors } = expectObject(val, path, L7_DENY_KEYS);
+  if (!obj) return errors;
   for (const f of ["method", "path", "command"] as const) {
-    if (obj[f] !== undefined) {
-      const t2 = checkType(obj[f], "string", `${path}.${f}`);
-      if (t2) errors.push(t2);
-    }
+    optionalScalar(errors, obj, f, "string", path);
   }
-  if (obj.query !== undefined) {
-    const t2 = checkType(obj.query, "object", `${path}.query`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [k, v] of Object.entries(obj.query as Record<string, unknown>)) {
-        errors.push(...validateQueryMatcher(v, `${path}.query.${k}`));
-      }
-    }
-  }
+  optionalRecordOf(errors, obj, "query", path, validateQueryMatcher);
   return errors;
 }
 
 function validateCredInjectHeader(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, CRED_INJECT_HEADER_KEYS, path));
+  const { obj, errors } = expectObject(val, path, CRED_INJECT_HEADER_KEYS);
+  if (!obj) return errors;
   for (const f of ["header", "from_credential"] as const) {
-    if (obj[f] === undefined) {
-      errors.push({ path, message: `missing required field "${f}"` });
-    } else {
-      const t2 = checkType(obj[f], "string", `${path}.${f}`);
-      if (t2) errors.push(t2);
-    }
+    requireScalar(errors, obj, f, "string", path);
   }
   return errors;
 }
 
 function validateCredInject(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, CRED_INJECT_KEYS, path));
-  if (obj.provider !== undefined) {
-    const t2 = checkType(obj.provider, "string", `${path}.provider`);
-    if (t2) errors.push(t2);
-  }
-  if (obj.strip_headers !== undefined) {
-    const t2 = checkType(obj.strip_headers, "array", `${path}.strip_headers`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.strip_headers as unknown[]).entries()) {
-        const t3 = checkType(v, "string", `${path}.strip_headers[${i}]`);
-        if (t3) errors.push(t3);
-      }
-    }
-  }
-  if (obj.inject !== undefined) {
-    const t2 = checkType(obj.inject, "array", `${path}.inject`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.inject as unknown[]).entries()) {
-        errors.push(...validateCredInjectHeader(v, `${path}.inject[${i}]`));
-      }
-    }
-  }
+  const { obj, errors } = expectObject(val, path, CRED_INJECT_KEYS);
+  if (!obj) return errors;
+  optionalScalar(errors, obj, "provider", "string", path);
+  optionalScalarArray(errors, obj, "strip_headers", "string", path);
+  optionalArrayOf(errors, obj, "inject", path, validateCredInjectHeader);
   return errors;
 }
 
 function validateTrustCheck(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, TRUST_CHECK_KEYS, path));
-  if (obj.registry === undefined) {
-    errors.push({ path, message: `missing required field "registry"` });
-  } else {
-    const t2 = checkType(obj.registry, "string", `${path}.registry`);
-    if (t2) errors.push(t2);
-  }
+  const { obj, errors } = expectObject(val, path, TRUST_CHECK_KEYS);
+  if (!obj) return errors;
+  requireScalar(errors, obj, "registry", "string", path);
   return errors;
 }
 
+function validateEndpointPort(errors: ValidationError[], val: unknown, path: string): void {
+  const e = validatePortNumber(val, path, `expected integer, got ${typeof val}`);
+  if (e) errors.push(e);
+}
+
+function validateEndpointPorts(errors: ValidationError[], val: unknown, path: string): void {
+  const t = checkType(val, "array", path);
+  if (t) {
+    errors.push(t);
+    return;
+  }
+  for (const [i, v] of (val as unknown[]).entries()) {
+    const e = validatePortNumber(v, `${path}[${i}]`, "expected integer");
+    if (e) errors.push(e);
+  }
+}
+
 function validateEndpoint(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, ENDPOINT_KEYS, path));
-
-  if (obj.host === undefined) {
-    errors.push({ path, message: `missing required field "host"` });
-  } else {
-    const t2 = checkType(obj.host, "string", `${path}.host`);
-    if (t2) errors.push(t2);
-  }
-
-  if (obj.port !== undefined) {
-    if (typeof obj.port !== "number" || !Number.isInteger(obj.port)) {
-      errors.push({ path: `${path}.port`, message: `expected integer, got ${typeof obj.port}` });
-    } else if (obj.port < 1 || obj.port > 65535) {
-      errors.push({ path: `${path}.port`, message: `port must be 1-65535, got ${obj.port}` });
-    }
-  }
-
-  if (obj.ports !== undefined) {
-    const t2 = checkType(obj.ports, "array", `${path}.ports`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.ports as unknown[]).entries()) {
-        if (typeof v !== "number" || !Number.isInteger(v)) {
-          errors.push({ path: `${path}.ports[${i}]`, message: `expected integer` });
-        } else if (v < 1 || v > 65535) {
-          errors.push({ path: `${path}.ports[${i}]`, message: `port must be 1-65535, got ${v}` });
-        }
-      }
-    }
-  }
-
+  const { obj, errors } = expectObject(val, path, ENDPOINT_KEYS);
+  if (!obj) return errors;
+  requireScalar(errors, obj, "host", "string", path);
+  if (obj.port !== undefined) validateEndpointPort(errors, obj.port, joinPath(path, "port"));
+  if (obj.ports !== undefined) validateEndpointPorts(errors, obj.ports, joinPath(path, "ports"));
   for (const f of ["protocol", "tls", "enforcement", "access"] as const) {
-    if (obj[f] !== undefined) {
-      const t2 = checkType(obj[f], "string", `${path}.${f}`);
-      if (t2) errors.push(t2);
-    }
+    optionalScalar(errors, obj, f, "string", path);
   }
-
-  if (obj.rules !== undefined) {
-    const t2 = checkType(obj.rules, "array", `${path}.rules`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.rules as unknown[]).entries()) {
-        errors.push(...validateL7Rule(v, `${path}.rules[${i}]`));
-      }
-    }
-  }
-
-  if (obj.allowed_ips !== undefined) {
-    const t2 = checkType(obj.allowed_ips, "array", `${path}.allowed_ips`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.allowed_ips as unknown[]).entries()) {
-        const t3 = checkType(v, "string", `${path}.allowed_ips[${i}]`);
-        if (t3) errors.push(t3);
-      }
-    }
-  }
-
-  if (obj.deny_rules !== undefined) {
-    const t2 = checkType(obj.deny_rules, "array", `${path}.deny_rules`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.deny_rules as unknown[]).entries()) {
-        errors.push(...validateL7Deny(v, `${path}.deny_rules[${i}]`));
-      }
-    }
-  }
-
-  if (obj.allow_encoded_slash !== undefined) {
-    const t2 = checkType(obj.allow_encoded_slash, "boolean", `${path}.allow_encoded_slash`);
-    if (t2) errors.push(t2);
-  }
-
-  if (obj.echo !== undefined) {
-    const t2 = checkType(obj.echo, "boolean", `${path}.echo`);
-    if (t2) errors.push(t2);
-  }
-
-  if (obj.cred_inject !== undefined) {
-    errors.push(...validateCredInject(obj.cred_inject, `${path}.cred_inject`));
-  }
-
-  if (obj.trust_check !== undefined) {
-    errors.push(...validateTrustCheck(obj.trust_check, `${path}.trust_check`));
-  }
-
+  optionalArrayOf(errors, obj, "rules", path, validateL7Rule);
+  optionalScalarArray(errors, obj, "allowed_ips", "string", path);
+  optionalArrayOf(errors, obj, "deny_rules", path, validateL7Deny);
+  optionalScalar(errors, obj, "allow_encoded_slash", "boolean", path);
+  optionalScalar(errors, obj, "echo", "boolean", path);
+  optionalSubobject(errors, obj, "cred_inject", path, validateCredInject);
+  optionalSubobject(errors, obj, "trust_check", path, validateTrustCheck);
   return errors;
 }
 
 function validateBinary(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, BINARY_KEYS, path));
-  if (obj.path === undefined) {
-    errors.push({ path, message: `missing required field "path"` });
-  } else {
-    const t2 = checkType(obj.path, "string", `${path}.path`);
-    if (t2) errors.push(t2);
-  }
-  if (obj.harness !== undefined) {
-    const t2 = checkType(obj.harness, "boolean", `${path}.harness`);
-    if (t2) errors.push(t2);
-  }
+  const { obj, errors } = expectObject(val, path, BINARY_KEYS);
+  if (!obj) return errors;
+  requireScalar(errors, obj, "path", "string", path);
+  optionalScalar(errors, obj, "harness", "boolean", path);
   return errors;
 }
 
 function validateNetworkPolicy(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, NETWORK_POLICY_KEYS, path));
-
-  if (obj.name !== undefined) {
-    const t2 = checkType(obj.name, "string", `${path}.name`);
-    if (t2) errors.push(t2);
-  }
-
-  if (obj.endpoints !== undefined) {
-    const t2 = checkType(obj.endpoints, "array", `${path}.endpoints`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.endpoints as unknown[]).entries()) {
-        errors.push(...validateEndpoint(v, `${path}.endpoints[${i}]`));
-      }
-    }
-  }
-
-  if (obj.binaries !== undefined) {
-    const t2 = checkType(obj.binaries, "array", `${path}.binaries`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.binaries as unknown[]).entries()) {
-        errors.push(...validateBinary(v, `${path}.binaries[${i}]`));
-      }
-    }
-  }
-
-  if (obj.allowed_secrets !== undefined) {
-    const t2 = checkType(obj.allowed_secrets, "array", `${path}.allowed_secrets`);
-    if (t2) errors.push(t2);
-    else {
-      for (const [i, v] of (obj.allowed_secrets as unknown[]).entries()) {
-        const t3 = checkType(v, "string", `${path}.allowed_secrets[${i}]`);
-        if (t3) errors.push(t3);
-      }
-    }
-  }
-
+  const { obj, errors } = expectObject(val, path, NETWORK_POLICY_KEYS);
+  if (!obj) return errors;
+  optionalScalar(errors, obj, "name", "string", path);
+  optionalArrayOf(errors, obj, "endpoints", path, validateEndpoint);
+  optionalArrayOf(errors, obj, "binaries", path, validateBinary);
+  optionalScalarArray(errors, obj, "allowed_secrets", "string", path);
   return errors;
 }
 
 function validateFilesystem(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, FILESYSTEM_KEYS, path));
-  if (obj.include_workdir !== undefined) {
-    const t2 = checkType(obj.include_workdir, "boolean", `${path}.include_workdir`);
-    if (t2) errors.push(t2);
-  }
+  const { obj, errors } = expectObject(val, path, FILESYSTEM_KEYS);
+  if (!obj) return errors;
+  optionalScalar(errors, obj, "include_workdir", "boolean", path);
   for (const f of ["read_only", "read_write"] as const) {
-    if (obj[f] !== undefined) {
-      const t2 = checkType(obj[f], "array", `${path}.${f}`);
-      if (t2) errors.push(t2);
-      else {
-        for (const [i, v] of (obj[f] as unknown[]).entries()) {
-          const t3 = checkType(v, "string", `${path}.${f}[${i}]`);
-          if (t3) errors.push(t3);
-        }
-      }
-    }
+    optionalScalarArray(errors, obj, f, "string", path);
   }
   return errors;
 }
 
 function validateLandlock(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, LANDLOCK_KEYS, path));
-  if (obj.compatibility !== undefined) {
-    const t2 = checkType(obj.compatibility, "string", `${path}.compatibility`);
-    if (t2) errors.push(t2);
-  }
+  const { obj, errors } = expectObject(val, path, LANDLOCK_KEYS);
+  if (!obj) return errors;
+  optionalScalar(errors, obj, "compatibility", "string", path);
   return errors;
 }
 
 function validateProcess(val: unknown, path: string): ValidationError[] {
-  const errors: ValidationError[] = [];
-  const t = checkType(val, "object", path);
-  if (t) return [t];
-  const obj = val as Record<string, unknown>;
-  errors.push(...unknownKeys(obj, PROCESS_KEYS, path));
+  const { obj, errors } = expectObject(val, path, PROCESS_KEYS);
+  if (!obj) return errors;
   for (const f of ["run_as_user", "run_as_group"] as const) {
-    if (obj[f] !== undefined) {
-      const t2 = checkType(obj[f], "string", `${path}.${f}`);
-      if (t2) errors.push(t2);
-    }
+    optionalScalar(errors, obj, f, "string", path);
   }
   return errors;
 }
 
+function validateVersion(errors: ValidationError[], obj: Record<string, unknown>): void {
+  if (obj.version === undefined) {
+    errors.push({ path: "version", message: "missing required field" });
+    return;
+  }
+  if (typeof obj.version !== "number" || !Number.isInteger(obj.version)) {
+    errors.push({ path: "version", message: `expected integer, got ${typeof obj.version}` });
+  }
+}
+
 export function validateSchema(doc: unknown): ValidationError[] {
-  const errors: ValidationError[] = [];
   const t = checkType(doc, "object", "");
   if (t) return [t];
   const obj = doc as Record<string, unknown>;
-
-  errors.push(...unknownKeys(obj, TOP_LEVEL_KEYS, ""));
-
-  if (obj.version === undefined) {
-    errors.push({ path: "version", message: "missing required field" });
-  } else if (typeof obj.version !== "number" || !Number.isInteger(obj.version)) {
-    errors.push({ path: "version", message: `expected integer, got ${typeof obj.version}` });
-  }
-
-  if (obj.filesystem_policy !== undefined) {
-    errors.push(...validateFilesystem(obj.filesystem_policy, "filesystem_policy"));
-  }
-
-  if (obj.landlock !== undefined) {
-    errors.push(...validateLandlock(obj.landlock, "landlock"));
-  }
-
-  if (obj.process !== undefined) {
-    errors.push(...validateProcess(obj.process, "process"));
-  }
-
-  if (obj.network_policies !== undefined) {
-    const t2 = checkType(obj.network_policies, "object", "network_policies");
-    if (t2) errors.push(t2);
-    else {
-      for (const [key, val] of Object.entries(obj.network_policies as Record<string, unknown>)) {
-        errors.push(...validateNetworkPolicy(val, `network_policies.${key}`));
-      }
-    }
-  }
-
+  const errors = unknownKeys(obj, TOP_LEVEL_KEYS, "");
+  validateVersion(errors, obj);
+  optionalSubobject(errors, obj, "filesystem_policy", "", validateFilesystem);
+  optionalSubobject(errors, obj, "landlock", "", validateLandlock);
+  optionalSubobject(errors, obj, "process", "", validateProcess);
+  optionalRecordOf(errors, obj, "network_policies", "", validateNetworkPolicy);
   return errors;
 }

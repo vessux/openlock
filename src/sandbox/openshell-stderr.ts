@@ -21,6 +21,49 @@ export function shouldDropOpenshellStderrLine(line: string): boolean {
   return isNoiseLine(line);
 }
 
+interface SplitInput {
+  completeLines: string[];
+  tail: string;
+  endsWithNewline: boolean;
+}
+
+function splitForFiltering(input: string): SplitInput {
+  const endsWithNewline = input.endsWith("\n");
+  const lines = input.split("\n");
+  const tail = endsWithNewline ? "" : lines.pop()!;
+  const completeLines = endsWithNewline ? lines.slice(0, -1) : lines;
+  return { completeLines, tail, endsWithNewline };
+}
+
+function popMietteHeader(kept: string[]): void {
+  if (kept.length > 0 && MIETTE_HEADER.test(kept[kept.length - 1]!)) kept.pop();
+}
+
+function filterCompleteLines(completeLines: string[]): string[] {
+  const kept: string[] = [];
+  let prevDropped = -2;
+  for (let i = 0; i < completeLines.length; i++) {
+    const line = completeLines[i]!;
+    if (isNoiseLine(line)) {
+      popMietteHeader(kept);
+      prevDropped = i;
+      continue;
+    }
+    if (prevDropped === i - 1 && MIETTE_CONTINUATION.test(line)) {
+      prevDropped = i;
+      continue;
+    }
+    kept.push(line);
+  }
+  return kept;
+}
+
+function reassemble(kept: string[], tail: string, endsWithNewline: boolean): string {
+  if (kept.length === 0) return tail;
+  const output = kept.join("\n");
+  return endsWithNewline ? `${output}\n${tail}` : output + (tail ? `\n${tail}` : "");
+}
+
 /**
  * Filter stderr from `openshell sandbox create`. Drops the SSH death-rattle
  * block at session detach (3 lines on current openshell, plus a bare `Error:`
@@ -28,33 +71,7 @@ export function shouldDropOpenshellStderrLine(line: string): boolean {
  * buffer across reads. Pure.
  */
 export function filterOpenshellStderr(input: string): string {
-  const endsWithNewline = input.endsWith("\n");
-  const lines = input.split("\n");
-  const tail = endsWithNewline ? "" : lines.pop()!;
-  const completeLines = endsWithNewline ? lines.slice(0, -1) : lines;
-
-  const kept: { idx: number; line: string }[] = [];
-  const drop = new Set<number>();
-  for (let i = 0; i < completeLines.length; i++) {
-    const line = completeLines[i]!;
-    if (isNoiseLine(line)) {
-      drop.add(i);
-      // Drop preceding bare `Error:` miette header if it's the previous kept line.
-      const j = kept.length - 1;
-      if (j >= 0 && MIETTE_HEADER.test(kept[j]!.line)) {
-        drop.add(kept[j]!.idx);
-        kept.splice(j, 1);
-      }
-      continue;
-    }
-    if (drop.has(i - 1) && MIETTE_CONTINUATION.test(line)) {
-      drop.add(i);
-      continue;
-    }
-    kept.push({ idx: i, line });
-  }
-
-  const output = kept.map((k) => k.line).join("\n");
-  if (kept.length === 0) return tail;
-  return endsWithNewline ? `${output}\n${tail}` : output + (tail ? `\n${tail}` : "");
+  const { completeLines, tail, endsWithNewline } = splitForFiltering(input);
+  const kept = filterCompleteLines(completeLines);
+  return reassemble(kept, tail, endsWithNewline);
 }
