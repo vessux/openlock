@@ -10,14 +10,36 @@ describe("shouldDropOpenshellStderrLine", () => {
     expect(shouldDropOpenshellStderrLine("  × ssh exited with status 255")).toBe(true);
   });
 
+  it("drops the new combined miette format with 'exit status:' prefix", () => {
+    expect(
+      shouldDropOpenshellStderrLine("Error:   × ssh exited with status exit status: 255"),
+    ).toBe(true);
+  });
+
+  it("keeps other ssh exit codes so real failures still surface", () => {
+    expect(shouldDropOpenshellStderrLine("ssh exited with status 1")).toBe(false);
+    expect(shouldDropOpenshellStderrLine("ssh exited with status 130")).toBe(false);
+    expect(
+      shouldDropOpenshellStderrLine("Error:   × ssh exited with status exit status: 1"),
+    ).toBe(false);
+  });
+
+  it("drops OpenSSH client connection-closed message", () => {
+    expect(shouldDropOpenshellStderrLine("Connection to sandbox closed by remote host.")).toBe(
+      true,
+    );
+    expect(
+      shouldDropOpenshellStderrLine("Connection to 127.0.0.1 closed by remote host."),
+    ).toBe(true);
+  });
+
+  it("drops OpenSSH client_loop disconnect", () => {
+    expect(shouldDropOpenshellStderrLine("client_loop: send disconnect: Broken pipe")).toBe(true);
+  });
+
   it("keeps unrelated stderr", () => {
     expect(shouldDropOpenshellStderrLine("Building image openlock-js")).toBe(false);
     expect(shouldDropOpenshellStderrLine("Error: bundle failed")).toBe(false);
-  });
-
-  it("keeps other ssh exit codes", () => {
-    expect(shouldDropOpenshellStderrLine("ssh exited with status 1")).toBe(false);
-    expect(shouldDropOpenshellStderrLine("ssh exited with status 130")).toBe(false);
   });
 });
 
@@ -50,5 +72,23 @@ describe("filterOpenshellStderr", () => {
     expect(out).not.toContain("╰─▶ connection closed");
     expect(out).toContain("starting...");
     expect(out).toContain("next message");
+  });
+
+  it("drops the full SSH death-rattle block as observed in v0.2.0", () => {
+    // Real output captured during /exit on Mac + Lima:
+    const input = [
+      "No commits to sync.",
+      "Gateway stopped (pid 92558).",
+      "Connection to sandbox closed by remote host.",
+      "client_loop: send disconnect: Broken pipe",
+      "Error:   × ssh exited with status exit status: 255",
+      "",
+    ].join("\n");
+    const out = filterOpenshellStderr(input);
+    expect(out).toContain("No commits to sync.");
+    expect(out).toContain("Gateway stopped (pid 92558).");
+    expect(out).not.toContain("Connection to sandbox closed");
+    expect(out).not.toContain("client_loop:");
+    expect(out).not.toContain("ssh exited with status");
   });
 });
