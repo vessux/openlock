@@ -9,8 +9,13 @@ describe("readGatewayRssKb", () => {
     expect(Number.isInteger(rss)).toBe(true);
   });
 
-  it("returns null for a PID that does not exist", () => {
-    // PID 0 / negative are invalid; ps should fail.
+  it("returns null for a guard-violating PID (zero)", () => {
     expect(readGatewayRssKb(0)).toBeNull();
+  });
+
+  it("returns null when ps fails for a non-existent PID", () => {
+    // Large PID unlikely to exist; reaches `ps` and exercises the
+    // non-zero exit-code branch (not just the guard).
+    expect(readGatewayRssKb(999_999)).toBeNull();
   });
 });
