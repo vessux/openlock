@@ -1,19 +1,31 @@
-const SSH_255 = /ssh exited with status 255/;
+// SSH death-rattle: at session detach, openshell's SSH child dies and prints
+// these in sequence. Each pattern is unconditionally noise; we drop them.
+//   "Connection to <host> closed by remote host."   ← OpenSSH client
+//   "client_loop: send disconnect: Broken pipe"     ← OpenSSH client
+//   "Error:   × ssh exited with status exit status: 255"  ← openshell miette
+// Older openshell builds split miette across two lines (bare "Error:" header,
+// then "  × ssh exited with status 255" body, optional "  ╰─▶ ..." continuation).
+// We tolerate both formats. Exit code stays pinned to 255 so any other ssh
+// failure (auth, host key, etc.) still surfaces.
+const SSH_EXIT = /ssh exited with status (?:exit status: )?255\b/;
+const SSH_CONN_CLOSED = /^\s*Connection to .+ closed by remote host\.?\s*$/;
+const SSH_CLIENT_LOOP = /^\s*client_loop:\s/;
 const MIETTE_HEADER = /^\s*Error:\s*$/;
 const MIETTE_CONTINUATION = /^\s+(?:╰─▶|╭─|help:|×|◇)/u;
 
+function isNoiseLine(line: string): boolean {
+  return SSH_EXIT.test(line) || SSH_CONN_CLOSED.test(line) || SSH_CLIENT_LOOP.test(line);
+}
+
 export function shouldDropOpenshellStderrLine(line: string): boolean {
-  return SSH_255.test(line);
+  return isNoiseLine(line);
 }
 
 /**
- * Filter stderr from `openshell sandbox create`. Drops the noisy
- * "ssh exited with status 255" line emitted on Linux when `gateway stop`
- * severs the create child's SSH proxy at session end, plus any directly
- * adjacent miette report decoration (the surrounding `Error:` / `╰─▶` lines).
- *
- * Pure: input → output. Trailing partial line (no final \n) is preserved
- * unfiltered so callers can buffer across reads.
+ * Filter stderr from `openshell sandbox create`. Drops the SSH death-rattle
+ * block at session detach (3 lines on current openshell, plus a bare `Error:`
+ * header on older builds). Preserves trailing partial line so callers can
+ * buffer across reads. Pure.
  */
 export function filterOpenshellStderr(input: string): string {
   const endsWithNewline = input.endsWith("\n");
@@ -25,16 +37,13 @@ export function filterOpenshellStderr(input: string): string {
   const drop = new Set<number>();
   for (let i = 0; i < completeLines.length; i++) {
     const line = completeLines[i]!;
-    if (SSH_255.test(line)) {
+    if (isNoiseLine(line)) {
       drop.add(i);
-      // Drop preceding `Error:` header if it's the previous non-dropped line.
-      for (let j = kept.length - 1; j >= 0; j--) {
-        const prev = kept[j]!;
-        if (MIETTE_HEADER.test(prev.line)) {
-          drop.add(prev.idx);
-          kept.splice(j, 1);
-        }
-        break;
+      // Drop preceding bare `Error:` miette header if it's the previous kept line.
+      const j = kept.length - 1;
+      if (j >= 0 && MIETTE_HEADER.test(kept[j]!.line)) {
+        drop.add(kept[j]!.idx);
+        kept.splice(j, 1);
       }
       continue;
     }
