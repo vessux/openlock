@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createBundle, ensureGitRepo, fetchBundle, pruneSandboxRefs } from "./git-sync";
+import { ensureRepoIsGit } from "./ensure-repo";
+import { createBundle, fetchBundle, pruneSandboxRefs } from "./git-sync";
 
 const testDir = join(import.meta.dir, "../../.test-git-sync");
 
@@ -29,24 +30,6 @@ describe("git-sync", () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  describe("ensureGitRepo", () => {
-    it("initializes git repo in bare directory", async () => {
-      const dir = join(testDir, "bare");
-      mkdirSync(dir);
-      await ensureGitRepo(dir);
-      expect(existsSync(join(dir, ".git"))).toBe(true);
-    });
-
-    it("is a no-op for existing git repo", async () => {
-      const dir = join(testDir, "existing");
-      mkdirSync(dir);
-      await run(["git", "init"], dir);
-      await run(["git", "commit", "--allow-empty", "-m", "init"], dir);
-      await ensureGitRepo(dir);
-      expect(existsSync(join(dir, ".git"))).toBe(true);
-    });
-  });
-
   describe("createBundle", () => {
     it("creates a bundle file from a git repo", async () => {
       const dir = join(testDir, "repo");
@@ -65,8 +48,8 @@ describe("git-sync", () => {
       const workDir = join(testDir, "work");
       mkdirSync(hostDir);
       mkdirSync(workDir);
-      await ensureGitRepo(hostDir);
-      await ensureGitRepo(workDir);
+      await ensureRepoIsGit(hostDir);
+      await ensureRepoIsGit(workDir);
       await run(["git", "checkout", "-b", "feature"], workDir);
       await run(["git", "commit", "--allow-empty", "-m", "feature work"], workDir);
       const bundle = join(testDir, "out.bundle");
@@ -87,7 +70,7 @@ describe("git-sync", () => {
     it("pruneSandboxRefs deletes refs/sandbox/<sessionName>/* and leaves others", async () => {
       const hostDir = join(testDir, "host-prune");
       mkdirSync(hostDir);
-      await ensureGitRepo(hostDir);
+      await ensureRepoIsGit(hostDir);
       await run(["git", "update-ref", "refs/sandbox/sess-a/main", "HEAD"], hostDir);
       await run(["git", "update-ref", "refs/sandbox/sess-b/main", "HEAD"], hostDir);
 
@@ -107,7 +90,7 @@ describe("git-sync", () => {
     it("pruneSandboxRefs no-ops when session has no refs", async () => {
       const hostDir = join(testDir, "host-ghost");
       mkdirSync(hostDir);
-      await ensureGitRepo(hostDir);
+      await ensureRepoIsGit(hostDir);
       await pruneSandboxRefs(hostDir, "ghost");
     });
   });
