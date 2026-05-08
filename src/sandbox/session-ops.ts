@@ -5,8 +5,8 @@ import {
   copyOutOfContainer,
   inspectContainerState,
   removeContainer,
-  removeSecretsByPrefix,
-  removeVolumesByMatch,
+  removeSecret,
+  removeVolume,
   stopContainer,
 } from "./container";
 import { pruneSandboxRefs } from "./git-sync";
@@ -87,8 +87,11 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
   }
 
   await removeContainer(containerName);
-  await removeSecretsByPrefix("openshell-handshake-");
-  await removeVolumesByMatch(SANDBOX_PREFIX, "-workspace");
+  // Session-scoped: only this session's handshake secret + workspace volume.
+  // Upstream openshell names them `openshell-handshake-<sandboxId>` and
+  // `openshell-sandbox-<sandboxId>-workspace`; sandboxId == m.name here.
+  await removeSecret(`openshell-handshake-${m.name}`);
+  await removeVolume(`${SANDBOX_PREFIX}${m.name}-workspace`);
   await pruneSandboxRefs(opts.hostRepoForRefs ?? m.repoPath, m.name);
   removeSessionDir(sessionsDir(), m.id);
   console.log(`cleaned ${name}`);

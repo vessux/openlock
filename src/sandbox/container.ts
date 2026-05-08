@@ -157,32 +157,14 @@ export async function copyOutOfContainer(
   return (await proc.exited) === 0;
 }
 
-export async function removeSecretsByPrefix(prefix: string): Promise<void> {
-  const ls = Bun.spawn(["podman", "secret", "ls", "--format", "{{.Name}}"], { stdout: "pipe" });
-  const out = await new Response(ls.stdout).text();
-  await ls.exited;
-  for (const name of out
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.startsWith(prefix))) {
-    const rm = Bun.spawn(["podman", "secret", "rm", name], { stdout: "ignore", stderr: "ignore" });
-    await rm.exited;
-  }
+export async function removeSecret(name: string): Promise<void> {
+  const rm = Bun.spawn(["podman", "secret", "rm", name], { stdout: "ignore", stderr: "ignore" });
+  await rm.exited;
 }
 
-export async function removeVolumesByMatch(prefix: string, suffix: string): Promise<void> {
-  const ls = Bun.spawn(["podman", "volume", "ls", "--format", "{{.Name}}"], { stdout: "pipe" });
-  const out = await new Response(ls.stdout).text();
-  await ls.exited;
-  for (const name of out.split("\n").map((s) => s.trim())) {
-    if (name.startsWith(prefix) && name.endsWith(suffix)) {
-      const rm = Bun.spawn(["podman", "volume", "rm", name], {
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      await rm.exited;
-    }
-  }
+export async function removeVolume(name: string): Promise<void> {
+  const rm = Bun.spawn(["podman", "volume", "rm", name], { stdout: "ignore", stderr: "ignore" });
+  await rm.exited;
 }
 
 export async function listSandboxContainers(
