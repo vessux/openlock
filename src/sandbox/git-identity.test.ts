@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { prepareGitIdentity } from "./git-identity";
 
 const tmpRoot = join(tmpdir(), "openlock-git-identity-test");
@@ -43,10 +43,7 @@ describe("prepareGitIdentity", () => {
   });
 
   it("returns null when only name is set (incomplete identity)", async () => {
-    writeFileSync(
-      join(fakeHome, ".gitconfig"),
-      "[user]\n\tname = Test User\n",
-    );
+    writeFileSync(join(fakeHome, ".gitconfig"), "[user]\n\tname = Test User\n");
     const result = await prepareGitIdentity(tmpDir, { homeOverride: fakeHome });
     expect(result).toBeNull();
   });

@@ -1,6 +1,6 @@
-import { join } from "path";
-import { homedir } from "os";
-import { existsSync, mkdirSync, chmodSync, renameSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { forkDir } from "../paths";
 
 // Pinned openshell fork release. Bump this constant when a new fork
@@ -46,17 +46,17 @@ async function ensureFromRelease(name: ForkBinary): Promise<string> {
   const url = downloadUrl(name);
   console.log(`Fetching ${name} from ${url}`);
   const tmpTar = `${cached}.tar.gz`;
-  const curl = Bun.spawn(
-    ["curl", "-fsSL", "-o", tmpTar, url],
-    { stdout: "inherit", stderr: "inherit" },
-  );
+  const curl = Bun.spawn(["curl", "-fsSL", "-o", tmpTar, url], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
   if ((await curl.exited) !== 0) {
     throw new Error(`Failed to download ${url}`);
   }
-  const tar = Bun.spawn(
-    ["tar", "-xzf", tmpTar, "-C", CACHE_DIR],
-    { stdout: "inherit", stderr: "inherit" },
-  );
+  const tar = Bun.spawn(["tar", "-xzf", tmpTar, "-C", CACHE_DIR], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
   if ((await tar.exited) !== 0) {
     throw new Error(`Failed to extract ${tmpTar}`);
   }
@@ -70,7 +70,11 @@ async function ensureFromRelease(name: ForkBinary): Promise<string> {
   return cached;
 }
 
-async function buildFromSource(crate: string, target?: string, useZigbuild = false): Promise<string> {
+async function buildFromSource(
+  crate: string,
+  target?: string,
+  useZigbuild = false,
+): Promise<string> {
   const fork = forkDir();
   const argv = useZigbuild
     ? ["cargo", "zigbuild", "-p", crate, "--target", target!, "--release"]
@@ -101,9 +105,8 @@ export async function getSupervisorBinary(): Promise<string> {
     if (process.platform === "linux") {
       return await buildFromSource("openshell-sandbox");
     }
-    const target = process.arch === "arm64"
-      ? "aarch64-unknown-linux-gnu"
-      : "x86_64-unknown-linux-gnu";
+    const target =
+      process.arch === "arm64" ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";
     return await buildFromSource("openshell-sandbox", target, true);
   }
   return await ensureFromRelease("openshell-sandbox");

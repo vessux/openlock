@@ -77,10 +77,7 @@ export function validateSemantics(policy: PolicyFile): ValidationError[] {
       const name = rule.name || key;
       for (const [i, ep] of (rule.endpoints ?? []).entries()) {
         const host = ep.host;
-        if (
-          host.includes("*") &&
-          (host.startsWith("*.") || host.startsWith("**."))
-        ) {
+        if (host.includes("*") && (host.startsWith("*.") || host.startsWith("**."))) {
           const labels = host.split(".").length;
           if (labels <= 2) {
             errors.push({
@@ -91,9 +88,7 @@ export function validateSemantics(policy: PolicyFile): ValidationError[] {
         }
 
         if (ep.cred_inject) {
-          const injected = (ep.cred_inject.inject ?? []).map(
-            (h) => h.from_credential,
-          );
+          const injected = (ep.cred_inject.inject ?? []).map((h) => h.from_credential);
           const allowed = rule.allowed_secrets ?? [];
           if (allowed.length > 0) {
             for (const cred of injected) {

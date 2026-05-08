@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
+import { join } from "node:path";
 import { loadConfig, resolveEndpoint } from "./cred-refresh/config";
 import { runRefreshLoop } from "./cred-refresh/loop";
-import { validatePolicyFile, formatErrors } from "./validate-policy";
-import { join } from "path";
+import { formatErrors, validatePolicyFile } from "./validate-policy";
 
 const USAGE = `
 openlock - sandbox orchestration toolkit
@@ -69,25 +69,30 @@ function main(): void {
       import("./cli/exec").then(({ execCmd }) => execCmd(args.slice(1)).then(processExit));
       return;
     case "cred-refresh":
-      return credRefresh(args.slice(1));
+      credRefresh(args.slice(1));
+      return;
     case "validate-policy":
-      return validatePolicy(args.slice(1));
+      validatePolicy(args.slice(1));
+      return;
     case "echo-server":
       console.error("echo-server not yet implemented");
       process.exit(1);
       return;
     case "sandbox":
-      return sandboxCmd(args.slice(1));
+      sandboxCmd(args.slice(1));
+      return;
     case "login":
       import("./login").then(({ login }) => login());
       return;
     case "gateway":
-      return gatewayCmd(args.slice(1));
+      gatewayCmd(args.slice(1));
+      return;
     case "doctor":
       doctorCmd(args.slice(1));
       return;
     case "update-images":
-      return updateImagesCmd(args.slice(1));
+      updateImagesCmd(args.slice(1));
+      return;
     default:
       console.error(`Unknown command: ${command}`);
       console.log(USAGE);
@@ -99,11 +104,10 @@ function credRefresh(args: string[]): void {
   const configIdx = args.indexOf("--config");
   const configIdxShort = args.indexOf("-c");
   const idx = configIdx !== -1 ? configIdx : configIdxShort;
-  const configPath = idx !== -1 && args[idx + 1]
-    ? args[idx + 1]
-    : join(process.cwd(), "providers", "refresh.yaml");
+  const configPath =
+    idx !== -1 && args[idx + 1] ? args[idx + 1] : join(process.cwd(), "providers", "refresh.yaml");
 
-  let config;
+  let config: ReturnType<typeof loadConfig>;
   try {
     config = loadConfig(configPath);
   } catch (e) {

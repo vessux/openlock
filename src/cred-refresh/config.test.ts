@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { loadConfig, resolveEndpoint, type RefreshConfig } from "./config";
-import { writeFileSync, mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { loadConfig, resolveEndpoint } from "./config";
 
 const tmpDir = join(import.meta.dir, "../../.test-tmp");
 

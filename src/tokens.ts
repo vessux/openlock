@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "fs";
-import { dirname, join } from "path";
-import { homedir } from "os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 export function credentialsPath(): string {
   return join(homedir(), ".config", "openlock", "credentials.json");

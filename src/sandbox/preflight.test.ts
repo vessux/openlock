@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test";
-import { preflight, type PreflightDeps } from "./preflight";
+import { describe, expect, it } from "bun:test";
+import { type PreflightDeps, preflight } from "./preflight";
 
 function makeDeps(overrides: Partial<PreflightDeps> = {}): PreflightDeps {
   return {

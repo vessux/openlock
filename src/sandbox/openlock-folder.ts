@@ -1,8 +1,8 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import yaml from "js-yaml";
-import { ALL_CAPS, detectCaps, type Cap } from "./detect-caps";
 import { defaultPolicyContent } from "./default-policies";
+import { ALL_CAPS, type Cap, detectCaps } from "./detect-caps";
 
 export const FOLDER_NAME = ".openlock";
 export const CONFIG_FILENAME = "config.yaml";

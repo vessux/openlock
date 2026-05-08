@@ -4,10 +4,10 @@ import { filterOpenshellStderr } from "./openshell-stderr";
 export type ContainerState = "running" | "exited" | "missing" | "other";
 
 export async function inspectContainerState(name: string): Promise<ContainerState> {
-  const proc = Bun.spawn(
-    ["podman", "inspect", name, "--format", "{{.State.Status}}"],
-    { stdout: "pipe", stderr: "ignore" },
-  );
+  const proc = Bun.spawn(["podman", "inspect", name, "--format", "{{.State.Status}}"], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
   const out = await new Response(proc.stdout).text();
   const code = await proc.exited;
   if (code !== 0) return "missing";
@@ -25,10 +25,10 @@ export async function startContainer(name: string): Promise<void> {
 }
 
 export async function stopContainer(name: string, graceSeconds = 5): Promise<void> {
-  const proc = Bun.spawn(
-    ["podman", "stop", "--time", String(graceSeconds), name],
-    { stdout: "ignore", stderr: "pipe" },
-  );
+  const proc = Bun.spawn(["podman", "stop", "--time", String(graceSeconds), name], {
+    stdout: "ignore",
+    stderr: "pipe",
+  });
   await proc.exited;
 }
 
@@ -80,15 +80,22 @@ export function openshellSandboxCreateAsync(args: OpenshellCreateArgs): Promise<
   return getCliInvocation().then((cli) => {
     const argv = [
       ...cli.argv,
-      "sandbox", "create",
-      "--name", args.sessionName,
-      "--from", args.imageTag,
-      "--upload", `${args.uploadDir}:/sandbox/`,
+      "sandbox",
+      "create",
+      "--name",
+      args.sessionName,
+      "--from",
+      args.imageTag,
+      "--upload",
+      `${args.uploadDir}:/sandbox/`,
       "--no-git-ignore",
-      "--policy", args.policy,
-      "--provider", "anthropic",
+      "--policy",
+      args.policy,
+      "--provider",
+      "anthropic",
       "--no-tty",
-      "--", ...args.command,
+      "--",
+      ...args.command,
     ];
     const proc = Bun.spawn(argv, {
       cwd: cli.cwd,
@@ -138,11 +145,15 @@ export async function waitForContainerRunning(name: string, timeoutMs = 60_000):
   throw new Error(`container ${name} did not reach running state within ${timeoutMs}ms`);
 }
 
-export async function copyOutOfContainer(name: string, src: string, dest: string): Promise<boolean> {
-  const proc = Bun.spawn(
-    ["podman", "cp", `${name}:${src}`, dest],
-    { stdout: "ignore", stderr: "ignore" },
-  );
+export async function copyOutOfContainer(
+  name: string,
+  src: string,
+  dest: string,
+): Promise<boolean> {
+  const proc = Bun.spawn(["podman", "cp", `${name}:${src}`, dest], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
   return (await proc.exited) === 0;
 }
 
@@ -150,7 +161,10 @@ export async function removeSecretsByPrefix(prefix: string): Promise<void> {
   const ls = Bun.spawn(["podman", "secret", "ls", "--format", "{{.Name}}"], { stdout: "pipe" });
   const out = await new Response(ls.stdout).text();
   await ls.exited;
-  for (const name of out.split("\n").map((s) => s.trim()).filter((s) => s.startsWith(prefix))) {
+  for (const name of out
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith(prefix))) {
     const rm = Bun.spawn(["podman", "secret", "rm", name], { stdout: "ignore", stderr: "ignore" });
     await rm.exited;
   }
@@ -162,17 +176,26 @@ export async function removeVolumesByMatch(prefix: string, suffix: string): Prom
   await ls.exited;
   for (const name of out.split("\n").map((s) => s.trim())) {
     if (name.startsWith(prefix) && name.endsWith(suffix)) {
-      const rm = Bun.spawn(["podman", "volume", "rm", name], { stdout: "ignore", stderr: "ignore" });
+      const rm = Bun.spawn(["podman", "volume", "rm", name], {
+        stdout: "ignore",
+        stderr: "ignore",
+      });
       await rm.exited;
     }
   }
 }
 
-export async function listSandboxContainers(prefix: string, includeExited = false): Promise<string[]> {
+export async function listSandboxContainers(
+  prefix: string,
+  includeExited = false,
+): Promise<string[]> {
   const args = ["podman", "ps", "--format", "{{.Names}}", "--filter", `name=${prefix}`];
   if (includeExited) args.splice(2, 0, "--all");
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
   const out = await new Response(proc.stdout).text();
   await proc.exited;
-  return out.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  return out
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }

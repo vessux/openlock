@@ -1,8 +1,11 @@
-import { resolve } from "path";
-import { findSessionsByPath, sessionsDir } from "../sandbox/session-store";
+import { resolve } from "node:path";
 import { loadSessionByName } from "../sandbox/session-ops";
+import { findSessionsByPath, sessionsDir } from "../sandbox/session-store";
 
-export async function resolveSessionName(positional: string | undefined, action: string): Promise<string | null> {
+export async function resolveSessionName(
+  positional: string | undefined,
+  action: string,
+): Promise<string | null> {
   if (positional) {
     const m = await loadSessionByName(positional);
     if (!m) {

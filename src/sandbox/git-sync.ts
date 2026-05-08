@@ -1,5 +1,5 @@
-import { existsSync } from "fs";
-import { join } from "path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 async function spawn(cmd: string[], cwd: string): Promise<{ exitCode: number; stderr: string }> {
   const proc = Bun.spawn(cmd, { cwd, stdout: "ignore", stderr: "pipe" });
@@ -45,10 +45,7 @@ export async function fetchBundle(
   sessionName: string,
 ): Promise<void> {
   const refspec = `refs/heads/*:refs/sandbox/${sessionName}/*`;
-  const { exitCode, stderr } = await spawn(
-    ["git", "fetch", bundlePath, refspec],
-    repoDir,
-  );
+  const { exitCode, stderr } = await spawn(["git", "fetch", bundlePath, refspec], repoDir);
   if (exitCode !== 0) {
     throw new Error(`git fetch from bundle failed: ${stderr}`);
   }
@@ -61,7 +58,10 @@ export async function pruneSandboxRefs(repoDir: string, sessionName: string): Pr
   );
   const out = await new Response(list.stdout).text();
   await list.exited;
-  const refs = out.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+  const refs = out
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
   for (const ref of refs) {
     const del = Bun.spawn(["git", "update-ref", "-d", ref], {
       cwd: repoDir,

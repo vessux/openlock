@@ -1,7 +1,7 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { computeImageTag, contextDirForHash } from "./image-build";
-import { homedir } from "os";
-import { join } from "path";
 
 describe("computeImageTag", () => {
   it("returns prefix:hash with 12-char hex hash", () => {

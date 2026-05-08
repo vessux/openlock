@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test";
-import { supervisorImageTag, supervisorDockerfile } from "./build-supervisor-image";
+import { describe, expect, it } from "bun:test";
+import { supervisorDockerfile, supervisorImageTag } from "./build-supervisor-image";
 
 describe("build-supervisor-image", () => {
   it("generates a stable image tag from binary path", () => {

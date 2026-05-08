@@ -1,4 +1,4 @@
-import { writeToken, credentialsPath } from "./tokens";
+import { credentialsPath, writeToken } from "./tokens";
 
 export async function login(): Promise<void> {
   console.log("Running claude setup-token to generate a long-lived OAuth token...\n");

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ensureRepoIsGit } from "./ensure-repo";
 
 // Hermetic env: hide host git config so tests fail loudly if prod code

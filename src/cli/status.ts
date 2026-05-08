@@ -7,13 +7,19 @@ export async function statusCmd(args: string[]): Promise<number> {
   if (!name) return 1;
   try {
     const r = await statusSession(name);
-    process.stdout.write(JSON.stringify({
-      name: r.meta.name,
-      meta: r.meta,
-      containerState: r.state.containerState,
-      pidAlive: r.state.pidAlive,
-      classification: r.classification,
-    }, null, 2) + "\n");
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          name: r.meta.name,
+          meta: r.meta,
+          containerState: r.state.containerState,
+          pidAlive: r.state.pidAlive,
+          classification: r.classification,
+        },
+        null,
+        2,
+      )}\n`,
+    );
     return 0;
   } catch (e) {
     console.error((e as Error).message);

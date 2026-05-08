@@ -1,14 +1,14 @@
 import core from "../../containers/core.Containerfile" with { type: "text" };
 import coreJs from "../../containers/core-js.Containerfile" with { type: "text" };
-import corePy from "../../containers/core-py.Containerfile" with { type: "text" };
 import coreJsPy from "../../containers/core-js-py.Containerfile" with { type: "text" };
+import corePy from "../../containers/core-py.Containerfile" with { type: "text" };
 
 import type { Cap } from "./detect-caps";
 
 export type ContainerfileKey = "core" | "core-js" | "core-py" | "core-js-py";
 
 export const DEFAULT_CONTAINERFILES: Record<ContainerfileKey, string> = {
-  "core": core,
+  core: core,
   "core-js": coreJs,
   "core-py": corePy,
   "core-js-py": coreJsPy,

@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync } from "node:fs";
 import yaml from "js-yaml";
 
 export interface CredentialConfig {
@@ -40,7 +40,11 @@ export function loadConfig(path: string): RefreshConfig {
     if (!p.name || typeof p.name !== "string") {
       throw new Error(`Each provider must have a 'name' field in ${path}`);
     }
-    if (!p.credentials || typeof p.credentials !== "object" || Object.keys(p.credentials).length === 0) {
+    if (
+      !p.credentials ||
+      typeof p.credentials !== "object" ||
+      Object.keys(p.credentials).length === 0
+    ) {
       throw new Error(`Provider '${p.name}' must have non-empty 'credentials' in ${path}`);
     }
   }
@@ -53,7 +57,5 @@ export function loadConfig(path: string): RefreshConfig {
 }
 
 export function resolveEndpoint(configEndpoint?: string): string {
-  return configEndpoint
-    ?? process.env.OPENSHELL_ENDPOINT
-    ?? "localhost:9090";
+  return configEndpoint ?? process.env.OPENSHELL_ENDPOINT ?? "localhost:9090";
 }

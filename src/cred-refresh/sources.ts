@@ -7,10 +7,7 @@ export class EnvSource implements CredentialSource {
   readonly type = "env" as const;
   readonly envVar: string;
 
-  constructor(
-    credentialKey: string,
-    envVar?: string,
-  ) {
+  constructor(credentialKey: string, envVar?: string) {
     this.envVar = envVar ?? credentialKey;
   }
 

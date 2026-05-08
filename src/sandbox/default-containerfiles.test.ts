@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { DEFAULT_CONTAINERFILES } from "./default-containerfiles";
 
 describe("DEFAULT_CONTAINERFILES", () => {
@@ -21,7 +21,7 @@ describe("DEFAULT_CONTAINERFILES", () => {
     expect(DEFAULT_CONTAINERFILES["core-js"]).toContain("https://bun.sh/install");
     expect(DEFAULT_CONTAINERFILES["core-js-py"]).toContain("https://bun.sh/install");
     expect(DEFAULT_CONTAINERFILES["core-py"]).not.toContain("https://bun.sh/install");
-    expect(DEFAULT_CONTAINERFILES["core"]).not.toContain("https://bun.sh/install");
+    expect(DEFAULT_CONTAINERFILES.core).not.toContain("https://bun.sh/install");
   });
 
   it("py variants install python and uv", () => {

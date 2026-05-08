@@ -1,7 +1,9 @@
 import { readToken } from "../tokens";
 import { getCliInvocation } from "./fork-binaries";
 
-async function openshell(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+async function openshell(
+  args: string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const cli = await getCliInvocation();
   const proc = Bun.spawn([...cli.argv, ...args], {
     cwd: cli.cwd,
@@ -27,11 +29,18 @@ export async function ensureProvider(): Promise<void> {
   }
 
   console.log("Creating anthropic provider...");
-  const { exitCode, stderr } = await openshell(
-    ["provider", "create", "--name", "anthropic", "--type", "claude",
-     "--credential", `ANTHROPIC_BEARER_TOKEN=Bearer ${token}`,
-     "--credential", `ANTHROPIC_AUTH_TOKEN=${token}`],
-  );
+  const { exitCode, stderr } = await openshell([
+    "provider",
+    "create",
+    "--name",
+    "anthropic",
+    "--type",
+    "claude",
+    "--credential",
+    `ANTHROPIC_BEARER_TOKEN=Bearer ${token}`,
+    "--credential",
+    `ANTHROPIC_AUTH_TOKEN=${token}`,
+  ]);
   if (exitCode !== 0) {
     console.error(`Failed to create provider: ${stderr}`);
     process.exit(1);
