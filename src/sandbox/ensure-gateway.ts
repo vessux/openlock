@@ -28,10 +28,15 @@ export interface GatewayStatus {
 
 export function readGatewayRssKb(pid: number): number | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  const proc = Bun.spawnSync(["ps", "-o", "rss=", "-p", String(pid)], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  let proc: ReturnType<typeof Bun.spawnSync>;
+  try {
+    proc = Bun.spawnSync(["ps", "-o", "rss=", "-p", String(pid)], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch {
+    return null;
+  }
   if (proc.exitCode !== 0) return null;
   const out = new TextDecoder().decode(proc.stdout).trim();
   if (out.length === 0) return null;
