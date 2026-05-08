@@ -283,92 +283,104 @@ function realPreflightDeps(): PreflightDeps {
   };
 }
 
-export async function runSandbox(opts: SandboxOpts): Promise<void> {
-  const projectPath = resolve(opts.path);
+function exitOnPreflightFailure(pre: { ok: boolean; reason?: string }): void {
+  if (pre.ok) return;
+  console.error(pre.reason ?? "preflight failed");
+  process.exit(1);
+}
 
-  const tty = Boolean(process.stdin.isTTY);
-  const pre = await preflight({ tty, deps: realPreflightDeps() });
-  if (!pre.ok) {
-    console.error(pre.reason ?? "preflight failed");
+function announceRepoAction(
+  action: "existed" | "created" | "inited" | "ensured-commit",
+  projectPath: string,
+): void {
+  if (action === "created") console.log(`Created new project at ${projectPath}`);
+  else if (action === "inited") console.log(`Initialized git repository at ${projectPath}`);
+  else if (action === "ensured-commit")
+    console.log(`Landed empty initial commit in ${projectPath}`);
+}
+
+interface ResolvedSession {
+  containerName: string;
+  sessionName: string;
+}
+
+function exitOnAmbiguousSessions(projectPath: string, matches: SessionMeta[]): void {
+  if (matches.length <= 1) return;
+  console.error(`Multiple sessions found for ${projectPath}:`);
+  for (const m of matches) console.error(`  ${m.name}  (created ${m.createdAt})`);
+  console.error("Run `openlock clean <name>` to remove unused sessions.");
+  process.exit(2);
+}
+
+async function reattachSession(m: SessionMeta): Promise<ResolvedSession> {
+  const containerName = `${SANDBOX_PREFIX}${m.name}`;
+  const state = await inspectContainerState(containerName);
+  if (state === "missing") {
+    console.error(
+      `Session ${m.name} has no container; run \`openlock clean ${m.name}\` to reclaim.`,
+    );
     process.exit(1);
   }
-
-  const repoResult = await ensureRepoIsGit(projectPath);
-  switch (repoResult.action) {
-    case "created":
-      console.log(`Created new project at ${projectPath}`);
-      break;
-    case "inited":
-      console.log(`Initialized git repository at ${projectPath}`);
-      break;
-    case "ensured-commit":
-      console.log(`Landed empty initial commit in ${projectPath}`);
-      break;
-    case "existed":
-      break;
+  if (pidAlive(m.attachedPid) && m.attachedPid !== process.pid) {
+    console.error(`Session ${m.name} is in use by pid ${m.attachedPid}.`);
+    process.exit(1);
   }
+  if (state === "exited") {
+    console.log(`Resuming session ${m.name} (container was stopped)...`);
+    await startContainer(containerName);
+  } else {
+    console.log(`Attaching to running session ${m.name}...`);
+  }
+  await startGateway();
+  await ensureProvider();
+  updateSessionMeta(sessionsDir(), m.id, {
+    attachedPid: process.pid,
+    lastAttachedAt: new Date().toISOString(),
+  });
+  return { containerName, sessionName: m.name };
+}
 
+async function resolveOrCreateSession(
+  projectPath: string,
+  opts: SandboxOpts,
+): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
-  if (matches.length > 1) {
-    console.error(`Multiple sessions found for ${projectPath}:`);
-    for (const m of matches) console.error(`  ${m.name}  (created ${m.createdAt})`);
-    console.error("Run `openlock clean <name>` to remove unused sessions.");
-    process.exit(2);
-  }
-
-  let containerName: string;
-  let sessionName: string;
+  exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
     const created = await createSession(projectPath, opts);
-    containerName = created.containerName;
-    sessionName = created.name;
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
     });
-  } else {
-    const m = matches[0]!;
-    sessionName = m.name;
-    containerName = `${SANDBOX_PREFIX}${m.name}`;
-    const state = await inspectContainerState(containerName);
-    if (state === "missing") {
-      console.error(
-        `Session ${m.name} has no container; run \`openlock clean ${m.name}\` to reclaim.`,
-      );
-      process.exit(1);
-    }
-    if (pidAlive(m.attachedPid) && m.attachedPid !== process.pid) {
-      console.error(`Session ${m.name} is in use by pid ${m.attachedPid}.`);
-      process.exit(1);
-    }
-    if (state === "exited") {
-      console.log(`Resuming session ${m.name} (container was stopped)...`);
-      await startContainer(containerName);
-    } else {
-      console.log(`Attaching to running session ${m.name}...`);
-    }
-    await startGateway();
-    await ensureProvider();
-    updateSessionMeta(sessionsDir(), m.id, {
-      attachedPid: process.pid,
-      lastAttachedAt: new Date().toISOString(),
-    });
+    return { containerName: created.containerName, sessionName: created.name };
   }
+  return reattachSession(matches[0]!);
+}
 
-  const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath);
-
-  const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
-    (n) => n !== containerName,
-  );
-  if (shouldStopGateway({ keepGateway: opts.keepGateway, otherSandboxes: stillRunning.length })) {
+function handleGatewayShutdown(opts: SandboxOpts, otherCount: number): void {
+  if (shouldStopGateway({ keepGateway: opts.keepGateway, otherSandboxes: otherCount })) {
     stopGateway();
-  } else if (stillRunning.length > 0) {
-    console.log(`Gateway kept running (${stillRunning.length} other sandbox(es) active).`);
+    return;
+  }
+  if (otherCount > 0) {
+    console.log(`Gateway kept running (${otherCount} other sandbox(es) active).`);
   } else {
     console.log("Gateway kept running (--keep-gateway).");
   }
+}
 
+export async function runSandbox(opts: SandboxOpts): Promise<void> {
+  const projectPath = resolve(opts.path);
+  const tty = Boolean(process.stdin.isTTY);
+  exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps() }));
+  const repoResult = await ensureRepoIsGit(projectPath);
+  announceRepoAction(repoResult.action, projectPath);
+  const { containerName, sessionName } = await resolveOrCreateSession(projectPath, opts);
+  const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath);
+  const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
+    (n) => n !== containerName,
+  );
+  handleGatewayShutdown(opts, stillRunning.length);
   await reportPostRunIdleHint();
-
   if (exitCode !== 0) process.exit(exitCode);
 }

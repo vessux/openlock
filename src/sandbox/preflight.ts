@@ -21,71 +21,67 @@ export interface PreflightResult {
   reason?: string;
 }
 
-export async function preflight(opts: PreflightOpts): Promise<PreflightResult> {
-  const { tty, deps } = opts;
+const MACHINE_NOT_RUNNING_REASON =
+  "podman machine is not running. Start it with: podman machine start";
 
-  const results = await deps.runDoctorChecks();
+function fail(reason: string): PreflightResult {
+  return { ok: false, reason };
+}
 
+function checkDoctor(results: DoctorResult[]): PreflightResult | null {
   const git = results.find((r) => r.name === "git");
-  if (git && !git.ok) {
-    return { ok: false, reason: "git is required. Install git and re-run." };
-  }
-
+  if (git && !git.ok) return fail("git is required. Install git and re-run.");
   const podman = results.find((r) => r.name === "podman");
   if (podman && !podman.ok) {
-    return {
-      ok: false,
-      reason: "podman is required. See https://podman.io/docs/installation",
-    };
+    return fail("podman is required. See https://podman.io/docs/installation");
   }
+  return null;
+}
 
-  if (deps.isMac) {
-    let running = await deps.podmanMachineRunning();
-    if (!running) {
-      if (!tty) {
-        return {
-          ok: false,
-          reason: "podman machine is not running. Start it with: podman machine start",
-        };
-      }
-      const consented = await deps.confirmStartMachine();
-      if (!consented) {
-        return {
-          ok: false,
-          reason: "podman machine is not running. Start it with: podman machine start",
-        };
-      }
-      const started = await deps.startPodmanMachine();
-      if (!started) {
-        return { ok: false, reason: "podman machine start failed. See output above." };
-      }
-      running = await deps.podmanMachineRunning();
-      if (!running) {
-        return { ok: false, reason: "podman machine did not reach running state." };
-      }
-    }
-  } else {
-    const active = await deps.podmanSocketActive();
-    if (!active) {
-      return {
-        ok: false,
-        reason: "podman API socket inactive. Run: systemctl --user enable --now podman.socket",
-      };
-    }
+async function ensurePodmanMachine(
+  deps: PreflightDeps,
+  tty: boolean,
+): Promise<PreflightResult | null> {
+  if (await deps.podmanMachineRunning()) return null;
+  if (!tty) return fail(MACHINE_NOT_RUNNING_REASON);
+  if (!(await deps.confirmStartMachine())) return fail(MACHINE_NOT_RUNNING_REASON);
+  if (!(await deps.startPodmanMachine())) {
+    return fail("podman machine start failed. See output above.");
   }
-
-  if (deps.readToken() === null) {
-    if (!tty) {
-      return {
-        ok: false,
-        reason: "no credentials found. Run: openlock login",
-      };
-    }
-    await deps.login();
-    if (deps.readToken() === null) {
-      return { ok: false, reason: "login did not produce a token." };
-    }
+  if (!(await deps.podmanMachineRunning())) {
+    return fail("podman machine did not reach running state.");
   }
+  return null;
+}
 
-  return { ok: true };
+async function checkPodmanRuntime(
+  deps: PreflightDeps,
+  tty: boolean,
+): Promise<PreflightResult | null> {
+  if (deps.isMac) return ensurePodmanMachine(deps, tty);
+  if (!(await deps.podmanSocketActive())) {
+    return fail("podman API socket inactive. Run: systemctl --user enable --now podman.socket");
+  }
+  return null;
+}
+
+async function checkCredentials(
+  deps: PreflightDeps,
+  tty: boolean,
+): Promise<PreflightResult | null> {
+  if (deps.readToken() !== null) return null;
+  if (!tty) return fail("no credentials found. Run: openlock login");
+  await deps.login();
+  if (deps.readToken() === null) return fail("login did not produce a token.");
+  return null;
+}
+
+export async function preflight(opts: PreflightOpts): Promise<PreflightResult> {
+  const { tty, deps } = opts;
+  const results = await deps.runDoctorChecks();
+  return (
+    checkDoctor(results) ??
+    (await checkPodmanRuntime(deps, tty)) ??
+    (await checkCredentials(deps, tty)) ?? { ok: true }
+  );
 }
