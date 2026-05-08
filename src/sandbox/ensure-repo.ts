@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-export type EnsureRepoAction = "existed" | "created" | "inited" | "ensured-commit";
+type EnsureRepoAction = "existed" | "created" | "inited" | "ensured-commit";
 
 export interface EnsureRepoResult {
   action: EnsureRepoAction;

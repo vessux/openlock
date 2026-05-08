@@ -3,7 +3,7 @@ import type { SessionMeta } from "./session-store";
 
 export const REAP_IDLE_MS_DEFAULT = 30 * 60 * 1000;
 
-export function reapIdleMs(): number {
+function reapIdleMs(): number {
   const v = process.env.OPENLOCK_REAP_IDLE_MS;
   if (v && /^\d+$/.test(v)) return parseInt(v, 10);
   return REAP_IDLE_MS_DEFAULT;

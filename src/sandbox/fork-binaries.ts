@@ -6,10 +6,10 @@ import { forkDir } from "../paths";
 // Pinned openshell fork release. Bump this constant when a new fork
 // release ships, alongside any matching changes in openlock that depend
 // on fork-side behavior.
-export const OPENSHELL_FORK_REPO = "vessux/OpenShell";
-export const OPENSHELL_FORK_TAG = "v0.1.0";
+const OPENSHELL_FORK_REPO = "vessux/OpenShell";
+const OPENSHELL_FORK_TAG = "v0.1.0";
 
-export type ForkBinary = "openshell-gateway" | "openshell-sandbox" | "openshell";
+type ForkBinary = "openshell-gateway" | "openshell-sandbox" | "openshell";
 
 const CACHE_DIR = join(homedir(), ".cache", "openlock", "bin", OPENSHELL_FORK_TAG);
 

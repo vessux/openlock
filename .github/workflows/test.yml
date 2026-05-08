@@ -32,5 +32,5 @@ jobs:
       - name: Tests
         run: bun test
 
-      - name: Dead code (knip, advisory)
-        run: bun run knip || echo "::warning::knip reported unused exports/dependencies (advisory, not blocking)"
+      - name: Dead code (knip)
+        run: bun run knip

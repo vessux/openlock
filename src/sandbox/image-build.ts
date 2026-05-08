@@ -23,7 +23,7 @@ export function contextDirForHash(hash: string): string {
   return join(homedir(), ".cache", "openlock", "build-context", hash);
 }
 
-export async function imageExists(tag: string): Promise<boolean> {
+async function imageExists(tag: string): Promise<boolean> {
   const proc = Bun.spawn(["podman", "image", "exists", tag], {
     stdout: "ignore",
     stderr: "ignore",
