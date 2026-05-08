@@ -60,3 +60,41 @@ function parseChoice(line: string | null, max: number): number | null {
   if (!Number.isFinite(n) || n < 1 || n > max) return null;
   return n;
 }
+
+export function defaultPickerIO(): PickerIO {
+  return {
+    isTTY: process.stdin.isTTY === true,
+    async readLine() {
+      const decoder = new TextDecoder();
+      let buf = "";
+      for await (const chunk of Bun.stdin.stream()) {
+        buf += decoder.decode(chunk as Uint8Array, { stream: true });
+        const nl = buf.indexOf("\n");
+        if (nl !== -1) return buf.slice(0, nl);
+      }
+      return buf.length > 0 ? buf : null;
+    },
+    writeStderr(s) {
+      process.stderr.write(s);
+    },
+    detectFzf() {
+      const r = Bun.spawnSync({ cmd: ["which", "fzf"], stdout: "ignore", stderr: "ignore" });
+      return r.exitCode === 0;
+    },
+    async runFzf(input, prompt) {
+      const proc = Bun.spawn({
+        cmd: ["fzf", `--prompt=${prompt} > `, "--no-sort", "--height=40%", "--reverse"],
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+      proc.stdin.write(input);
+      proc.stdin.end();
+      const out = await new Response(proc.stdout).text();
+      const code = await proc.exited;
+      if (code !== 0) return null;
+      const trimmed = out.replace(/\n$/, "");
+      return trimmed.length > 0 ? trimmed : null;
+    },
+  };
+}
