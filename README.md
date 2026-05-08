@@ -73,6 +73,49 @@ openlock gateway start|stop|status
 
 After the session exits, sandbox commits are in your repo under `refs/sandbox/<session>/*`. Inspect with `git log refs/sandbox/<session>/main` and merge or cherry-pick as needed.
 
+## Shell completion
+
+`openlock` ships completion scripts for bash, zsh, and fish via a generator subcommand:
+
+```sh
+openlock complete <bash|zsh|fish>
+```
+
+Completion covers subcommands, common flags, and live session names (queried at Tab time via the hidden `openlock __list-sessions` subcommand — filesystem only, no podman calls).
+
+### zsh (compinit-friendly install)
+
+```sh
+mkdir -p ~/.zsh/completions
+echo 'fpath=(~/.zsh/completions $fpath)' >> ~/.zshrc
+openlock complete zsh > ~/.zsh/completions/_openlock
+compinit
+```
+
+Or system-wide: `openlock complete zsh > "${fpath[1]}/_openlock"`.
+
+### bash
+
+```sh
+echo 'source <(openlock complete bash)' >> ~/.bashrc
+```
+
+Or system-wide: `openlock complete bash | sudo tee /etc/bash_completion.d/openlock`.
+
+### fish
+
+```sh
+openlock complete fish > ~/.config/fish/completions/openlock.fish
+```
+
+## Interactive session picker
+
+Commands that take a session name (`status`, `stop`, `clean`, `shell`, `exec`) accept it as a positional argument. When you omit it, openlock resolves the session as follows:
+
+- **Exactly one session** for your current directory → that one is used silently.
+- **Multiple sessions** for your cwd, **or** zero in cwd but sessions exist elsewhere → an interactive picker appears (uses `fzf` if installed; otherwise a numbered prompt).
+- **No sessions exist anywhere**, or you're not running interactively → openlock falls back to the existing text error.
+
 ## Session lifecycle
 
 A session = one persistent container per repo. Exiting Claude (`/exit`) does not destroy the container; the next `openlock sandbox <path>` reattaches. Sessions live under `~/.local/state/openlock/sessions/<id>/`.
