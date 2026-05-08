@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { loadSessionByName } from "../sandbox/session-ops";
-import { findSessionsByPath, sessionsDir } from "../sandbox/session-store";
+import { findSessionsByPath, listAllSessions, sessionsDir } from "../sandbox/session-store";
+import { defaultPickerIO, pickSession } from "./_picker";
 
 export async function resolveSessionName(
   positional: string | undefined,
@@ -14,15 +15,25 @@ export async function resolveSessionName(
     }
     return m.name;
   }
-  const matches = findSessionsByPath(sessionsDir(), resolve(process.cwd()));
-  if (matches.length === 0) {
-    console.error(`no session for ${process.cwd()}; pass a session name to ${action}`);
-    return null;
-  }
+  const baseDir = sessionsDir();
+  const cwd = resolve(process.cwd());
+  const matches = findSessionsByPath(baseDir, cwd);
+
+  if (matches.length === 1) return matches[0]!.name;
+
   if (matches.length > 1) {
-    console.error(`multiple sessions for ${process.cwd()}; pass a session name to ${action}:`);
+    const picked = await pickSession(matches, action, defaultPickerIO());
+    if (picked) return picked.name;
+    console.error(`multiple sessions for ${cwd}; pass a session name to ${action}:`);
     for (const m of matches) console.error(`  ${m.name}`);
     return null;
   }
-  return matches[0]!.name;
+
+  const all = listAllSessions(baseDir);
+  if (all.length > 0) {
+    const picked = await pickSession(all, action, defaultPickerIO());
+    if (picked) return picked.name;
+  }
+  console.error(`no session for ${cwd}; pass a session name to ${action}`);
+  return null;
 }
