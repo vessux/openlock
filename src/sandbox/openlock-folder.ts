@@ -4,9 +4,9 @@ import yaml from "js-yaml";
 import { defaultPolicyContent } from "./default-policies";
 import { ALL_CAPS, type Cap, detectCaps } from "./detect-caps";
 
-export const FOLDER_NAME = ".openlock";
-export const CONFIG_FILENAME = "config.yaml";
-export const POLICY_FILENAME = "policy.yaml";
+const FOLDER_NAME = ".openlock";
+const CONFIG_FILENAME = "config.yaml";
+const POLICY_FILENAME = "policy.yaml";
 
 export interface OpenlockFolderConfig {
   caps: Cap[];
@@ -59,7 +59,7 @@ export function copyDefaultPolicy(folderPath: string, caps: Cap[]): void {
   writeFileSync(policyPath(folderPath), defaultPolicyContent(caps), "utf-8");
 }
 
-export type ResolveOrigin = "first-run" | "restored-config" | "restored-policy" | "existing";
+type ResolveOrigin = "first-run" | "restored-config" | "restored-policy" | "existing";
 
 export interface ResolveResult {
   caps: Cap[];
@@ -67,7 +67,7 @@ export interface ResolveResult {
   origin: ResolveOrigin;
 }
 
-export function folderPathFor(projectPath: string): string {
+function folderPathFor(projectPath: string): string {
   return join(projectPath, FOLDER_NAME);
 }
 

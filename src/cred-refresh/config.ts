@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import yaml from "js-yaml";
 
-export interface CredentialConfig {
+interface CredentialConfig {
   source: string;
   env_var?: string;
 }

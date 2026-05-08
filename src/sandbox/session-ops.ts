@@ -21,7 +21,7 @@ export async function loadSessionByName(name: string): Promise<SessionMeta | nul
   return null;
 }
 
-export async function enrichSession(m: SessionMeta): Promise<SessionWithState> {
+async function enrichSession(m: SessionMeta): Promise<SessionWithState> {
   const containerState = await inspectContainerState(`${SANDBOX_PREFIX}${m.name}`);
   return {
     ...m,

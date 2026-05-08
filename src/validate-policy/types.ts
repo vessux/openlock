@@ -1,37 +1,37 @@
-export interface CredInjectHeader {
+interface CredInjectHeader {
   header: string;
   from_credential: string;
 }
 
-export interface CredInject {
+interface CredInject {
   provider?: string;
   strip_headers?: string[];
   inject?: CredInjectHeader[];
 }
 
-export interface L7Allow {
+interface L7Allow {
   method?: string;
   path?: string;
   command?: string;
   query?: Record<string, string | { any: string[] }>;
 }
 
-export interface L7Rule {
+interface L7Rule {
   allow: L7Allow;
 }
 
-export interface L7DenyRule {
+interface L7DenyRule {
   method?: string;
   path?: string;
   command?: string;
   query?: Record<string, string | { any: string[] }>;
 }
 
-export interface TrustCheck {
+interface TrustCheck {
   registry: string;
 }
 
-export interface NetworkEndpoint {
+interface NetworkEndpoint {
   host: string;
   port?: number;
   ports?: number[];
@@ -48,29 +48,29 @@ export interface NetworkEndpoint {
   trust_check?: TrustCheck;
 }
 
-export interface NetworkBinary {
+interface NetworkBinary {
   path: string;
   harness?: boolean;
 }
 
-export interface NetworkPolicy {
+interface NetworkPolicy {
   name?: string;
   endpoints?: NetworkEndpoint[];
   binaries?: NetworkBinary[];
   allowed_secrets?: string[];
 }
 
-export interface FilesystemPolicy {
+interface FilesystemPolicy {
   include_workdir?: boolean;
   read_only?: string[];
   read_write?: string[];
 }
 
-export interface LandlockPolicy {
+interface LandlockPolicy {
   compatibility?: string;
 }
 
-export interface ProcessPolicy {
+interface ProcessPolicy {
   run_as_user?: string;
   run_as_group?: string;
 }
