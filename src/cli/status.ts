@@ -1,9 +1,25 @@
+import type { ParseArgsOptionsConfig } from "node:util";
+import { parseArgs } from "node:util";
 import { statusSession } from "../sandbox/session-ops";
+import { printCmdHelp } from "./_help";
 import { resolveSessionName } from "./_resolve";
 
+export const flagSchema = {
+  json: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
+
 export async function statusCmd(args: string[]): Promise<number> {
-  const positional = args.find((a) => !a.startsWith("--"));
-  const name = await resolveSessionName(positional, "show status");
+  const { values, positionals } = parseArgs({
+    args,
+    options: flagSchema,
+    allowPositionals: true,
+  });
+  if (values.help === true) {
+    printCmdHelp("status", flagSchema, "[name]", "Show session metadata + container state");
+    return 0;
+  }
+  const name = await resolveSessionName(positionals[0], "show status");
   if (!name) return 1;
   try {
     const r = await statusSession(name);

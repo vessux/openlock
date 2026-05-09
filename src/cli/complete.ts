@@ -1,4 +1,15 @@
+import type { ParseArgsOptionsConfig } from "node:util";
+import { printCmdHelp } from "./_help";
+
+export const flagSchema = {
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
+
 export async function completeCmd(args: string[]): Promise<number> {
+  if (args[0] === "--help" || args[0] === "-h") {
+    printCmdHelp("complete", flagSchema, "<bash|zsh|fish>", "Print shell completion script");
+    return 0;
+  }
   const shell = args[0];
   switch (shell) {
     case "bash": {

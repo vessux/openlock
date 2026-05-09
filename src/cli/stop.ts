@@ -1,9 +1,27 @@
+import type { ParseArgsOptionsConfig } from "node:util";
+import { parseArgs } from "node:util";
 import { classifyAll, stopSession } from "../sandbox/session-ops";
+import { printCmdHelp } from "./_help";
 import { resolveSessionName } from "./_resolve";
 
+export const flagSchema = {
+  all: { type: "boolean" },
+  stale: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
+
 export async function stopCmd(args: string[]): Promise<number> {
-  if (args.includes("--all") || args.includes("--stale")) {
-    const stale = args.includes("--stale");
+  const { values, positionals } = parseArgs({
+    args,
+    options: flagSchema,
+    allowPositionals: true,
+  });
+  if (values.help === true) {
+    printCmdHelp("stop", flagSchema, "[name]", "Stop session containers (preserves state)");
+    return 0;
+  }
+  if (values.all === true || values.stale === true) {
+    const stale = values.stale === true;
     const rows = await classifyAll();
     const targets = rows.filter((r) =>
       stale
@@ -26,8 +44,7 @@ export async function stopCmd(args: string[]): Promise<number> {
     console.log(`stopped ${targets.length} session(s)`);
     return 0;
   }
-  const positional = args.find((a) => !a.startsWith("--"));
-  const name = await resolveSessionName(positional, "stop");
+  const name = await resolveSessionName(positionals[0], "stop");
   if (!name) return 1;
   try {
     await stopSession(name);

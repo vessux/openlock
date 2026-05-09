@@ -1,9 +1,5 @@
 #!/usr/bin/env bun
-import { join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
-import { loadConfig, resolveEndpoint } from "./cred-refresh/config";
-import { runRefreshLoop } from "./cred-refresh/loop";
-import { formatErrors, validatePolicyFile } from "./validate-policy";
 
 const USAGE = `
 openlock - sandbox orchestration toolkit
@@ -46,7 +42,15 @@ function main(): void {
     process.exit(0);
   }
 
-  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+  if (args.length === 0) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  // If --help/-h appears BEFORE any command, treat as global help.
+  // Once a command is present, dispatch and let the command handler
+  // print per-command help via `values.help` in its parseArgs result.
+  if (args[0] === "--help" || args[0] === "-h") {
     console.log(USAGE);
     process.exit(0);
   }
@@ -76,29 +80,31 @@ function main(): void {
       import("./cli/exec").then(({ execCmd }) => execCmd(args.slice(1)).then(processExit));
       return;
     case "cred-refresh":
-      credRefresh(args.slice(1));
+      import("./cli/cred-refresh").then(({ credRefreshCmd }) => credRefreshCmd(args.slice(1)));
       return;
     case "validate-policy":
-      validatePolicy(args.slice(1));
+      import("./cli/validate-policy").then(({ validatePolicyCmd }) =>
+        validatePolicyCmd(args.slice(1)),
+      );
       return;
     case "echo-server":
       console.error("echo-server not yet implemented");
       process.exit(1);
       return;
     case "sandbox":
-      sandboxCmd(args.slice(1));
+      import("./cli/sandbox").then(({ sandboxCmd }) => sandboxCmd(args.slice(1)));
       return;
     case "login":
       import("./login").then(({ login }) => login());
       return;
     case "gateway":
-      gatewayCmd(args.slice(1));
+      import("./cli/gateway").then(({ gatewayCmd }) => gatewayCmd(args.slice(1)));
       return;
     case "doctor":
-      doctorCmd(args.slice(1));
+      import("./doctor").then(({ doctor }) => doctor());
       return;
     case "update-images":
-      updateImagesCmd(args.slice(1));
+      import("./cli/update-images").then(({ updateImagesCmd }) => updateImagesCmd(args.slice(1)));
       return;
     case "complete":
       import("./cli/complete").then(({ completeCmd }) =>
@@ -116,98 +122,6 @@ function main(): void {
       console.log(USAGE);
       process.exit(1);
   }
-}
-
-function credRefresh(args: string[]): void {
-  const configIdx = args.indexOf("--config");
-  const configIdxShort = args.indexOf("-c");
-  const idx = configIdx !== -1 ? configIdx : configIdxShort;
-  const configPath =
-    idx !== -1 && args[idx + 1] ? args[idx + 1] : join(process.cwd(), "providers", "refresh.yaml");
-
-  let config: ReturnType<typeof loadConfig>;
-  try {
-    config = loadConfig(configPath);
-  } catch (e) {
-    console.error(`[cred-refresh] ${(e as Error).message}`);
-    process.exit(1);
-  }
-
-  const endpoint = resolveEndpoint(config.endpoint);
-  console.log(`[cred-refresh] endpoint: ${endpoint}`);
-  console.log(`[cred-refresh] config: ${configPath}`);
-
-  runRefreshLoop(config);
-}
-
-function validatePolicy(args: string[]): void {
-  const files = args.filter((a) => !a.startsWith("-"));
-  if (files.length === 0) {
-    console.error("[validate-policy] no files specified");
-    console.error("Usage: openlock validate-policy <file.yaml> [file2.yaml ...]");
-    process.exit(1);
-  }
-
-  let hasErrors = false;
-  for (const file of files) {
-    const errors = validatePolicyFile(file);
-    if (errors.length > 0) {
-      hasErrors = true;
-      console.error(formatErrors(errors, file));
-    } else {
-      console.log(`  ${file}: valid`);
-    }
-  }
-
-  process.exit(hasErrors ? 1 : 0);
-}
-
-function sandboxCmd(args: string[]): void {
-  const path = args.find((a) => !a.startsWith("-")) ?? process.cwd();
-  const policyIdx = args.indexOf("--policy");
-
-  import("./sandbox/session").then(({ runSandbox }) =>
-    runSandbox({
-      path,
-      policy: policyIdx !== -1 ? args[policyIdx + 1] : undefined,
-    }),
-  );
-}
-
-function gatewayCmd(args: string[]): void {
-  const sub = args[0];
-
-  switch (sub) {
-    case "start":
-      import("./sandbox/ensure-gateway").then(({ startGateway }) => startGateway());
-      return;
-    case "stop":
-      import("./sandbox/ensure-gateway").then(({ stopGateway }) => stopGateway());
-      return;
-    case "status":
-      import("./sandbox/ensure-gateway").then(({ gatewayStatus }) => {
-        const status = gatewayStatus();
-        console.log(JSON.stringify(status));
-      });
-      return;
-    default:
-      console.error("Usage: openlock gateway <start|stop|status>");
-      process.exit(1);
-  }
-}
-
-function doctorCmd(_args: string[]): void {
-  import("./doctor").then(({ doctor }) => doctor());
-}
-
-function updateImagesCmd(args: string[]): void {
-  const noCache = args.includes("--no-cache");
-  import("./sandbox/build-images").then(({ updateImages }) =>
-    updateImages({ noCache }).catch((e) => {
-      console.error((e as Error).message);
-      process.exit(1);
-    }),
-  );
 }
 
 function processExit(code: number): void {

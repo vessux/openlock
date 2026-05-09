@@ -1,8 +1,20 @@
+import type { ParseArgsOptionsConfig } from "node:util";
+import { parseArgs } from "node:util";
 import { SANDBOX_PREFIX } from "../sandbox/constants";
 import { stopContainer } from "../sandbox/container";
 import { classifyAll } from "../sandbox/session-ops";
+import { printCmdHelp } from "./_help";
 
-export async function reapCmd(_args: string[]): Promise<number> {
+export const flagSchema = {
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
+
+export async function reapCmd(args: string[]): Promise<number> {
+  const { values } = parseArgs({ args, options: flagSchema, allowPositionals: true });
+  if (values.help === true) {
+    printCmdHelp("reap", flagSchema, "", "Stop idle sessions (no removal)");
+    return 0;
+  }
   const rows = await classifyAll();
   const targets = rows.filter((r) => r.classification === "idle-stale");
   if (targets.length === 0) {

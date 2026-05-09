@@ -1,16 +1,35 @@
+import type { ParseArgsOptionsConfig } from "node:util";
+import { parseArgs } from "node:util";
 import { classifyAll, cleanSession } from "../sandbox/session-ops";
+import { printCmdHelp } from "./_help";
 import { resolveSessionName } from "./_resolve";
 
-function copyDirArg(args: string[]): string | undefined {
-  const i = args.indexOf("--copy");
-  if (i === -1) return undefined;
-  return args[i + 1];
-}
+export const flagSchema = {
+  copy: { type: "string" },
+  all: { type: "boolean" },
+  stale: { type: "boolean" },
+  json: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
 
 export async function cleanCmd(args: string[]): Promise<number> {
-  const copyDir = copyDirArg(args);
-  if (args.includes("--all") || args.includes("--stale")) {
-    const stale = args.includes("--stale");
+  const { values, positionals } = parseArgs({
+    args,
+    options: flagSchema,
+    allowPositionals: true,
+  });
+  if (values.help === true) {
+    printCmdHelp(
+      "clean",
+      flagSchema,
+      "[name]",
+      "Tear down session (rm container + state + host refs)",
+    );
+    return 0;
+  }
+  const copyDir = values.copy;
+  if (values.all === true || values.stale === true) {
+    const stale = values.stale === true;
     const rows = await classifyAll();
     const targets = rows.filter((r) =>
       stale ? r.classification === "exited" || r.classification === "missing" : true,
@@ -25,8 +44,7 @@ export async function cleanCmd(args: string[]): Promise<number> {
     console.log(`cleaned ${targets.length} session(s)`);
     return 0;
   }
-  const positional = args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--copy");
-  const name = await resolveSessionName(positional, "clean");
+  const name = await resolveSessionName(positionals[0], "clean");
   if (!name) return 1;
   try {
     await cleanSession(name, { copyDir });

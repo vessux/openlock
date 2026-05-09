@@ -1,4 +1,53 @@
+import type { ParseArgsOptionsConfig } from "node:util";
+import { COMMAND_FLAGS, type CommandName } from "../_commands";
+import { flagsOf } from "./_flag-format";
+
+function emitFlagsFor(cmd: CommandName, schema: ParseArgsOptionsConfig): string {
+  const lines: string[] = [];
+  for (const info of flagsOf(schema)) {
+    const longName = info.long.slice(2);
+    const requiresValue = info.takesValue ? " -r" : "";
+    const shortPart = info.short ? ` -s ${info.short.slice(1)}` : "";
+    lines.push(
+      `complete -c openlock -n "__openlock_using_subcommand ${cmd}" -l ${longName}${shortPart}${requiresValue}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
+  sandbox: "Create or resume a sandbox session",
+  list: "List all sessions",
+  status: "Show session metadata + container state",
+  stop: "Stop session containers",
+  clean: "Tear down session",
+  reap: "Stop idle sessions",
+  shell: "Open bash inside the session container",
+  exec: "Run a command inside the session container",
+  "cred-refresh": "Start the credential refresh service",
+  "validate-policy": "Validate a sandbox policy YAML file",
+  login: "Authenticate with the gateway",
+  gateway: "Manage the gateway",
+  doctor: "Check system health and prerequisites",
+  "update-images": "Rebuild sandbox container images",
+  complete: "Print shell completion script",
+};
+
+const SESSION_CMDS_FOR_FISH = ["status", "stop", "clean", "shell", "exec"] as const;
+
 export function completionScript(): string {
+  const cmds = Object.keys(COMMAND_FLAGS) as CommandName[];
+  const topLevel = cmds
+    .map(
+      (c) =>
+        `complete -c openlock -n '__openlock_no_subcommand' -f -a ${c} -d '${COMMAND_DESCRIPTIONS[c]}'`,
+    )
+    .join("\n");
+  const flagsBlocks = cmds.map((c) => emitFlagsFor(c, COMMAND_FLAGS[c])).join("\n");
+  const sessionNameCompletions = SESSION_CMDS_FOR_FISH.map(
+    (c) =>
+      `complete -c openlock -n "__openlock_using_subcommand ${c}" -f -a '(__openlock_sessions)'`,
+  ).join("\n");
   return `# fish completion for openlock
 
 function __openlock_no_subcommand
@@ -22,39 +71,21 @@ function __openlock_sessions
 end
 
 # Top-level subcommands
-complete -c openlock -n '__openlock_no_subcommand' -f -a sandbox -d 'Create or resume a sandbox session'
-complete -c openlock -n '__openlock_no_subcommand' -f -a list -d 'List all sessions'
-complete -c openlock -n '__openlock_no_subcommand' -f -a status -d 'Show session metadata + container state'
-complete -c openlock -n '__openlock_no_subcommand' -f -a stop -d 'Stop session containers'
-complete -c openlock -n '__openlock_no_subcommand' -f -a clean -d 'Tear down session'
-complete -c openlock -n '__openlock_no_subcommand' -f -a reap -d 'Stop idle sessions'
-complete -c openlock -n '__openlock_no_subcommand' -f -a shell -d 'Open bash inside the session container'
-complete -c openlock -n '__openlock_no_subcommand' -f -a exec -d 'Run a command inside the session container'
-complete -c openlock -n '__openlock_no_subcommand' -f -a cred-refresh -d 'Start the credential refresh service'
-complete -c openlock -n '__openlock_no_subcommand' -f -a validate-policy -d 'Validate a sandbox policy YAML file'
-complete -c openlock -n '__openlock_no_subcommand' -f -a login -d 'Authenticate with the gateway'
-complete -c openlock -n '__openlock_no_subcommand' -f -a gateway -d 'Manage the gateway'
-complete -c openlock -n '__openlock_no_subcommand' -f -a doctor -d 'Check system health and prerequisites'
-complete -c openlock -n '__openlock_no_subcommand' -f -a update-images -d 'Rebuild sandbox container images'
-complete -c openlock -n '__openlock_no_subcommand' -f -a complete -d 'Print shell completion script'
+${topLevel}
 
-# Session-name commands
-for sub in status stop clean shell exec
-  complete -c openlock -n "__openlock_using_subcommand $sub" -f -a '(__openlock_sessions)'
-  complete -c openlock -n "__openlock_using_subcommand $sub" -l all -d 'All sessions'
-  complete -c openlock -n "__openlock_using_subcommand $sub" -l stale -d 'Stale sessions only'
-  complete -c openlock -n "__openlock_using_subcommand $sub" -l copy -d 'Copy out repo dir'
-  complete -c openlock -n "__openlock_using_subcommand $sub" -l json -d 'JSON output'
-end
+# Session-name completions
+${sessionNameCompletions}
 
-# sandbox: dir + --policy
+# sandbox: dir + flags via the per-command flag block below
 complete -c openlock -n '__openlock_using_subcommand sandbox' -a '(__fish_complete_directories)'
-complete -c openlock -n '__openlock_using_subcommand sandbox' -l policy -d 'Override policy.yaml' -r
 
 # gateway subcommands
 complete -c openlock -n '__openlock_using_subcommand gateway' -f -a 'start stop status'
 
-# complete subcommand
+# complete subcommand (shells)
 complete -c openlock -n '__openlock_using_subcommand complete' -f -a 'bash zsh fish'
+
+# Per-command flags
+${flagsBlocks}
 `;
 }
