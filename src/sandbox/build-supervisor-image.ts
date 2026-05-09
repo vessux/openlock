@@ -16,7 +16,7 @@ export function supervisorDockerfile(): string {
 export async function ensureSupervisorImage(): Promise<string> {
   const binaryPath = await getSupervisorBinary();
 
-  const contextDir = join(homedir(), ".cache", "openlock", "supervisor-image");
+  const contextDir = join(process.env.HOME || homedir(), ".cache", "openlock", "supervisor-image");
   mkdirSync(contextDir, { recursive: true });
   writeFileSync(join(contextDir, "Dockerfile"), supervisorDockerfile());
 

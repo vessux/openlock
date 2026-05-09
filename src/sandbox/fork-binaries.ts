@@ -11,7 +11,13 @@ const OPENSHELL_FORK_TAG = "v0.2.0";
 
 type ForkBinary = "openshell-gateway" | "openshell-sandbox" | "openshell";
 
-const CACHE_DIR = join(homedir(), ".cache", "openlock", "bin", OPENSHELL_FORK_TAG);
+const CACHE_DIR = join(
+  process.env.HOME || homedir(),
+  ".cache",
+  "openlock",
+  "bin",
+  OPENSHELL_FORK_TAG,
+);
 
 export function isDevMode(): boolean {
   return existsSync(join(forkDir(), ".git"));

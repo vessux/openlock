@@ -6,7 +6,7 @@ import { ensureSupervisorImage } from "./build-supervisor-image";
 import { getGatewayBinary } from "./fork-binaries";
 import { pidAlive } from "./proc";
 
-const STATE_DIR = join(homedir(), ".local", "state", "openlock");
+const STATE_DIR = join(process.env.HOME || homedir(), ".local", "state", "openlock");
 const PID_FILE = join(STATE_DIR, "gateway.pid");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
 const HANDSHAKE_SECRET_FILE = join(STATE_DIR, "handshake-secret");
@@ -63,7 +63,7 @@ export function gatewayStatus(): GatewayStatus {
 }
 
 function registerGatewayMetadata(): void {
-  const configHome = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
+  const configHome = process.env.XDG_CONFIG_HOME ?? join(process.env.HOME || homedir(), ".config");
   const gatewayDir = join(configHome, "openshell", "gateways", GATEWAY_NAME);
   mkdirSync(gatewayDir, { recursive: true });
 

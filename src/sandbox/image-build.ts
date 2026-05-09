@@ -20,7 +20,8 @@ export function computeImageTag(content: string, tagPrefix: string): string {
 }
 
 export function contextDirForHash(hash: string): string {
-  return join(homedir(), ".cache", "openlock", "build-context", hash);
+  const home = process.env.HOME || homedir();
+  return join(home, ".cache", "openlock", "build-context", hash);
 }
 
 async function imageExists(tag: string): Promise<boolean> {

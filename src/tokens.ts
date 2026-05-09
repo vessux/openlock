@@ -3,7 +3,8 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export function credentialsPath(): string {
-  return join(homedir(), ".config", "openlock", "credentials.json");
+  const home = process.env.HOME || homedir();
+  return join(home, ".config", "openlock", "credentials.json");
 }
 
 export function readToken(path?: string): string | null {
