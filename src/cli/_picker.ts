@@ -1,3 +1,5 @@
+import { createInterface } from "node:readline";
+
 import type { SessionMeta } from "../sandbox/session-store";
 
 export interface PickerIO {
@@ -65,14 +67,13 @@ export function defaultPickerIO(): PickerIO {
   return {
     isTTY: process.stdin.isTTY === true,
     async readLine() {
-      const decoder = new TextDecoder();
-      let buf = "";
-      for await (const chunk of Bun.stdin.stream()) {
-        buf += decoder.decode(chunk as Uint8Array, { stream: true });
-        const nl = buf.indexOf("\n");
-        if (nl !== -1) return buf.slice(0, nl);
+      const rl = createInterface({ input: process.stdin });
+      try {
+        for await (const line of rl) return line;
+        return null;
+      } finally {
+        rl.close();
       }
-      return buf.length > 0 ? buf : null;
     },
     writeStderr(s) {
       process.stderr.write(s);
