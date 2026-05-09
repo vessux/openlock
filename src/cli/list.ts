@@ -1,6 +1,15 @@
-import { GATEWAY_NAME, type GatewayStatus, gatewayStatus } from "../sandbox/ensure-gateway";
+import type { ParseArgsOptionsConfig } from "node:util";
+import { parseArgs } from "node:util";
+import type { GatewayStatus } from "../sandbox/ensure-gateway";
+import { GATEWAY_NAME, gatewayStatus } from "../sandbox/ensure-gateway";
 import { formatBytes, formatDuration } from "../sandbox/format";
 import { classifyAll } from "../sandbox/session-ops";
+import { printCmdHelp } from "./_help";
+
+export const flagSchema = {
+  json: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
 
 interface GatewayJson {
   name: string;
@@ -35,7 +44,12 @@ function renderGatewayHeader(status: GatewayStatus): string {
 }
 
 export async function listCmd(args: string[]): Promise<number> {
-  const json = args.includes("--json");
+  const { values } = parseArgs({ args, options: flagSchema, allowPositionals: true });
+  if (values.help === true) {
+    printCmdHelp("list", flagSchema, "", "List all sessions");
+    return 0;
+  }
+  const json = values.json === true;
   const gw = gatewayStatus();
   const rows = await classifyAll();
 
