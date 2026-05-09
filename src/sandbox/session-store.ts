@@ -30,7 +30,8 @@ function migrateMeta(raw: LegacyMeta): SessionMeta {
 }
 
 export function sessionsDir(): string {
-  return join(homedir(), ".local", "state", "openlock", "sessions");
+  const home = process.env.HOME || homedir();
+  return join(home, ".local", "state", "openlock", "sessions");
 }
 
 export function sessionDirById(baseDir: string, id: string): string {

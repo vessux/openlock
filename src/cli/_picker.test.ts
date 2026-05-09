@@ -126,3 +126,37 @@ describe("pickSession", () => {
     expect(result).toBeNull();
   });
 });
+
+describe("pickSession reprompt against real stdin", () => {
+  it("falls through after out-of-range then empty (smoke via subprocess)", async () => {
+    const proc = Bun.spawn({
+      cmd: ["bun", "run", `${import.meta.dir}/_picker-smoke.ts`],
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, OPENLOCK_PICKER_SMOKE: "1" },
+    });
+    proc.stdin.write("99\n\n");
+    proc.stdin.end();
+    const out = await new Response(proc.stdout).text();
+    await proc.exited;
+    expect(proc.exitCode).toBe(0);
+    expect(out.trim()).toBe("<null>");
+  });
+
+  it("returns the chosen session on a valid index (smoke via subprocess)", async () => {
+    const proc = Bun.spawn({
+      cmd: ["bun", "run", `${import.meta.dir}/_picker-smoke.ts`],
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, OPENLOCK_PICKER_SMOKE: "1" },
+    });
+    proc.stdin.write("2\n");
+    proc.stdin.end();
+    const out = await new Response(proc.stdout).text();
+    await proc.exited;
+    expect(proc.exitCode).toBe(0);
+    expect(out.trim()).toBe("beta");
+  });
+});
