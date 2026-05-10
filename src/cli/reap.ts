@@ -12,7 +12,7 @@ export const flagSchema = {
 export async function reapCmd(args: string[]): Promise<number> {
   const { values } = parseArgs({ args, options: flagSchema, allowPositionals: true });
   if (values.help === true) {
-    printCmdHelp("reap", flagSchema, "", "Stop idle sessions (no removal)");
+    printCmdHelp("reap", flagSchema, "");
     return 0;
   }
   const rows = await classifyAll();

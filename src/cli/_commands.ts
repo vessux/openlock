@@ -38,3 +38,7 @@ export const COMMAND_FLAGS = {
 export type CommandName = keyof typeof COMMAND_FLAGS;
 
 export const SESSION_COMMANDS = ["status", "stop", "clean", "shell", "exec"] as const;
+
+// Re-export descriptions from the cycle-safe source file so callers that
+// already import from _commands.ts can pick them up here too.
+export { COMMAND_DESCRIPTIONS } from "./_descriptions";

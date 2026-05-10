@@ -295,12 +295,7 @@ async function promoteAction(
 
 export async function refsCmd(args: string[], deps: RefsDeps = defaultDeps()): Promise<number> {
   if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-    printCmdHelp(
-      "refs",
-      flagSchema,
-      "<list|promote> [<session>] [<branch>]",
-      "Inspect and promote sandbox commits to real branches",
-    );
+    printCmdHelp("refs", flagSchema, "<list|promote> [<session>] [<branch>]");
     return args.length === 0 ? 1 : 0;
   }
   const subverb = args[0];
@@ -311,12 +306,7 @@ export async function refsCmd(args: string[], deps: RefsDeps = defaultDeps()): P
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp(
-      "refs",
-      flagSchema,
-      "<list|promote> [<session>] [<branch>]",
-      "Inspect and promote sandbox commits to real branches",
-    );
+    printCmdHelp("refs", flagSchema, "<list|promote> [<session>] [<branch>]");
     return 0;
   }
   switch (subverb) {

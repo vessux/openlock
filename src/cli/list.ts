@@ -46,7 +46,7 @@ function renderGatewayHeader(status: GatewayStatus): string {
 export async function listCmd(args: string[]): Promise<number> {
   const { values } = parseArgs({ args, options: flagSchema, allowPositionals: true });
   if (values.help === true) {
-    printCmdHelp("list", flagSchema, "", "List all sessions");
+    printCmdHelp("list", flagSchema, "");
     return 0;
   }
   const json = values.json === true;

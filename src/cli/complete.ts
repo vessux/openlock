@@ -7,7 +7,7 @@ export const flagSchema = {
 
 export async function completeCmd(args: string[]): Promise<number> {
   if (args[0] === "--help" || args[0] === "-h") {
-    printCmdHelp("complete", flagSchema, "<bash|zsh|fish>", "Print shell completion script");
+    printCmdHelp("complete", flagSchema, "<bash|zsh|fish>");
     return 0;
   }
   const shell = args[0];

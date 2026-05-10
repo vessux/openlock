@@ -15,7 +15,7 @@ function captureLog(fn: () => void): string {
 }
 
 describe("printCmdHelp", () => {
-  it("prints usage line, summary, and each flag", () => {
+  it("prints usage line, summary from registry, and each flag", () => {
     const out = captureLog(() =>
       printCmdHelp(
         "stop",
@@ -24,7 +24,6 @@ describe("printCmdHelp", () => {
           help: { type: "boolean", short: "h" },
         },
         "[name]",
-        "Stop session containers",
       ),
     );
     expect(out).toContain("Usage: openlock stop [name]");
@@ -42,15 +41,14 @@ describe("printCmdHelp", () => {
           help: { type: "boolean", short: "h" },
         },
         "[name]",
-        "Tear down session",
       ),
     );
     expect(out).toContain("--copy <value>");
   });
 
   it("omits the Flags section when schema is empty", () => {
-    const out = captureLog(() => printCmdHelp("noop", {}, "", "Does nothing"));
+    const out = captureLog(() => printCmdHelp("doctor", {}, ""));
     expect(out).not.toContain("Flags:");
-    expect(out).toContain("Does nothing");
+    expect(out).toContain("Check system health and prerequisites");
   });
 });

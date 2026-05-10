@@ -17,7 +17,7 @@ export async function stopCmd(args: string[]): Promise<number> {
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp("stop", flagSchema, "[name]", "Stop session containers (preserves state)");
+    printCmdHelp("stop", flagSchema, "[name]");
     return 0;
   }
   if (values.all === true || values.stale === true) {
