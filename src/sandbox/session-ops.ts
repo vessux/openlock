@@ -46,6 +46,24 @@ export async function classifyAll(): Promise<ClassifiedSession[]> {
   return out;
 }
 
+export async function reapIdleStaleSessions(): Promise<{
+  reaped: string[];
+  durationMs: number;
+}> {
+  const rows = await classifyAll();
+  const targets = rows.filter((r) => r.classification === "idle-stale");
+  if (targets.length === 0) return { reaped: [], durationMs: 0 };
+  const start = Date.now();
+  await Promise.all(
+    targets.map((r) =>
+      stopContainer(`${SANDBOX_PREFIX}${r.meta.name}`).catch((e) =>
+        console.error(`stop ${r.meta.name}: ${(e as Error).message}`),
+      ),
+    ),
+  );
+  return { reaped: targets.map((r) => r.meta.name), durationMs: Date.now() - start };
+}
+
 export async function stopSession(name: string): Promise<void> {
   const m = await loadSessionByName(name);
   if (!m) throw new Error(`no such session: ${name}`);
