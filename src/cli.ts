@@ -23,6 +23,7 @@ Other:
   gateway            Manage the gateway
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
+  refs               Inspect and promote sandbox commits to real branches
   complete <shell>   Print shell completion script (bash|zsh|fish)
 
 Common flags:
@@ -105,6 +106,9 @@ function main(): void {
       return;
     case "update-images":
       import("./cli/update-images").then(({ updateImagesCmd }) => updateImagesCmd(args.slice(1)));
+      return;
+    case "refs":
+      import("./cli/refs").then(({ refsCmd }) => refsCmd(args.slice(1)).then(processExit));
       return;
     case "complete":
       import("./cli/complete").then(({ completeCmd }) =>
