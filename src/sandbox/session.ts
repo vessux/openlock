@@ -20,7 +20,14 @@ import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
 import { prepareGitIdentity } from "./git-identity";
-import { createBundle, fetchBundle } from "./git-sync";
+import {
+  createBundle,
+  fetchBundle,
+  formatSyncBackLog,
+  promoteActiveBranch,
+  pruneSandboxRefs,
+  readSandboxActiveBranch,
+} from "./git-sync";
 import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureImage } from "./image-build";
 import { resolveOpenlockFolder } from "./openlock-folder";
@@ -166,23 +173,41 @@ async function syncBackToHost(
   containerName: string,
   sessionName: string,
 ): Promise<void> {
+  // Read the active branch while the container is still running.
+  // null = detached HEAD; auto-promote will skip silently.
+  const activeBranch = await readSandboxActiveBranch(containerName);
+
+  // Pre-prune: defensive against stale refs from prior sessions reusing
+  // this name. The bundle is the source of truth for current refs.
+  // Note: if both copy-out paths below fail ("No commits to sync."),
+  // prior namespaced refs are already gone. Reachability of any prior
+  // tip is preserved via refs/heads/openlock/<session> when auto-promote
+  // ran on a previous sync; otherwise the next successful sync recovers.
+  await pruneSandboxRefs(projectPath, sessionName);
+
   const tmp = mkdtempSync(join(tmpdir(), "openlock-syncback-"));
   try {
     const outBundle = join(tmp, "out.bundle");
-    const ok = await copyOutOfContainer(containerName, "/sandbox/out.bundle", outBundle);
-    if (ok) {
-      await fetchBundle(projectPath, outBundle, sessionName);
-      console.log(`Sandbox commits synced to refs/sandbox/${sessionName}/*`);
-      return;
-    }
+    // Always regenerate the bundle inside the container before copying it
+    // out. Prior implementations preferred a stale /sandbox/out.bundle if
+    // one existed, which broke re-attach: a second sync would resurface
+    // refs from the first sync only. Run as `sandbox` with cwd
+    // /sandbox/repo so git can open the repo (root trips safe.directory)
+    // and write /sandbox/out.bundle (owned by sandbox).
     const regen = Bun.spawn(
       [
         "podman",
         "exec",
+        "-u",
+        "sandbox",
+        "-w",
+        "/sandbox/repo",
         containerName,
-        "bash",
-        "-c",
-        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all",
+        "git",
+        "bundle",
+        "create",
+        "/sandbox/out.bundle",
+        "--all",
       ],
       { stdout: "ignore", stderr: "ignore" },
     );
@@ -191,13 +216,15 @@ async function syncBackToHost(
       console.warn("No commits to sync.");
       return;
     }
-    const ok2 = await copyOutOfContainer(containerName, "/sandbox/out.bundle", outBundle);
-    if (!ok2) {
+    const ok = await copyOutOfContainer(containerName, "/sandbox/out.bundle", outBundle);
+    if (!ok) {
       console.warn("No commits to sync.");
       return;
     }
     await fetchBundle(projectPath, outBundle, sessionName);
-    console.log(`Sandbox commits synced to refs/sandbox/${sessionName}/*`);
+
+    const promote = await promoteActiveBranch(projectPath, sessionName, activeBranch);
+    console.log(formatSyncBackLog(sessionName, activeBranch, promote));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
