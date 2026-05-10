@@ -15,43 +15,73 @@ export async function pickSession(
   action: string,
   io: PickerIO,
 ): Promise<SessionMeta | null> {
-  if (sessions.length === 0) return null;
+  return pickItem(
+    sessions,
+    {
+      numbered: (s) => `${s.name}  (${s.repoPath})`,
+      fzfLine: (s) => `${s.name}\t${s.repoPath}`,
+      fzfMatch: (line, items) => {
+        const name = line.split("\t")[0];
+        return items.find((s) => s.name === name) ?? null;
+      },
+    },
+    action,
+    io,
+  );
+}
+
+export interface PickRender<T> {
+  /** Label for the numbered fallback (shown in the prompt list). */
+  numbered: (item: T) => string;
+  /** One-line representation passed to fzf as input. */
+  fzfLine: (item: T) => string;
+  /** Resolve fzf's selected output line back to an item. */
+  fzfMatch: (line: string, items: T[]) => T | null;
+}
+
+export async function pickItem<T>(
+  items: T[],
+  render: PickRender<T>,
+  action: string,
+  io: PickerIO,
+): Promise<T | null> {
+  if (items.length === 0) return null;
   if (!io.isTTY) return null;
 
   if (io.detectFzf()) {
-    const input = sessions.map((s) => `${s.name}\t${s.repoPath}`).join("\n");
+    const input = items.map(render.fzfLine).join("\n");
     const selected = await io.runFzf(input, action);
     if (selected === null) return null;
-    const name = selected.split("\t")[0];
-    return sessions.find((s) => s.name === name) ?? null;
+    return render.fzfMatch(selected, items);
   }
 
-  return promptNumbered(sessions, action, io);
+  return promptNumbered(items, render.numbered, action, io);
 }
 
-async function promptNumbered(
-  sessions: SessionMeta[],
+async function promptNumbered<T>(
+  items: T[],
+  label: (item: T) => string,
   action: string,
   io: PickerIO,
-): Promise<SessionMeta | null> {
+): Promise<T | null> {
   const printList = (): void => {
     io.writeStderr(`Pick one for ${action}:\n`);
-    sessions.forEach((s, i) => {
-      io.writeStderr(`  ${i + 1}) ${s.name}  (${s.repoPath})\n`);
+    items.forEach((item, i) => {
+      io.writeStderr(`  ${i + 1}) ${label(item)}\n`);
     });
     io.writeStderr("> ");
   };
 
   printList();
   let line = await io.readLine();
-  let picked = parseChoice(line, sessions.length);
+  let picked = parseChoice(line, items.length);
   if (picked === null && line !== null && line.trim() !== "") {
     printList();
     line = await io.readLine();
-    picked = parseChoice(line, sessions.length);
+    picked = parseChoice(line, items.length);
   }
   if (picked === null) return null;
-  return sessions[picked - 1] ?? null;
+  return items[picked - 1] ?? null;
 }
 
 function parseChoice(line: string | null, max: number): number | null {

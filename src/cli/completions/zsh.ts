@@ -29,6 +29,11 @@ function emitCmdCase(cmd: CommandName): string {
       _values 'subcommand' 'start' 'stop' 'status'
       ;;`;
   }
+  if (cmd === "refs") {
+    return `    refs)
+      _values 'subcommand' 'list' 'promote'
+      ;;`;
+  }
   if (cmd === "complete") {
     return `    complete)
       _values 'shell' 'bash' 'zsh' 'fish'
@@ -64,6 +69,7 @@ const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   doctor: "Check system health and prerequisites",
   "update-images": "Rebuild sandbox container images",
   complete: "Print shell completion script",
+  refs: "Inspect and promote sandbox commits to real branches",
 };
 
 export function completionScript(): string {

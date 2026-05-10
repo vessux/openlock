@@ -31,6 +31,12 @@ function emitCmdCase(cmd: CommandName): string {
       return 0
       ;;`;
   }
+  if (cmd === "refs") {
+    return `    refs)
+      COMPREPLY=( $(compgen -W "list promote" -- "$cur") )
+      return 0
+      ;;`;
+  }
   if (cmd === "complete") {
     return `    complete)
       COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )

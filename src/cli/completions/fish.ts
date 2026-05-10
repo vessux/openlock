@@ -31,6 +31,7 @@ const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   doctor: "Check system health and prerequisites",
   "update-images": "Rebuild sandbox container images",
   complete: "Print shell completion script",
+  refs: "Inspect and promote sandbox commits to real branches",
 };
 
 const SESSION_CMDS_FOR_FISH = ["status", "stop", "clean", "shell", "exec"] as const;
@@ -81,6 +82,9 @@ complete -c openlock -n '__openlock_using_subcommand sandbox' -a '(__fish_comple
 
 # gateway subcommands
 complete -c openlock -n '__openlock_using_subcommand gateway' -f -a 'start stop status'
+
+# refs subcommands
+complete -c openlock -n '__openlock_using_subcommand refs' -f -a 'list promote'
 
 # complete subcommand (shells)
 complete -c openlock -n '__openlock_using_subcommand complete' -f -a 'bash zsh fish'
