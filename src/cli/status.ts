@@ -16,7 +16,7 @@ export async function statusCmd(args: string[]): Promise<number> {
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp("status", flagSchema, "[name]", "Show session metadata + container state");
+    printCmdHelp("status", flagSchema, "[name]");
     return 0;
   }
   const name = await resolveSessionName(positionals[0], "show status");

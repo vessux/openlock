@@ -16,7 +16,7 @@ export async function shellCmd(args: string[]): Promise<number> {
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp("shell", flagSchema, "[name]", "Open bash inside the session container");
+    printCmdHelp("shell", flagSchema, "[name]");
     return 0;
   }
   const name = await resolveSessionName(positionals[0], "shell into");

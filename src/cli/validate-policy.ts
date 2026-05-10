@@ -10,12 +10,7 @@ export const flagSchema = {
 export function validatePolicyCmd(args: string[]): void {
   const { values, positionals } = parseArgs({ args, options: flagSchema, allowPositionals: true });
   if (values.help === true) {
-    printCmdHelp(
-      "validate-policy",
-      flagSchema,
-      "<file.yaml>...",
-      "Validate one or more sandbox policy YAML files",
-    );
+    printCmdHelp("validate-policy", flagSchema, "<file.yaml>...");
     return;
   }
   const files = positionals;

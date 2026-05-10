@@ -7,24 +7,8 @@ import { completionScript as zshScript } from "./zsh";
 describe("bash completion script", () => {
   it("contains all top-level subcommands", () => {
     const s = bashScript();
-    for (const cmd of [
-      "sandbox",
-      "list",
-      "status",
-      "stop",
-      "clean",
-      "reap",
-      "shell",
-      "exec",
-      "cred-refresh",
-      "validate-policy",
-      "login",
-      "gateway",
-      "doctor",
-      "update-images",
-      "complete",
-    ]) {
-      expect(s).toContain(cmd);
+    for (const cmd of Object.keys(COMMAND_FLAGS)) {
+      expect(s, `bash script missing ${cmd}`).toContain(cmd);
     }
   });
 
@@ -45,18 +29,8 @@ describe("zsh completion script", () => {
 
   it("contains all top-level subcommands", () => {
     const s = zshScript();
-    for (const cmd of [
-      "sandbox",
-      "list",
-      "status",
-      "stop",
-      "clean",
-      "reap",
-      "shell",
-      "exec",
-      "complete",
-    ]) {
-      expect(s).toContain(cmd);
+    for (const cmd of Object.keys(COMMAND_FLAGS)) {
+      expect(s, `zsh script missing ${cmd}`).toContain(cmd);
     }
   });
 
@@ -68,18 +42,8 @@ describe("zsh completion script", () => {
 describe("fish completion script", () => {
   it("contains all top-level subcommands", () => {
     const s = fishScript();
-    for (const cmd of [
-      "sandbox",
-      "list",
-      "status",
-      "stop",
-      "clean",
-      "reap",
-      "shell",
-      "exec",
-      "complete",
-    ]) {
-      expect(s).toContain(cmd);
+    for (const cmd of Object.keys(COMMAND_FLAGS)) {
+      expect(s, `fish script missing ${cmd}`).toContain(cmd);
     }
   });
 

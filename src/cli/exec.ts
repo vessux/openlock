@@ -19,12 +19,7 @@ export async function execCmd(args: string[]): Promise<number> {
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp(
-      "exec",
-      flagSchema,
-      "[name] -- <cmd...>",
-      "Run a command inside the session container",
-    );
+    printCmdHelp("exec", flagSchema, "[name] -- <cmd...>");
     return 0;
   }
   if (after.length === 0) {

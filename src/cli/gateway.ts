@@ -13,7 +13,7 @@ export function gatewayCmd(args: string[]): void {
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp("gateway", flagSchema, "<start|stop|status>", "Manage the gateway");
+    printCmdHelp("gateway", flagSchema, "<start|stop|status>");
     return;
   }
   const sub = positionals[0];

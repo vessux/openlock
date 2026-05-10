@@ -13,7 +13,7 @@ export const flagSchema = {
 export function credRefreshCmd(args: string[]): void {
   const { values } = parseArgs({ args, options: flagSchema, allowPositionals: true });
   if (values.help === true) {
-    printCmdHelp("cred-refresh", flagSchema, "", "Start the credential refresh service");
+    printCmdHelp("cred-refresh", flagSchema, "");
     return;
   }
   const configPath = values.config ?? join(process.cwd(), "providers", "refresh.yaml");

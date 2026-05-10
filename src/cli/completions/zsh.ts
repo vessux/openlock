@@ -1,5 +1,5 @@
 import type { ParseArgsOptionsConfig } from "node:util";
-import { COMMAND_FLAGS, type CommandName } from "../_commands";
+import { COMMAND_DESCRIPTIONS, COMMAND_FLAGS, type CommandName } from "../_commands";
 import { flagsOf } from "./_flag-format";
 
 function flagsToZshValues(schema: ParseArgsOptionsConfig): string {
@@ -52,25 +52,6 @@ function emitCmdCase(cmd: CommandName): string {
       _values 'flags' ${flagValues}
       ;;`;
 }
-
-const COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
-  sandbox: "Create or resume a sandbox session",
-  list: "List all sessions",
-  status: "Show session metadata + container state",
-  stop: "Stop session containers",
-  clean: "Tear down session",
-  reap: "Stop idle sessions",
-  shell: "Open bash inside the session container",
-  exec: "Run a command inside the session container",
-  "cred-refresh": "Start the credential refresh service",
-  "validate-policy": "Validate a sandbox policy YAML file",
-  login: "Authenticate with the gateway",
-  gateway: "Manage the gateway",
-  doctor: "Check system health and prerequisites",
-  "update-images": "Rebuild sandbox container images",
-  complete: "Print shell completion script",
-  refs: "Inspect and promote sandbox commits to real branches",
-};
 
 export function completionScript(): string {
   const subcommandLines = (Object.keys(COMMAND_FLAGS) as CommandName[])

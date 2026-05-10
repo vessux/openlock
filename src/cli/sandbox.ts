@@ -14,12 +14,7 @@ export function sandboxCmd(args: string[]): void {
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp(
-      "sandbox",
-      flagSchema,
-      "[path]",
-      "Create or resume a sandbox session (path defaults to cwd; runs preflight + auto-inits the repo)",
-    );
+    printCmdHelp("sandbox", flagSchema, "[path]");
     return;
   }
   const path = positionals[0] ?? process.cwd();

@@ -19,12 +19,7 @@ export async function cleanCmd(args: string[]): Promise<number> {
     allowPositionals: true,
   });
   if (values.help === true) {
-    printCmdHelp(
-      "clean",
-      flagSchema,
-      "[name]",
-      "Tear down session (rm container + state + host refs)",
-    );
+    printCmdHelp("clean", flagSchema, "[name]");
     return 0;
   }
   const copyDir = values.copy;

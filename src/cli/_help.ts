@@ -1,14 +1,14 @@
 import type { ParseArgsOptionsConfig } from "node:util";
+import { COMMAND_DESCRIPTIONS, type CommandName } from "./_descriptions";
 
 export function printCmdHelp(
-  name: string,
+  name: CommandName,
   schema: ParseArgsOptionsConfig,
   signature: string,
-  summary: string,
 ): void {
   console.log(`Usage: openlock ${name}${signature ? ` ${signature}` : ""}`);
   console.log("");
-  console.log(summary);
+  console.log(COMMAND_DESCRIPTIONS[name]);
   const entries = Object.entries(schema);
   if (entries.length === 0) return;
   console.log("");

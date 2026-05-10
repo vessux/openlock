@@ -10,7 +10,7 @@ export const flagSchema = {
 export function updateImagesCmd(args: string[]): void {
   const { values } = parseArgs({ args, options: flagSchema, allowPositionals: true });
   if (values.help === true) {
-    printCmdHelp("update-images", flagSchema, "", "Rebuild sandbox container images");
+    printCmdHelp("update-images", flagSchema, "");
     return;
   }
   const noCache = values["no-cache"] === true;
