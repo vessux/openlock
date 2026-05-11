@@ -24,6 +24,7 @@ export const COMMAND_DESCRIPTIONS = {
   "update-images": "Rebuild sandbox container images",
   complete: "Print shell completion script",
   refs: "Inspect and promote sandbox commits to real branches",
+  report: "Collect diagnostic bundle for bug reports",
 } as const;
 
 export type CommandName = keyof typeof COMMAND_DESCRIPTIONS;
