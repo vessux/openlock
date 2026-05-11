@@ -33,7 +33,7 @@ import { ensureImage } from "./image-build";
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
-import { classifySession, type SessionWithState } from "./reap";
+import { reapIdleStaleSessions } from "./session-ops";
 import {
   findSessionsByPath,
   listAllSessions,
@@ -254,22 +254,10 @@ async function attachClaudeAndSync(
   return exitCode;
 }
 
-async function reportPostRunIdleHint(): Promise<void> {
-  const all = listAllSessions(sessionsDir());
-  const now = Date.now();
-  let stale = 0;
-  for (const m of all) {
-    const state = await inspectContainerState(`${SANDBOX_PREFIX}${m.name}`);
-    const enriched: SessionWithState = {
-      ...m,
-      containerState: state,
-      pidAlive: pidAlive(m.attachedPid),
-    };
-    if (classifySession(enriched, now) === "idle-stale") stale += 1;
-  }
-  if (stale > 0) {
-    console.log(`\n${stale} idle session(s) detected. Reap with: openlock reap`);
-  }
+async function autoReapStaleSessions(): Promise<void> {
+  const { reaped, durationMs } = await reapIdleStaleSessions();
+  if (reaped.length === 0) return;
+  console.log(`\nauto-reaped ${reaped.length} idle session(s) (${durationMs}ms)`);
 }
 
 function realPreflightDeps(): PreflightDeps {
@@ -395,6 +383,6 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     (n) => n !== containerName,
   );
   handleGatewayShutdown(stillRunning.length);
-  await reportPostRunIdleHint();
+  await autoReapStaleSessions();
   if (exitCode !== 0) process.exit(exitCode);
 }
