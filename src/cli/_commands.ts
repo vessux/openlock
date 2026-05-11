@@ -9,6 +9,7 @@ import { flagSchema as listFlags } from "./list";
 import { flagSchema as loginFlags } from "./login";
 import { flagSchema as reapFlags } from "./reap";
 import { flagSchema as refsFlags } from "./refs";
+import { flagSchema as reportFlags } from "./report";
 import { flagSchema as sandboxFlags } from "./sandbox";
 import { flagSchema as shellFlags } from "./shell";
 import { flagSchema as statusFlags } from "./status";
@@ -33,6 +34,7 @@ export const COMMAND_FLAGS = {
   "update-images": updateImagesFlags,
   complete: completeFlags,
   refs: refsFlags,
+  report: reportFlags,
 } as const satisfies Record<string, ParseArgsOptionsConfig>;
 
 export type CommandName = keyof typeof COMMAND_FLAGS;

@@ -24,6 +24,7 @@ Other:
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
   refs               Inspect and promote sandbox commits to real branches
+  report             Collect diagnostic bundle for bug reports
   complete <shell>   Print shell completion script (bash|zsh|fish)
 
 Common flags:
@@ -109,6 +110,9 @@ function main(): void {
       return;
     case "refs":
       import("./cli/refs").then(({ refsCmd }) => refsCmd(args.slice(1)).then(processExit));
+      return;
+    case "report":
+      import("./cli/report").then(({ reportCmd }) => reportCmd(args.slice(1)).then(processExit));
       return;
     case "complete":
       import("./cli/complete").then(({ completeCmd }) =>
