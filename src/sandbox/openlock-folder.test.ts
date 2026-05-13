@@ -35,14 +35,14 @@ describe("readConfig", () => {
     const folder = join(workDir, ".openlock");
     mkdirSync(folder);
     writeFileSync(join(folder, "config.yaml"), "caps: [js, py]\n");
-    expect(readConfig(folder)).toEqual({ caps: ["js", "py"] });
+    expect(readConfig(folder)).toEqual({ caps: ["js", "py"], mounts: [], args: [], env: {} });
   });
 
   it("returns empty caps when caps key omitted", () => {
     const folder = join(workDir, ".openlock");
     mkdirSync(folder);
     writeFileSync(join(folder, "config.yaml"), "{}\n");
-    expect(readConfig(folder)).toEqual({ caps: [] });
+    expect(readConfig(folder)).toEqual({ caps: [], mounts: [], args: [], env: {} });
   });
 
   it("throws when config.yaml is missing", () => {
@@ -64,6 +64,66 @@ describe("readConfig", () => {
     writeFileSync(join(folder, "config.yaml"), "caps: js\n");
     expect(() => readConfig(folder)).toThrow(/must be a list/);
   });
+
+  it("parses mounts/args/env when present", () => {
+    const folder = join(workDir, ".openlock");
+    const src = join(workDir, "seed-src");
+    mkdirSync(folder);
+    mkdirSync(src);
+    writeFileSync(
+      join(folder, "config.yaml"),
+      `caps: [js]
+mounts:
+  - source: ${src}
+    target: /sandbox/.openlock/skills
+    type: copy-once
+args: ["--plugin-dir", "/sandbox/.openlock/skills"]
+env:
+  FOO: bar
+`,
+    );
+    const cfg = readConfig(folder);
+    expect(cfg.caps).toEqual(["js"]);
+    expect(cfg.mounts).toEqual([
+      { source: src, target: "/sandbox/.openlock/skills", type: "copy-once" },
+    ]);
+    expect(cfg.args).toEqual(["--plugin-dir", "/sandbox/.openlock/skills"]);
+    expect(cfg.env).toEqual({ FOO: "bar" });
+  });
+
+  it("defaults mounts/args/env to empty when omitted", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "config.yaml"), "caps: [js]\n");
+    const cfg = readConfig(folder);
+    expect(cfg.mounts).toEqual([]);
+    expect(cfg.args).toEqual([]);
+    expect(cfg.env).toEqual({});
+  });
+
+  it("throws when args is not a list of strings", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "config.yaml"), "args: [1, 2, 3]\n");
+    expect(() => readConfig(folder)).toThrow(/args/);
+  });
+
+  it("throws when env values are not strings", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "config.yaml"), "env:\n  K: 42\n");
+    expect(() => readConfig(folder)).toThrow(/env/);
+  });
+
+  it("throws when mounts is invalid (propagates parseMounts error)", () => {
+    const folder = join(workDir, ".openlock");
+    mkdirSync(folder);
+    writeFileSync(
+      join(folder, "config.yaml"),
+      "mounts:\n  - source: /nope\n    target: /sandbox/.openlock/x\n    type: copy-once\n",
+    );
+    expect(() => readConfig(folder)).toThrow(/does not exist/);
+  });
 });
 
 describe("writeConfig", () => {
@@ -71,20 +131,20 @@ describe("writeConfig", () => {
     const folder = join(workDir, ".openlock");
     mkdirSync(folder);
     writeConfig(folder, { caps: ["js"] });
-    expect(readConfig(folder)).toEqual({ caps: ["js"] });
+    expect(readConfig(folder)).toEqual({ caps: ["js"], mounts: [], args: [], env: {} });
   });
 
   it("writes empty caps as an empty list", () => {
     const folder = join(workDir, ".openlock");
     mkdirSync(folder);
     writeConfig(folder, { caps: [] });
-    expect(readConfig(folder)).toEqual({ caps: [] });
+    expect(readConfig(folder)).toEqual({ caps: [], mounts: [], args: [], env: {} });
   });
 
   it("creates the .openlock directory if it does not yet exist", () => {
     const folder = join(workDir, ".openlock");
     writeConfig(folder, { caps: ["py"] });
-    expect(readConfig(folder)).toEqual({ caps: ["py"] });
+    expect(readConfig(folder)).toEqual({ caps: ["py"], mounts: [], args: [], env: {} });
   });
 });
 
@@ -123,7 +183,7 @@ describe("resolveOpenlockFolder", () => {
     expect(result.policyPath).toBe(join(folder, "policy.yaml"));
     expect(existsSync(join(folder, "config.yaml"))).toBe(true);
     expect(existsSync(join(folder, "policy.yaml"))).toBe(true);
-    expect(readConfig(folder)).toEqual({ caps: ["js"] });
+    expect(readConfig(folder)).toEqual({ caps: ["js"], mounts: [], args: [], env: {} });
   });
 
   it("first-run: empty repo -> caps = [] and uses default.yaml", () => {
@@ -160,7 +220,7 @@ describe("resolveOpenlockFolder", () => {
 
     expect(result.origin).toBe("restored-config");
     expect(result.caps).toEqual(["js"]);
-    expect(readConfig(folder)).toEqual({ caps: ["js"] });
+    expect(readConfig(folder)).toEqual({ caps: ["js"], mounts: [], args: [], env: {} });
     expect(statSync(policyPath(folder)).mtimeMs).toBe(policyMtimeBefore);
   });
 

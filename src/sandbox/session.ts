@@ -30,6 +30,7 @@ import {
 } from "./git-sync";
 import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureImage } from "./image-build";
+import { type Mount, restageMount, stageMounts } from "./mounts";
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
@@ -62,11 +63,20 @@ async function buildSandboxImage(caps: Cap[]): Promise<string> {
 interface ResolvedRepo {
   caps: Cap[];
   policy: string;
+  mounts: Mount[];
+  args: string[];
+  env: Record<string, string>;
 }
 
 function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string): ResolvedRepo {
   if (policyOverride) {
-    return { caps: detectCaps(projectPath), policy: resolve(policyOverride) };
+    return {
+      caps: detectCaps(projectPath),
+      policy: resolve(policyOverride),
+      mounts: [],
+      args: [],
+      env: {},
+    };
   }
   const folder = resolveOpenlockFolder(projectPath);
   if (folder.origin === "first-run") {
@@ -77,7 +87,13 @@ function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string):
     const suffix = folder.caps.length > 0 ? `-${folder.caps.join("-")}` : "";
     console.log(`Restored .openlock/policy.yaml from default${suffix}.yaml.`);
   }
-  return { caps: folder.caps, policy: folder.policyPath };
+  return {
+    caps: folder.caps,
+    policy: folder.policyPath,
+    mounts: folder.mounts,
+    args: folder.args,
+    env: folder.env,
+  };
 }
 
 interface NewSession {
@@ -89,8 +105,8 @@ interface NewSession {
   image: string;
 }
 
-async function createSession(projectPath: string, opts: SandboxOpts): Promise<NewSession> {
-  const { caps, policy } = resolveRepoPolicyAndCaps(projectPath, opts.policy);
+async function createSession(projectPath: string, resolved: ResolvedRepo): Promise<NewSession> {
+  const { caps, policy, mounts } = resolved;
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
 
   await startGateway();
@@ -110,6 +126,7 @@ async function createSession(projectPath: string, opts: SandboxOpts): Promise<Ne
     mkdirSync(staging);
     await createBundle(projectPath, join(staging, "repo.bundle"));
     console.log("Git bundle created.");
+    stageMounts(staging, mounts);
 
     const gitconfigPath = await prepareGitIdentity(staging);
     console.log(
@@ -237,12 +254,18 @@ function findSessionByName(name: string): SessionMeta | null {
   return null;
 }
 
+interface LaunchOpts {
+  args: readonly string[];
+  env: Readonly<Record<string, string>>;
+}
+
 async function attachClaudeAndSync(
   containerName: string,
   sessionName: string,
   projectPath: string,
+  launch: LaunchOpts,
 ): Promise<number> {
-  const exitCode = await execClaude(containerName);
+  const exitCode = await execClaude(containerName, launch.args, launch.env);
   await syncBackToHost(projectPath, containerName, sessionName);
   const meta = findSessionByName(sessionName);
   if (meta) {
@@ -318,7 +341,7 @@ function exitOnAmbiguousSessions(projectPath: string, matches: SessionMeta[]): v
   process.exit(2);
 }
 
-async function reattachSession(m: SessionMeta): Promise<ResolvedSession> {
+async function reattachSession(m: SessionMeta, mounts: readonly Mount[]): Promise<ResolvedSession> {
   const containerName = `${SANDBOX_PREFIX}${m.name}`;
   const state = await inspectContainerState(containerName);
   if (state === "missing") {
@@ -339,6 +362,11 @@ async function reattachSession(m: SessionMeta): Promise<ResolvedSession> {
   }
   await startGateway();
   await ensureProvider();
+  for (const mount of mounts) {
+    if (mount.type !== "copy-refresh") continue;
+    console.log(`Refreshing mount ${mount.target}...`);
+    await restageMount(containerName, mount);
+  }
   updateSessionMeta(sessionsDir(), m.id, {
     attachedPid: process.pid,
     lastAttachedAt: new Date().toISOString(),
@@ -348,19 +376,19 @@ async function reattachSession(m: SessionMeta): Promise<ResolvedSession> {
 
 async function resolveOrCreateSession(
   projectPath: string,
-  opts: SandboxOpts,
+  resolved: ResolvedRepo,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
-    const created = await createSession(projectPath, opts);
+    const created = await createSession(projectPath, resolved);
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
     });
     return { containerName: created.containerName, sessionName: created.name };
   }
-  return reattachSession(matches[0]!);
+  return reattachSession(matches[0]!, resolved.mounts);
 }
 
 function handleGatewayShutdown(otherCount: number): void {
@@ -377,8 +405,10 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps() }));
   const repoResult = await ensureRepoIsGit(projectPath);
   announceRepoAction(repoResult.action, projectPath);
-  const { containerName, sessionName } = await resolveOrCreateSession(projectPath, opts);
-  const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath);
+  const resolved = resolveRepoPolicyAndCaps(projectPath, opts.policy);
+  const { containerName, sessionName } = await resolveOrCreateSession(projectPath, resolved);
+  const launch: LaunchOpts = { args: resolved.args, env: resolved.env };
+  const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath, launch);
   const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
     (n) => n !== containerName,
   );

@@ -179,6 +179,40 @@ Default policies live in `policies/` and are selected by detected capabilities:
 
 Override with `--policy /abs/path/to/policy.yaml`.
 
+## Seeds: mounts, args, env
+
+`.openlock/config.yaml` accepts three optional fields that let you inject host content into the sandbox and tweak the agent launch:
+
+- `mounts[]` — host directories copied into the container. Each entry requires `source` (host path, absolute / `~/...` / relative-to-project-root), `target` (absolute container path; must be under `/sandbox/.openlock/`), and `type` (`copy-once` — stage on create only; `copy-refresh` — re-stage on every attach). Targets `/sandbox/.openlock/repo.bundle` and `/sandbox/.openlock/.gitconfig` are reserved for openlock-internal use.
+- `args[]` — extra argv appended to the in-container agent launch (today: `claude`).
+- `env{}` — extra environment variables set on the agent process.
+
+Example — Claude Code with a seed-skills plugin:
+
+```yaml
+caps: [js]
+mounts:
+  - source: ~/.cache/seed-skills/bundles/abc123
+    target: /sandbox/.openlock/skills
+    type: copy-refresh
+args: ["--plugin-dir", "/sandbox/.openlock/skills"]
+```
+
+Example — opencode (when supported via openlock-9bw multi-harness):
+
+```yaml
+mounts:
+  - source: ./opencode-bundle
+    target: /sandbox/.openlock/opencode-config
+    type: copy-once
+env:
+  OPENCODE_CONFIG_DIR: /sandbox/.openlock/opencode-config
+```
+
+Symlinks in `mounts[].source` are dereferenced at copy time, so producers that compile to host-symlinked caches (e.g., seed-skills) materialize as real files inside the container. User maintains consistency between `target` values and container paths referenced in `args[]` / `env{}` — there is no cross-validation.
+
+Future mount types `bind` (live podman `-v`) and `git-bundle` (workdir unification) are tracked under bd `openlock-71j` and `openlock-bkk`.
+
 ## Repo layout
 
 ```
