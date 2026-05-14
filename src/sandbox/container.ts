@@ -38,11 +38,37 @@ export async function removeContainer(name: string, force = true): Promise<void>
   await proc.exited;
 }
 
-export async function execClaude(name: string): Promise<number> {
-  const proc = Bun.spawn(
-    ["podman", "exec", "-it", "-u", "sandbox", "-w", "/sandbox/repo", name, "claude"],
-    { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
-  );
+export function buildClaudeExecArgv(
+  name: string,
+  extraArgs: readonly string[],
+  extraEnv: Readonly<Record<string, string>>,
+): string[] {
+  const envFlags: string[] = [];
+  for (const [k, v] of Object.entries(extraEnv)) {
+    envFlags.push("--env", `${k}=${v}`);
+  }
+  return [
+    "podman",
+    "exec",
+    "-it",
+    "-u",
+    "sandbox",
+    "-w",
+    "/sandbox/repo",
+    ...envFlags,
+    name,
+    "claude",
+    ...extraArgs,
+  ];
+}
+
+export async function execClaude(
+  name: string,
+  extraArgs: readonly string[] = [],
+  extraEnv: Readonly<Record<string, string>> = {},
+): Promise<number> {
+  const argv = buildClaudeExecArgv(name, extraArgs, extraEnv);
+  const proc = Bun.spawn(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
   return await proc.exited;
 }
 
@@ -165,6 +191,59 @@ export async function removeSecret(name: string): Promise<void> {
 export async function removeVolume(name: string): Promise<void> {
   const rm = Bun.spawn(["podman", "volume", "rm", name], { stdout: "ignore", stderr: "ignore" });
   await rm.exited;
+}
+
+export function buildPodmanCpArgv(
+  hostPath: string,
+  name: string,
+  containerDestDir: string,
+): string[] {
+  return ["podman", "cp", hostPath, `${name}:${containerDestDir}`];
+}
+
+export function buildPodmanRmArgv(name: string, containerPath: string): string[] {
+  return ["podman", "exec", "-u", "root", name, "rm", "-rf", containerPath];
+}
+
+export function buildPodmanChownArgv(name: string, containerPath: string): string[] {
+  return ["podman", "exec", "-u", "root", name, "chown", "-R", "sandbox:sandbox", containerPath];
+}
+
+async function spawnExitCode(argv: string[]): Promise<{ code: number; stderr: string }> {
+  const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "pipe" });
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  return { code, stderr };
+}
+
+export async function podmanCpInto(
+  hostPath: string,
+  name: string,
+  containerDestDir: string,
+): Promise<void> {
+  const { code, stderr } = await spawnExitCode(buildPodmanCpArgv(hostPath, name, containerDestDir));
+  if (code !== 0) {
+    throw new Error(
+      `podman cp ${hostPath} -> ${name}:${containerDestDir} failed (exit ${code}): ${stderr.trim()}`,
+    );
+  }
+}
+
+export async function podmanExecRmRf(name: string, containerPath: string): Promise<void> {
+  const { code, stderr } = await spawnExitCode(buildPodmanRmArgv(name, containerPath));
+  if (code !== 0) {
+    throw new Error(
+      `podman exec ${name} rm -rf ${containerPath} failed (exit ${code}): ${stderr.trim()}`,
+    );
+  }
+}
+
+export async function podmanExecChownSandbox(name: string, containerPath: string): Promise<void> {
+  const { code, stderr } = await spawnExitCode(buildPodmanChownArgv(name, containerPath));
+  if (code !== 0) {
+    throw new Error(
+      `podman exec ${name} chown ${containerPath} failed (exit ${code}): ${stderr.trim()}`,
+    );
+  }
 }
 
 export async function listSandboxContainers(

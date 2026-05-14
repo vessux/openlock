@@ -1,0 +1,304 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import {
+  readFileSync as fsReadFileSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { type Mount, parseMounts, stageMounts, stagingPathFor } from "./mounts";
+
+let projectRoot: string;
+beforeEach(() => {
+  projectRoot = mkdtempSync(join(tmpdir(), "openlock-mounts-test-"));
+});
+afterEach(() => {
+  rmSync(projectRoot, { recursive: true, force: true });
+});
+
+describe("parseMounts", () => {
+  it("returns [] when raw is undefined", () => {
+    expect(parseMounts(undefined, projectRoot)).toEqual([]);
+  });
+
+  it("returns [] when raw is an empty list", () => {
+    expect(parseMounts([], projectRoot)).toEqual([]);
+  });
+
+  it("throws when raw is not a list", () => {
+    expect(() => parseMounts({}, projectRoot)).toThrow(/'mounts' must be a list/);
+  });
+
+  it("resolves a relative source path against projectRoot", () => {
+    const src = join(projectRoot, "seeds");
+    mkdirSync(src);
+    const [m] = parseMounts(
+      [{ source: "seeds", target: "/sandbox/.openlock/x", type: "copy-once" }],
+      projectRoot,
+    );
+    expect(m?.source).toBe(src);
+  });
+
+  it("expands ~ in source", () => {
+    const testDir = join(homedir(), ".openlock-mounts-test-tmp");
+    mkdirSync(testDir, { recursive: true });
+    try {
+      const [m] = parseMounts(
+        [
+          {
+            source: "~/.openlock-mounts-test-tmp",
+            target: "/sandbox/.openlock/x",
+            type: "copy-once",
+          },
+        ],
+        projectRoot,
+      );
+      expect(m?.source).toBe(testDir);
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts absolute source", () => {
+    const src = join(projectRoot, "abs");
+    mkdirSync(src);
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/.openlock/x", type: "copy-once" }],
+      projectRoot,
+    );
+    expect(m?.source).toBe(src);
+  });
+
+  it("throws when source is missing or not a string", () => {
+    expect(() =>
+      parseMounts([{ target: "/sandbox/.openlock/x", type: "copy-once" }], projectRoot),
+    ).toThrow(/source/);
+  });
+
+  it("throws when source does not exist", () => {
+    expect(() =>
+      parseMounts(
+        [{ source: "/nope/does/not/exist", target: "/sandbox/.openlock/x", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/source.*does not exist/);
+  });
+
+  it("throws when source is a file, not a directory", () => {
+    const f = join(projectRoot, "file");
+    writeFileSync(f, "x");
+    expect(() =>
+      parseMounts([{ source: f, target: "/sandbox/.openlock/x", type: "copy-once" }], projectRoot),
+    ).toThrow(/source.*not a directory/);
+  });
+
+  it("throws when target is missing", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() => parseMounts([{ source: src, type: "copy-once" }], projectRoot)).toThrow(/target/);
+  });
+
+  it("throws when target is not absolute", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts([{ source: src, target: "sandbox/x", type: "copy-once" }], projectRoot),
+    ).toThrow(/absolute/);
+  });
+
+  it("throws when target is not under /sandbox/.openlock/", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts([{ source: src, target: "/etc/passwd", type: "copy-once" }], projectRoot),
+    ).toThrow(/under \/sandbox\/\.openlock\//);
+  });
+
+  it("throws when target is under /sandbox/ but not under /sandbox/.openlock/", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts([{ source: src, target: "/sandbox/scratch", type: "copy-once" }], projectRoot),
+    ).toThrow(/under \/sandbox\/\.openlock\//);
+  });
+
+  it("throws when target equals /sandbox/.openlock or /sandbox/.openlock/", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts([{ source: src, target: "/sandbox/.openlock", type: "copy-once" }], projectRoot),
+    ).toThrow(/under \/sandbox\/\.openlock\//);
+  });
+
+  it("throws when target contains a .. segment", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/../etc/passwd", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/must not contain '\.\.'/);
+  });
+
+  it("rejects /sandbox/.openlock/../etc/passwd (prefix-bypass via ..)", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/../etc/passwd", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/must not contain '\.\.'/);
+  });
+
+  it("throws when target's top segment collides with openlock-internal name (repo.bundle)", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/repo.bundle", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name 'repo\.bundle'/);
+  });
+
+  it("throws when target's top segment collides with openlock-internal name (.gitconfig)", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/.gitconfig", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name '\.gitconfig'/);
+  });
+
+  it("also catches collision when reserved name is the prefix of a deeper path", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/repo.bundle/sub", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name 'repo\.bundle'/);
+  });
+
+  it("throws when two mounts share a target", () => {
+    const a = join(projectRoot, "a");
+    const b = join(projectRoot, "b");
+    mkdirSync(a);
+    mkdirSync(b);
+    expect(() =>
+      parseMounts(
+        [
+          { source: a, target: "/sandbox/.openlock/x", type: "copy-once" },
+          { source: b, target: "/sandbox/.openlock/x", type: "copy-refresh" },
+        ],
+        projectRoot,
+      ),
+    ).toThrow(/duplicate target/);
+  });
+
+  it("throws when type is missing", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts([{ source: src, target: "/sandbox/.openlock/x" }], projectRoot),
+    ).toThrow(/type/);
+  });
+
+  it("throws when type is unknown", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts([{ source: src, target: "/sandbox/.openlock/x", type: "bind" }], projectRoot),
+    ).toThrow(/bind.*not yet supported|unknown type/);
+  });
+
+  it("accepts type copy-once and copy-refresh", () => {
+    const a = join(projectRoot, "a");
+    const b = join(projectRoot, "b");
+    mkdirSync(a);
+    mkdirSync(b);
+    const ms = parseMounts(
+      [
+        { source: a, target: "/sandbox/.openlock/a", type: "copy-once" },
+        { source: b, target: "/sandbox/.openlock/b", type: "copy-refresh" },
+      ],
+      projectRoot,
+    );
+    expect(ms.map((m) => m.type)).toEqual(["copy-once", "copy-refresh"]);
+  });
+});
+
+describe("stagingPathFor", () => {
+  it("strips the /sandbox/.openlock/ prefix and returns the staging-relative path", () => {
+    expect(stagingPathFor("/sandbox/.openlock/skills")).toBe("skills");
+    expect(stagingPathFor("/sandbox/.openlock/scratch")).toBe("scratch");
+  });
+
+  it("throws when target is not under /sandbox/.openlock/", () => {
+    expect(() => stagingPathFor("/etc/passwd")).toThrow(/under \/sandbox\/\.openlock\//);
+  });
+
+  it("throws when target contains a .. segment", () => {
+    expect(() => stagingPathFor("/sandbox/a/../b")).toThrow(/must not contain '\.\.'/);
+  });
+});
+
+describe("stageMounts", () => {
+  it("copies each mount's source into staging at the staging-relative path", () => {
+    const src = join(projectRoot, "seed");
+    mkdirSync(src);
+    writeFileSync(join(src, "file.txt"), "hello");
+    const staging = mkdtempSync(join(tmpdir(), "openlock-stage-"));
+    try {
+      const mounts: Mount[] = [
+        { source: src, target: "/sandbox/.openlock/skills", type: "copy-once" },
+      ];
+      stageMounts(staging, mounts);
+      expect(fsReadFileSync(join(staging, "skills/file.txt"), "utf-8")).toBe("hello");
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("dereferences symlinks (no symlinks in staged output)", () => {
+    const src = join(projectRoot, "seed");
+    mkdirSync(src);
+    writeFileSync(join(src, "real.txt"), "real-content");
+    symlinkSync(join(src, "real.txt"), join(src, "linked.txt"));
+    const staging = mkdtempSync(join(tmpdir(), "openlock-stage-"));
+    try {
+      stageMounts(staging, [
+        { source: src, target: "/sandbox/.openlock/scratch", type: "copy-once" },
+      ]);
+      const lst = lstatSync(join(staging, "scratch/linked.txt"));
+      expect(lst.isSymbolicLink()).toBe(false);
+      expect(fsReadFileSync(join(staging, "scratch/linked.txt"), "utf-8")).toBe("real-content");
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("creates parent dirs as needed", () => {
+    const src = join(projectRoot, "seed");
+    mkdirSync(src);
+    writeFileSync(join(src, "x"), "");
+    const staging = mkdtempSync(join(tmpdir(), "openlock-stage-"));
+    try {
+      stageMounts(staging, [
+        { source: src, target: "/sandbox/.openlock/a/b/c/d", type: "copy-once" },
+      ]);
+      expect(fsReadFileSync(join(staging, "a/b/c/d/x"), "utf-8")).toBe("");
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  });
+});
