@@ -176,6 +176,7 @@ async function createSession(projectPath: string, resolved: ResolvedRepo): Promi
       createdAt: new Date().toISOString(),
       lastAttachedAt: null,
       attachedPid: null,
+      harness: "claude_code",
     };
     saveSession(sessionsDir(), meta);
 

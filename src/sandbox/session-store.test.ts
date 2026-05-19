@@ -26,6 +26,7 @@ describe("session-store", () => {
       createdAt: "2026-05-03T12:00:00Z",
       lastAttachedAt: null,
       attachedPid: null,
+      harness: "claude_code",
     };
     saveSession(testDir, meta);
     const loaded = loadSession(testDir, "existing-test-1");
@@ -62,6 +63,7 @@ describe("session-store v2", () => {
       createdAt: "2026-05-07T10:00:00Z",
       lastAttachedAt: null,
       attachedPid: null,
+      harness: "claude_code",
       ...overrides,
     };
   }
@@ -140,5 +142,69 @@ describe("session-store v2", () => {
     const [meta] = listAllSessions(base);
     expect(meta!.attachedPid).toBe(4242);
     expect(meta!.lastAttachedAt).toBe("2026-05-07T11:00:00Z");
+  });
+});
+
+describe("session-store harness field (backward compat)", () => {
+  let baseDir: string;
+
+  function setup(): string {
+    baseDir = mkdtempSync(join(tmpdir(), "openlock-session-harness-"));
+    return baseDir;
+  }
+
+  function cleanup(): void {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+
+  it("legacy record without harness field reads as claude_code", () => {
+    setup();
+    try {
+      const id = "test-id-legacy";
+      const dir = join(baseDir, id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "meta.json"),
+        JSON.stringify({
+          id,
+          name: "sb-legacy",
+          repoPath: "/some/repo",
+          caps: [],
+          image: "openlock-core",
+          policy: "default",
+          createdAt: "2026-05-01T00:00:00Z",
+          lastAttachedAt: null,
+          attachedPid: null,
+        }),
+      );
+      const meta = loadSession(baseDir, id);
+      expect(meta).not.toBeNull();
+      expect(meta?.harness).toBe("claude_code");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("new record with explicit harness is persisted and reads back", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-new",
+        name: "sb-new",
+        repoPath: "/some/repo",
+        caps: [],
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-05-19T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "opencode",
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.harness).toBe("opencode");
+    } finally {
+      cleanup();
+    }
   });
 });
