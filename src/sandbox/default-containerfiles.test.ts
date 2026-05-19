@@ -37,4 +37,27 @@ describe("DEFAULT_CONTAINERFILES", () => {
       expect(content, key).toContain("@anthropic-ai/claude-code@");
     }
   });
+
+  it("each entry has the opencode-ai install line", () => {
+    for (const [key, content] of Object.entries(DEFAULT_CONTAINERFILES)) {
+      expect(content, key).toContain("opencode-ai@");
+    }
+  });
+
+  it("harness installs (claude + opencode) come after USER sandbox", () => {
+    for (const [key, content] of Object.entries(DEFAULT_CONTAINERFILES)) {
+      const userSandboxIdx = content.indexOf("USER sandbox");
+      const claudeIdx = content.indexOf("@anthropic-ai/claude-code@");
+      const opencodeIdx = content.indexOf("opencode-ai@");
+      expect(userSandboxIdx, `${key}: USER sandbox directive missing`).toBeGreaterThan(-1);
+      expect(claudeIdx, `${key}: claude install missing`).toBeGreaterThan(-1);
+      expect(opencodeIdx, `${key}: opencode install missing`).toBeGreaterThan(-1);
+      expect(claudeIdx, `${key}: claude install must come after USER sandbox`).toBeGreaterThan(
+        userSandboxIdx,
+      );
+      expect(opencodeIdx, `${key}: opencode install must come after USER sandbox`).toBeGreaterThan(
+        userSandboxIdx,
+      );
+    }
+  });
 });
