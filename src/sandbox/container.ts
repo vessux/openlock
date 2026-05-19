@@ -1,4 +1,5 @@
 import { getCliInvocation } from "./fork-binaries";
+import { type Harness, harnessLaunchArgv } from "./harness";
 import { filterOpenshellStderr } from "./openshell-stderr";
 
 export type ContainerState = "running" | "exited" | "missing" | "other";
@@ -38,7 +39,8 @@ export async function removeContainer(name: string, force = true): Promise<void>
   await proc.exited;
 }
 
-export function buildClaudeExecArgv(
+export function buildHarnessExecArgv(
+  harness: Harness,
   name: string,
   extraArgs: readonly string[],
   extraEnv: Readonly<Record<string, string>>,
@@ -57,9 +59,27 @@ export function buildClaudeExecArgv(
     "/sandbox/repo",
     ...envFlags,
     name,
-    "claude",
-    ...extraArgs,
+    ...harnessLaunchArgv(harness, extraArgs),
   ];
+}
+
+export async function execHarness(
+  harness: Harness,
+  name: string,
+  extraArgs: readonly string[] = [],
+  extraEnv: Readonly<Record<string, string>> = {},
+): Promise<number> {
+  const argv = buildHarnessExecArgv(harness, name, extraArgs, extraEnv);
+  const proc = Bun.spawn(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+  return await proc.exited;
+}
+
+export function buildClaudeExecArgv(
+  name: string,
+  extraArgs: readonly string[],
+  extraEnv: Readonly<Record<string, string>>,
+): string[] {
+  return buildHarnessExecArgv("claude_code", name, extraArgs, extraEnv);
 }
 
 export async function execClaude(
@@ -67,9 +87,7 @@ export async function execClaude(
   extraArgs: readonly string[] = [],
   extraEnv: Readonly<Record<string, string>> = {},
 ): Promise<number> {
-  const argv = buildClaudeExecArgv(name, extraArgs, extraEnv);
-  const proc = Bun.spawn(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-  return await proc.exited;
+  return execHarness("claude_code", name, extraArgs, extraEnv);
 }
 
 export async function execBash(name: string): Promise<number> {
