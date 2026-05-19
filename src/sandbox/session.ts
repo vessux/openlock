@@ -2,12 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { podmanMachineRunning, podmanSocketActive, runDoctorChecks } from "../doctor";
+import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
 import { readToken } from "../tokens";
 import { SANDBOX_PREFIX } from "./constants";
 import {
   copyOutOfContainer,
-  execClaude,
+  execHarness,
   inspectContainerState,
   listSandboxContainers,
   openshellSandboxCreateAsync,
@@ -28,6 +29,7 @@ import {
   pruneSandboxRefs,
   readSandboxActiveBranch,
 } from "./git-sync";
+import { type Harness, resolveHarness } from "./harness";
 import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureImage } from "./image-build";
 import { type Mount, restageMount, stageMounts } from "./mounts";
@@ -106,7 +108,11 @@ interface NewSession {
   image: string;
 }
 
-async function createSession(projectPath: string, resolved: ResolvedRepo): Promise<NewSession> {
+async function createSession(
+  projectPath: string,
+  resolved: ResolvedRepo,
+  harness: Harness,
+): Promise<NewSession> {
   const { caps, policy, mounts } = resolved;
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
 
@@ -177,7 +183,7 @@ async function createSession(projectPath: string, resolved: ResolvedRepo): Promi
       createdAt: new Date().toISOString(),
       lastAttachedAt: null,
       attachedPid: null,
-      harness: "claude_code",
+      harness,
     };
     saveSession(sessionsDir(), meta);
 
@@ -259,15 +265,16 @@ function findSessionByName(name: string): SessionMeta | null {
 interface LaunchOpts {
   args: readonly string[];
   env: Readonly<Record<string, string>>;
+  harness: Harness;
 }
 
-async function attachClaudeAndSync(
+async function attachHarnessAndSync(
   containerName: string,
   sessionName: string,
   projectPath: string,
   launch: LaunchOpts,
 ): Promise<number> {
-  const exitCode = await execClaude(containerName, launch.args, launch.env);
+  const exitCode = await execHarness(launch.harness, containerName, launch.args, launch.env);
   await syncBackToHost(projectPath, containerName, sessionName);
   const meta = findSessionByName(sessionName);
   if (meta) {
@@ -379,11 +386,12 @@ async function reattachSession(m: SessionMeta, mounts: readonly Mount[]): Promis
 async function resolveOrCreateSession(
   projectPath: string,
   resolved: ResolvedRepo,
+  harness: Harness,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
-    const created = await createSession(projectPath, resolved);
+    const created = await createSession(projectPath, resolved, harness);
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
@@ -391,6 +399,59 @@ async function resolveOrCreateSession(
     return { containerName: created.containerName, sessionName: created.name };
   }
   return reattachSession(matches[0]!, resolved.mounts);
+}
+
+/**
+ * True iff the user explicitly selected a harness via `--harness` flag or
+ * `OPENLOCK_HARNESS` env var. Reattach should NOT reject a session when the
+ * user passed nothing and `resolveHarness` falls back to a default that
+ * happens to differ from the session's harness.
+ */
+export function userExplicitlyPickedHarness(args: {
+  cliFlag: string | undefined;
+  envOpenlockHarness: string | undefined;
+}): boolean {
+  return Boolean(args.cliFlag) || Boolean(args.envOpenlockHarness);
+}
+
+export interface PickSessionHarnessArgs {
+  existingSessionHarness: Harness | null;
+  userExplicitFlag: string | undefined;
+  envOpenlockHarness: string | undefined;
+  resolvedHarness: Harness;
+}
+
+export interface PickSessionHarnessResult {
+  harness: Harness;
+  mismatch: boolean;
+}
+
+/**
+ * Decides which harness to use for a runSandbox invocation given the
+ * existing session (if any) and the user's explicit signals.
+ *
+ * Rules (per Task 6, approach b):
+ * 1. If no existing session, use the resolved harness.
+ * 2. If an existing session is found AND the user gave NO explicit signal
+ *    (`--harness` or `OPENLOCK_HARNESS`), prefer the existing session's harness.
+ * 3. If the user passed an explicit signal AND it doesn't match the existing
+ *    session's harness, return mismatch=true so callers can reject.
+ */
+export function pickSessionHarness(args: PickSessionHarnessArgs): PickSessionHarnessResult {
+  if (args.existingSessionHarness === null) {
+    return { harness: args.resolvedHarness, mismatch: false };
+  }
+  const explicit = userExplicitlyPickedHarness({
+    cliFlag: args.userExplicitFlag,
+    envOpenlockHarness: args.envOpenlockHarness,
+  });
+  if (!explicit) {
+    return { harness: args.existingSessionHarness, mismatch: false };
+  }
+  if (args.existingSessionHarness !== args.resolvedHarness) {
+    return { harness: args.resolvedHarness, mismatch: true };
+  }
+  return { harness: args.resolvedHarness, mismatch: false };
 }
 
 function handleGatewayShutdown(otherCount: number): void {
@@ -408,9 +469,40 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const repoResult = await ensureRepoIsGit(projectPath);
   announceRepoAction(repoResult.action, projectPath);
   const resolved = resolveRepoPolicyAndCaps(projectPath, opts.policy);
-  const { containerName, sessionName } = await resolveOrCreateSession(projectPath, resolved);
-  const launch: LaunchOpts = { args: resolved.args, env: resolved.env };
-  const exitCode = await attachClaudeAndSync(containerName, sessionName, projectPath, launch);
+
+  // Decide the effective harness BEFORE create-or-reattach so we can persist
+  // the right value on first create and reject explicit mismatches on reattach.
+  const existingMatches = findSessionsByPath(sessionsDir(), projectPath);
+  exitOnAmbiguousSessions(projectPath, existingMatches);
+  const resolvedHarness = resolveHarness({
+    cliFlag: opts.harness,
+    env: process.env,
+    readGlobal: readGlobalConfig,
+  });
+  const pick = pickSessionHarness({
+    existingSessionHarness: existingMatches[0]?.harness ?? null,
+    userExplicitFlag: opts.harness,
+    envOpenlockHarness: process.env.OPENLOCK_HARNESS,
+    resolvedHarness,
+  });
+  if (pick.mismatch) {
+    const existing = existingMatches[0]!;
+    console.error(
+      `Session ${existing.name} was created with harness ${existing.harness}; ` +
+        `requested harness ${pick.harness} does not match. ` +
+        `Create a new session or omit --harness.`,
+    );
+    process.exit(1);
+  }
+  const harness = pick.harness;
+
+  const { containerName, sessionName } = await resolveOrCreateSession(
+    projectPath,
+    resolved,
+    harness,
+  );
+  const launch: LaunchOpts = { args: resolved.args, env: resolved.env, harness };
+  const exitCode = await attachHarnessAndSync(containerName, sessionName, projectPath, launch);
   const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
     (n) => n !== containerName,
   );
