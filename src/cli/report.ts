@@ -5,6 +5,7 @@ import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import pkg from "../../package.json" with { type: "json" };
 import { runDoctorChecks } from "../doctor";
+import { globalConfigPath } from "../global-config/paths";
 import { OPENSHELL_FORK_TAG } from "../sandbox/fork-binaries";
 import { printCmdHelp } from "./_help";
 import { capLines, redactSecrets, stripSecretFields } from "./report-redact";
@@ -40,13 +41,20 @@ interface SummaryLog {
   redactionCounts: Record<string, number> | null;
 }
 
+interface SummaryGlobalConfig {
+  path: string;
+  exists: boolean;
+  bytes: number | null;
+}
+
 interface Summary {
   schemaVersion: 1;
   generatedAt: string;
   versions: SummaryVersions;
-  doctor: Array<{ name: string; ok: boolean }>;
+  doctor: Array<{ name: string; ok: boolean; detail?: string }>;
   sessions: SummarySession[];
   log: SummaryLog;
+  globalConfig: SummaryGlobalConfig;
 }
 
 export interface ReportOptions {
@@ -83,6 +91,11 @@ export async function report(
     writeFileSync(join(bundleDir, "gateway.log"), logResult.payload);
   }
 
+  const globalConfigResult = collectGlobalConfig();
+  if (globalConfigResult.payload !== null) {
+    writeFileSync(join(bundleDir, "global-config.yaml"), globalConfigResult.payload);
+  }
+
   const summary: Summary = {
     schemaVersion: 1,
     generatedAt: now.toISOString(),
@@ -90,6 +103,7 @@ export async function report(
     doctor,
     sessions,
     log: logResult.info,
+    globalConfig: globalConfigResult.info,
   };
   writeFileSync(join(bundleDir, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
 
@@ -177,11 +191,34 @@ async function collectVersions(): Promise<SummaryVersions> {
   };
 }
 
-async function collectDoctor(): Promise<Array<{ name: string; ok: boolean }>> {
+async function collectDoctor(): Promise<Array<{ name: string; ok: boolean; detail?: string }>> {
   try {
     return await runDoctorChecks();
   } catch {
     return [];
+  }
+}
+
+interface GlobalConfigResult {
+  payload: string | null;
+  info: SummaryGlobalConfig;
+}
+
+function collectGlobalConfig(): GlobalConfigResult {
+  const path = globalConfigPath();
+  try {
+    const buf = readFileSync(path);
+    const text = buf.toString("utf8");
+    return {
+      payload: text,
+      info: { path, exists: true, bytes: buf.length },
+    };
+  } catch (e) {
+    const missing = (e as NodeJS.ErrnoException)?.code === "ENOENT";
+    return {
+      payload: null,
+      info: { path, exists: !missing, bytes: null },
+    };
   }
 }
 

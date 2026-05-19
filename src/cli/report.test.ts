@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPENSHELL_FORK_TAG } from "../sandbox/fork-binaries";
@@ -66,6 +66,63 @@ describe("report()", () => {
     const log = readFileSync(join(bundleRoot, "gateway.log"), "utf8");
     expect(log).not.toContain("planted-bearer");
     expect(log).toContain("[REDACTED:");
+  });
+
+  it("captures ~/.config/openlock/config.yaml contents in the bundle when present", async () => {
+    const oldXdg = process.env.XDG_CONFIG_HOME;
+    const xdgDir = mkdtempSync(join(tmpdir(), "openlock-report-xdg-"));
+    try {
+      process.env.XDG_CONFIG_HOME = xdgDir;
+      const cfgDir = join(xdgDir, "openlock");
+      mkdirSync(cfgDir, { recursive: true });
+      const cfgBody = "default_harness: opencode\n";
+      writeFileSync(join(cfgDir, "config.yaml"), cfgBody);
+
+      const { path: tarballPath } = await report({ stateDir, outDir });
+      const extract = Bun.spawn(["tar", "-xzf", tarballPath, "-C", extractDir]);
+      expect(await extract.exited).toBe(0);
+
+      const baseName = tarballPath
+        .substring(tarballPath.lastIndexOf("/") + 1)
+        .replace(/\.tar\.gz$/, "");
+      const bundleRoot = join(extractDir, baseName);
+
+      const captured = readFileSync(join(bundleRoot, "global-config.yaml"), "utf8");
+      expect(captured).toBe(cfgBody);
+
+      const summary = JSON.parse(readFileSync(join(bundleRoot, "summary.json"), "utf8"));
+      expect(summary.globalConfig.exists).toBe(true);
+      expect(summary.globalConfig.path).toBe(join(cfgDir, "config.yaml"));
+    } finally {
+      if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = oldXdg;
+      rmSync(xdgDir, { recursive: true, force: true });
+    }
+  });
+
+  it("omits global-config.yaml from the bundle when the file is absent", async () => {
+    const oldXdg = process.env.XDG_CONFIG_HOME;
+    const xdgDir = mkdtempSync(join(tmpdir(), "openlock-report-xdg-"));
+    try {
+      process.env.XDG_CONFIG_HOME = xdgDir;
+      const { path: tarballPath } = await report({ stateDir, outDir });
+      const extract = Bun.spawn(["tar", "-xzf", tarballPath, "-C", extractDir]);
+      expect(await extract.exited).toBe(0);
+
+      const baseName = tarballPath
+        .substring(tarballPath.lastIndexOf("/") + 1)
+        .replace(/\.tar\.gz$/, "");
+      const bundleRoot = join(extractDir, baseName);
+
+      expect(existsSync(join(bundleRoot, "global-config.yaml"))).toBe(false);
+
+      const summary = JSON.parse(readFileSync(join(bundleRoot, "summary.json"), "utf8"));
+      expect(summary.globalConfig.exists).toBe(false);
+    } finally {
+      if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = oldXdg;
+      rmSync(xdgDir, { recursive: true, force: true });
+    }
   });
 
   it("emits log.exists=false and omits gateway.log when no log file is present", async () => {

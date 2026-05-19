@@ -1,12 +1,19 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { readGlobalConfig } from "./global-config";
+import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { readToken } from "./tokens";
 
+interface CheckOutcome {
+  ok: boolean;
+  detail?: string;
+}
+
 interface Check {
   name: string;
-  test: () => Promise<boolean>;
+  test: () => Promise<boolean | CheckOutcome>;
 }
 
 async function commandExists(cmd: string): Promise<boolean> {
@@ -57,6 +64,17 @@ export async function podmanSocketActive(): Promise<boolean> {
 export interface DoctorResult {
   name: string;
   ok: boolean;
+  detail?: string;
+}
+
+async function checkGlobalConfig(): Promise<CheckOutcome> {
+  try {
+    readGlobalConfig();
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, detail: msg };
+  }
 }
 
 export async function runDoctorChecks(): Promise<DoctorResult[]> {
@@ -85,11 +103,22 @@ export async function runDoctorChecks(): Promise<DoctorResult[]> {
       name: "credentials (openlock login)",
       test: async () => readToken() !== null,
     },
+    {
+      name: `global config (${globalConfigPath()})`,
+      test: checkGlobalConfig,
+    },
   ];
 
   const results: DoctorResult[] = [];
   for (const c of checks) {
-    results.push({ name: c.name, ok: await c.test() });
+    const outcome = await c.test();
+    if (typeof outcome === "boolean") {
+      results.push({ name: c.name, ok: outcome });
+    } else {
+      const r: DoctorResult = { name: c.name, ok: outcome.ok };
+      if (outcome.detail !== undefined) r.detail = outcome.detail;
+      results.push(r);
+    }
   }
   return results;
 }
@@ -100,6 +129,7 @@ export async function doctor(): Promise<void> {
   for (const r of results) {
     const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
     console.log(`  ${icon} ${r.name}`);
+    if (r.detail !== undefined) console.log(`      ${r.detail}`);
     if (!r.ok) failures++;
   }
 
