@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildClaudeExecArgv,
+  buildHarnessExecArgv,
   buildPodmanChownArgv,
   buildPodmanCpArgv,
   buildPodmanRmArgv,
@@ -56,6 +57,63 @@ describe("buildClaudeExecArgv", () => {
     expect(argv).toContain("FOO=bar");
     expect(argv[argv.length - 2]).toBe("claude");
     expect(argv[argv.length - 1]).toBe("--print");
+  });
+});
+
+describe("buildHarnessExecArgv", () => {
+  it("uses 'claude' binary for claude_code harness", () => {
+    expect(buildHarnessExecArgv("claude_code", "sb-foo", [], {})).toEqual([
+      "podman",
+      "exec",
+      "-it",
+      "-u",
+      "sandbox",
+      "-w",
+      "/sandbox/repo",
+      "sb-foo",
+      "claude",
+    ]);
+  });
+
+  it("uses 'opencode' binary for opencode harness", () => {
+    expect(buildHarnessExecArgv("opencode", "sb-foo", [], {})).toEqual([
+      "podman",
+      "exec",
+      "-it",
+      "-u",
+      "sandbox",
+      "-w",
+      "/sandbox/repo",
+      "sb-foo",
+      "opencode",
+    ]);
+  });
+
+  it("appends extra args after the harness binary for opencode", () => {
+    expect(buildHarnessExecArgv("opencode", "sb-foo", ["run", "hello"], {})).toEqual([
+      "podman",
+      "exec",
+      "-it",
+      "-u",
+      "sandbox",
+      "-w",
+      "/sandbox/repo",
+      "sb-foo",
+      "opencode",
+      "run",
+      "hello",
+    ]);
+  });
+
+  it("emits --env flags before container name for both harnesses", () => {
+    for (const harness of ["claude_code", "opencode"] as const) {
+      const argv = buildHarnessExecArgv(harness, "sb-foo", [], { FOO: "bar" });
+      const envIdx = argv.indexOf("--env");
+      const containerIdx = argv.indexOf("sb-foo");
+      expect(envIdx).toBeGreaterThan(-1);
+      expect(envIdx).toBeLessThan(containerIdx);
+      expect(argv).toContain("FOO=bar");
+    }
   });
 });
 
