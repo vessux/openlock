@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Cap } from "./detect-caps";
+import type { Harness } from "./harness";
 
 export interface SessionMeta {
   id: string;
@@ -13,20 +14,25 @@ export interface SessionMeta {
   createdAt: string;
   lastAttachedAt: string | null;
   attachedPid: number | null;
+  harness: Harness;
 }
 
-interface LegacyMeta extends Omit<SessionMeta, "repoPath"> {
+interface LegacyMeta extends Omit<SessionMeta, "repoPath" | "harness"> {
   repoPath?: string;
   path?: string;
+  harness?: Harness;
 }
 
 function migrateMeta(raw: LegacyMeta): SessionMeta {
+  let withRepoPath: Omit<SessionMeta, "harness">;
   if (raw.repoPath === undefined && typeof raw.path === "string") {
     const { path, ...rest } = raw;
-    return { ...rest, repoPath: path };
+    withRepoPath = { ...rest, repoPath: path };
+  } else {
+    const { path: _legacy, ...rest } = raw;
+    withRepoPath = rest as Omit<SessionMeta, "harness">;
   }
-  const { path: _legacy, ...rest } = raw;
-  return rest as SessionMeta;
+  return { ...withRepoPath, harness: raw.harness ?? "claude_code" };
 }
 
 export function sessionsDir(): string {

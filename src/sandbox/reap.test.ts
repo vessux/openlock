@@ -14,6 +14,7 @@ function meta(o: Partial<SessionWithState> = {}): SessionWithState {
     createdAt: "2026-05-07T10:00:00Z",
     lastAttachedAt: null,
     attachedPid: null,
+    harness: "claude_code",
     containerState: "running",
     pidAlive: false,
     ...o,

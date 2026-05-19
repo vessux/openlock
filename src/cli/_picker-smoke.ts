@@ -18,6 +18,7 @@ const sessions: SessionMeta[] = [
     createdAt: "2026-05-09T00:00:00Z",
     lastAttachedAt: null,
     attachedPid: null,
+    harness: "claude_code",
   },
   {
     id: "b",
@@ -29,6 +30,7 @@ const sessions: SessionMeta[] = [
     createdAt: "2026-05-09T00:00:00Z",
     lastAttachedAt: null,
     attachedPid: null,
+    harness: "claude_code",
   },
 ];
 

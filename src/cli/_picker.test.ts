@@ -13,6 +13,7 @@ function meta(name: string, repoPath = `/tmp/${name}`): SessionMeta {
     createdAt: "2026-05-09T00:00:00Z",
     lastAttachedAt: null,
     attachedPid: null,
+    harness: "claude_code",
   };
 }
 
