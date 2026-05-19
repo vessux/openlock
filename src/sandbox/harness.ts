@@ -2,10 +2,6 @@ export type Harness = "claude_code" | "opencode";
 
 export const HARNESSES: ReadonlySet<Harness> = new Set<Harness>(["claude_code", "opencode"]);
 
-export interface GlobalConfigForHarness {
-  defaultHarness?: Harness;
-}
-
 export function validateHarness(value: string, source: string): Harness {
   if (!HARNESSES.has(value as Harness)) {
     const allowed = [...HARNESSES].join(", ");
@@ -37,7 +33,7 @@ export function harnessBinaryPath(harness: Harness): string {
 export interface ResolveHarnessArgs {
   cliFlag: string | undefined;
   env: Readonly<Record<string, string | undefined>>;
-  readGlobal: () => GlobalConfigForHarness | null;
+  readGlobal: () => { defaultHarness?: Harness } | null;
 }
 
 export function resolveHarness(args: ResolveHarnessArgs): Harness {
