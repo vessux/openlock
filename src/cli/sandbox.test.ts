@@ -6,4 +6,10 @@ describe("sandbox flagSchema", () => {
     expect(flagSchema.policy).toEqual({ type: "string" });
     expect(flagSchema.help).toEqual({ type: "boolean", short: "h" });
   });
+
+  it("includes --harness flag", () => {
+    expect("harness" in flagSchema).toBe(true);
+    const h = (flagSchema as { harness?: { type: string } }).harness;
+    expect(h?.type).toBe("string");
+  });
 });
