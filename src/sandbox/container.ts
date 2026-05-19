@@ -74,22 +74,6 @@ export async function execHarness(
   return await proc.exited;
 }
 
-export function buildClaudeExecArgv(
-  name: string,
-  extraArgs: readonly string[],
-  extraEnv: Readonly<Record<string, string>>,
-): string[] {
-  return buildHarnessExecArgv("claude_code", name, extraArgs, extraEnv);
-}
-
-export async function execClaude(
-  name: string,
-  extraArgs: readonly string[] = [],
-  extraEnv: Readonly<Record<string, string>> = {},
-): Promise<number> {
-  return execHarness("claude_code", name, extraArgs, extraEnv);
-}
-
 export async function execBash(name: string): Promise<number> {
   const proc = Bun.spawn(
     ["podman", "exec", "-it", "-u", "sandbox", "-w", "/sandbox/repo", name, "/bin/bash"],

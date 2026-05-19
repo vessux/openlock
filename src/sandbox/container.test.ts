@@ -1,15 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import {
-  buildClaudeExecArgv,
   buildHarnessExecArgv,
   buildPodmanChownArgv,
   buildPodmanCpArgv,
   buildPodmanRmArgv,
 } from "./container";
 
-describe("buildClaudeExecArgv", () => {
+describe('buildHarnessExecArgv("claude_code", ...)', () => {
   it("returns the baseline argv when extraArgs and extraEnv are empty", () => {
-    expect(buildClaudeExecArgv("sb-foo", [], {})).toEqual([
+    expect(buildHarnessExecArgv("claude_code", "sb-foo", [], {})).toEqual([
       "podman",
       "exec",
       "-it",
@@ -24,7 +23,12 @@ describe("buildClaudeExecArgv", () => {
 
   it("appends extra args after `claude`", () => {
     expect(
-      buildClaudeExecArgv("sb-foo", ["--plugin-dir", "/sandbox/.openlock/skills"], {}),
+      buildHarnessExecArgv(
+        "claude_code",
+        "sb-foo",
+        ["--plugin-dir", "/sandbox/.openlock/skills"],
+        {},
+      ),
     ).toEqual([
       "podman",
       "exec",
@@ -41,7 +45,7 @@ describe("buildClaudeExecArgv", () => {
   });
 
   it("emits one --env KEY=VALUE per env entry, before container name", () => {
-    const argv = buildClaudeExecArgv("sb-foo", [], { FOO: "bar", BAZ: "qux" });
+    const argv = buildHarnessExecArgv("claude_code", "sb-foo", [], { FOO: "bar", BAZ: "qux" });
     const envIdx = argv.indexOf("--env");
     expect(envIdx).toBeGreaterThan(-1);
     const containerIdx = argv.indexOf("sb-foo");
@@ -53,7 +57,7 @@ describe("buildClaudeExecArgv", () => {
   });
 
   it("combines extraArgs and extraEnv", () => {
-    const argv = buildClaudeExecArgv("sb-foo", ["--print"], { FOO: "bar" });
+    const argv = buildHarnessExecArgv("claude_code", "sb-foo", ["--print"], { FOO: "bar" });
     expect(argv).toContain("FOO=bar");
     expect(argv[argv.length - 2]).toBe("claude");
     expect(argv[argv.length - 1]).toBe("--print");
