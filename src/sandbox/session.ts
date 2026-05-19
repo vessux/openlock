@@ -47,6 +47,7 @@ import {
 export interface SandboxOpts {
   path: string;
   policy?: string;
+  harness?: string;
 }
 
 async function buildSandboxImage(caps: Cap[]): Promise<string> {
