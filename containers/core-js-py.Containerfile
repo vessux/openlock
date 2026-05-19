@@ -9,9 +9,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code@2.1.128 \
-    && ln -sf /usr/bin/claude /usr/local/bin/claude
-
 RUN groupadd -r supervisor && useradd -r -g supervisor -d /home/supervisor -s /usr/sbin/nologin supervisor \
     && groupadd -r sandbox && useradd -r -g sandbox -d /sandbox -s /bin/bash -m sandbox
 
@@ -33,6 +30,16 @@ USER sandbox
 WORKDIR /sandbox
 
 ENV HOME=/sandbox
+RUN git config --global user.name "Sandbox" \
+ && git config --global user.email "sandbox@openlock.local"
+
+# === Harness layers (last, for cache-on-bump) ===
+
+# --- Claude Code ---
+USER root
+RUN npm install -g @anthropic-ai/claude-code@2.1.128 \
+    && ln -sf /usr/bin/claude /usr/local/bin/claude
+USER sandbox
 RUN cat > /sandbox/.claude.json <<'JSON'
 {
   "hasCompletedOnboarding": true,
@@ -48,5 +55,8 @@ RUN cat > /sandbox/.claude.json <<'JSON'
 }
 JSON
 
-RUN git config --global user.name "Sandbox" \
- && git config --global user.email "sandbox@openlock.local"
+# --- opencode ---
+USER root
+RUN npm install -g opencode-ai@1.15.5 \
+    && ln -sf /usr/bin/opencode /usr/local/bin/opencode
+USER sandbox

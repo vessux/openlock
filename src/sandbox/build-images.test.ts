@@ -32,4 +32,23 @@ describe("updateImages", () => {
     await updateImages({ noCache: true }, { ensureImage: fakeEnsure });
     expect(calls.every((c) => c.noCache === true)).toBe(true);
   });
+
+  it("passes containerfile content that installs both harness binaries", async () => {
+    const calls: { tagPrefix: string; containerfileContent: string }[] = [];
+    const fakeEnsure = mock(
+      async (args: { containerfileContent: string; tagPrefix: string; noCache?: boolean }) => {
+        calls.push({
+          tagPrefix: args.tagPrefix,
+          containerfileContent: args.containerfileContent,
+        });
+        return { tag: `${args.tagPrefix}:fake`, built: true };
+      },
+    );
+    await updateImages({ noCache: false }, { ensureImage: fakeEnsure });
+    expect(calls.length).toBe(4);
+    for (const c of calls) {
+      expect(c.containerfileContent, c.tagPrefix).toContain("@anthropic-ai/claude-code@");
+      expect(c.containerfileContent, c.tagPrefix).toContain("opencode-ai@");
+    }
+  });
 });
