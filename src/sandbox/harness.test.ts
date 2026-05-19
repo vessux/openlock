@@ -1,11 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
   HARNESSES,
-  harnessLaunchArgv,
   harnessBinaryPath,
+  harnessLaunchArgv,
   resolveHarness,
   validateHarness,
-  type Harness,
 } from "./harness";
 
 describe("HARNESSES", () => {
@@ -32,20 +31,12 @@ describe("validateHarness", () => {
 describe("harnessLaunchArgv", () => {
   it("returns claude argv for claude_code", () => {
     expect(harnessLaunchArgv("claude_code", [])).toEqual(["claude"]);
-    expect(harnessLaunchArgv("claude_code", ["-p", "hello"])).toEqual([
-      "claude",
-      "-p",
-      "hello",
-    ]);
+    expect(harnessLaunchArgv("claude_code", ["-p", "hello"])).toEqual(["claude", "-p", "hello"]);
   });
 
   it("returns opencode argv for opencode", () => {
     expect(harnessLaunchArgv("opencode", [])).toEqual(["opencode"]);
-    expect(harnessLaunchArgv("opencode", ["run", "hello"])).toEqual([
-      "opencode",
-      "run",
-      "hello",
-    ]);
+    expect(harnessLaunchArgv("opencode", ["run", "hello"])).toEqual(["opencode", "run", "hello"]);
   });
 });
 
@@ -97,14 +88,18 @@ describe("resolveHarness", () => {
   });
 
   it("rejects invalid CLI flag", () => {
-    expect(() =>
-      resolveHarness({ cliFlag: "foo", env: {}, readGlobal: () => null }),
-    ).toThrow(/--harness/);
+    expect(() => resolveHarness({ cliFlag: "foo", env: {}, readGlobal: () => null })).toThrow(
+      /--harness/,
+    );
   });
 
   it("rejects invalid env value", () => {
     expect(() =>
-      resolveHarness({ cliFlag: undefined, env: { OPENLOCK_HARNESS: "foo" }, readGlobal: () => null }),
+      resolveHarness({
+        cliFlag: undefined,
+        env: { OPENLOCK_HARNESS: "foo" },
+        readGlobal: () => null,
+      }),
     ).toThrow(/OPENLOCK_HARNESS/);
   });
 
