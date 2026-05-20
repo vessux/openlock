@@ -169,6 +169,11 @@ export async function startGateway(): Promise<void> {
       stderr: "ignore",
     },
   );
+  // The gateway is a daemon — don't hold the parent CLI's event loop open
+  // after this function returns. `bun src/cli.ts` (interpreter) auto-exits
+  // when the script ends; `bun build --compile`d binaries don't, so the
+  // parent hangs after "Gateway ready." until the child dies.
+  proc.unref();
 
   writeFileSync(PID_FILE, String(proc.pid));
   console.log(`Gateway starting (pid ${proc.pid}), log: ${LOG_FILE}`);
