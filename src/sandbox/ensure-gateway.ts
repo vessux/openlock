@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureSupervisorImage } from "./build-supervisor-image";
@@ -127,6 +136,29 @@ async function resolvePodmanSocket(): Promise<string> {
     throw new Error("Failed to resolve Podman socket path via `podman machine inspect`");
   }
   return out.trim();
+}
+
+export function spawnDaemonToLog(
+  args: string[],
+  cwd: string,
+  logPath: string,
+): { pid: number } {
+  const logFd = openSync(logPath, "a");
+  try {
+    const proc = Bun.spawn(args, {
+      cwd,
+      stdout: logFd,
+      stderr: logFd,
+    });
+    // The gateway is a daemon — don't hold the parent CLI's event loop open
+    // after this function returns. `bun src/cli.ts` (interpreter) auto-exits
+    // when the script ends; `bun build --compile`d binaries don't, so the
+    // parent hangs after "Gateway ready." until the child dies.
+    proc.unref();
+    return { pid: proc.pid };
+  } finally {
+    closeSync(logFd);
+  }
 }
 
 export async function startGateway(): Promise<void> {
