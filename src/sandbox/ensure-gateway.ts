@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +8,11 @@ import { pidAlive } from "./proc";
 const STATE_DIR = join(process.env.HOME || homedir(), ".local", "state", "openlock");
 const PID_FILE = join(STATE_DIR, "gateway.pid");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
-const HANDSHAKE_SECRET_FILE = join(STATE_DIR, "handshake-secret");
+const CONFIG_FILE = join(STATE_DIR, "gateway-config.toml");
 const GATEWAY_PORT = 18081;
 export const GATEWAY_NAME = "podman-dev";
+
+const DEFAULT_SANDBOX_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
 
 function readPid(): number | null {
   if (!existsSync(PID_FILE)) return null;
@@ -82,15 +83,23 @@ function registerGatewayMetadata(): void {
   writeFileSync(activeGatewayPath, GATEWAY_NAME);
 }
 
-function getHandshakeSecret(): string {
-  if (existsSync(HANDSHAKE_SECRET_FILE)) {
-    const secret = readFileSync(HANDSHAKE_SECRET_FILE, "utf-8").trim();
-    if (secret.length > 0) return secret;
-  }
-  const secret = randomBytes(32).toString("hex");
+function tomlEscape(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function writeGatewayConfigFile(opts: { supervisorImage: string; podmanSocket: string }): void {
   mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(HANDSHAKE_SECRET_FILE, secret, { mode: 0o600 });
-  return secret;
+  const toml = [
+    "[openshell]",
+    "version = 1",
+    "",
+    "[openshell.drivers.podman]",
+    `default_image = "${tomlEscape(DEFAULT_SANDBOX_IMAGE)}"`,
+    `supervisor_image = "${tomlEscape(opts.supervisorImage)}"`,
+    `socket_path = "${tomlEscape(opts.podmanSocket)}"`,
+    "",
+  ].join("\n");
+  writeFileSync(CONFIG_FILE, toml);
 }
 
 async function resolvePodmanSocket(): Promise<string> {
@@ -135,11 +144,13 @@ export async function startGateway(): Promise<void> {
   registerGatewayMetadata();
 
   const podmanSocket = await resolvePodmanSocket();
-  const handshakeSecret = getHandshakeSecret();
+  writeGatewayConfigFile({ supervisorImage, podmanSocket });
 
   const dbPath = join(STATE_DIR, "gateway.db");
   const args = [
     gatewayBin,
+    "--config",
+    CONFIG_FILE,
     "--drivers",
     "podman",
     "--disable-tls",
@@ -147,21 +158,7 @@ export async function startGateway(): Promise<void> {
     String(GATEWAY_PORT),
     "--db-url",
     `sqlite:${dbPath}?mode=rwc`,
-    "--sandbox-namespace",
-    "podman-dev",
-    "--sandbox-image",
-    "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
-    "--grpc-endpoint",
-    `http://host.containers.internal:${GATEWAY_PORT}`,
-    "--ssh-handshake-secret",
-    handshakeSecret,
   ];
-
-  const env: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    OPENSHELL_PODMAN_SOCKET: podmanSocket,
-    OPENSHELL_SUPERVISOR_IMAGE: supervisorImage,
-  };
 
   const proc = Bun.spawn(
     ["bash", "-c", `exec ${args.map((a) => `'${a}'`).join(" ")} >> "${LOG_FILE}" 2>&1`],
@@ -169,7 +166,6 @@ export async function startGateway(): Promise<void> {
       cwd: STATE_DIR,
       stdout: "ignore",
       stderr: "ignore",
-      env,
     },
   );
 
