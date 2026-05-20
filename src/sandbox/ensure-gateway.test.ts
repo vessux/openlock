@@ -1,7 +1,7 @@
+import { describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "bun:test";
 import { readGatewayRssKb, spawnDaemonToLog } from "./ensure-gateway";
 import { pidAlive } from "./proc";
 
@@ -29,11 +29,7 @@ describe("spawnDaemonToLog", () => {
     const dir = mkdtempSync(join(tmpdir(), "spawn-daemon-"));
     const log = join(dir, "out.log");
     try {
-      const { pid } = spawnDaemonToLog(
-        ["sh", "-c", "echo hello; echo boom 1>&2"],
-        dir,
-        log,
-      );
+      const { pid } = spawnDaemonToLog(["sh", "-c", "echo hello; echo boom 1>&2"], dir, log);
       // Wait for the stub to exit.
       const deadline = Date.now() + 5_000;
       while (Date.now() < deadline && pidAlive(pid)) {

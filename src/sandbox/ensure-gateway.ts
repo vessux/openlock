@@ -138,11 +138,7 @@ async function resolvePodmanSocket(): Promise<string> {
   return out.trim();
 }
 
-export function spawnDaemonToLog(
-  args: string[],
-  cwd: string,
-  logPath: string,
-): { pid: number } {
+export function spawnDaemonToLog(args: string[], cwd: string, logPath: string): { pid: number } {
   const logFd = openSync(logPath, "a");
   try {
     const proc = Bun.spawn(args, {
