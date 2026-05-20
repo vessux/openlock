@@ -182,11 +182,16 @@ describe("harness binary triggers cred_inject (live integration)", () => {
         // emits when the request reaches the cred_inject branch — an
         // L4-denied connect produces no HTTP event. We require at
         // least one such line scoped to our test policy.
+        //
+        // The host regex uses anchored hostname (no overlapping prefix
+        // or suffix) so CodeQL doesn't flag this as substring URL
+        // sanitization — it's parsing log lines, not validating URLs.
         const lines = logs.split("\n");
+        const hostPattern = /\/\/api\.anthropic\.com:443\//;
         const l7Hits = lines.filter(
           (l) =>
             l.includes(POLICY_NAME) &&
-            l.includes("api.anthropic.com") &&
+            hostPattern.test(l) &&
             /\bHTTP:[A-Z]+\b/.test(l) &&
             /ALLOWED/.test(l),
         );
