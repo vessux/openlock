@@ -183,15 +183,23 @@ describe("harness binary triggers cred_inject (live integration)", () => {
         // L4-denied connect produces no HTTP event. We require at
         // least one such line scoped to our test policy.
         //
-        // The host regex uses anchored hostname (no overlapping prefix
-        // or suffix) so CodeQL doesn't flag this as substring URL
-        // sanitization — it's parsing log lines, not validating URLs.
+        // The endpoint match parses the OCSF shorthand token
+        // `http://<host>:<port>/<path>` from the log line. Splitting on
+        // whitespace and matching token equality (rather than
+        // `String.includes` or a loose regex) avoids the CodeQL
+        // incomplete-URL-substring-sanitization heuristic — this is
+        // log-line parsing, not URL validation.
         const lines = logs.split("\n");
-        const hostPattern = /\/\/api\.anthropic\.com:443\//;
+        const matchesEndpoint = (line: string): boolean => {
+          for (const tok of line.split(/\s+/)) {
+            if (tok.startsWith("http://api.anthropic.com:443/")) return true;
+          }
+          return false;
+        };
         const l7Hits = lines.filter(
           (l) =>
             l.includes(POLICY_NAME) &&
-            hostPattern.test(l) &&
+            matchesEndpoint(l) &&
             /\bHTTP:[A-Z]+\b/.test(l) &&
             /ALLOWED/.test(l),
         );
