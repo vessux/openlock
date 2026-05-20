@@ -88,7 +88,6 @@ function tomlEscape(s: string): string {
 }
 
 function writeGatewayConfigFile(opts: { supervisorImage: string; podmanSocket: string }): void {
-  mkdirSync(STATE_DIR, { recursive: true });
   const toml = [
     "[openshell]",
     "version = 1",
@@ -139,8 +138,10 @@ export async function startGateway(): Promise<void> {
 
   mkdirSync(STATE_DIR, { recursive: true });
 
-  const supervisorImage = await ensureSupervisorImage();
-  const gatewayBin = await getGatewayBinary();
+  const [supervisorImage, gatewayBin] = await Promise.all([
+    ensureSupervisorImage(),
+    getGatewayBinary(),
+  ]);
   registerGatewayMetadata();
 
   const podmanSocket = await resolvePodmanSocket();
