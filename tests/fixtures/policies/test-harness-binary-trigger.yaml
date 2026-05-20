@@ -1,0 +1,66 @@
+# Test-only policy: proves cred_inject applies when a harness binary
+# (currently: claude) itself makes the network request.
+#
+# Why only claude here: the live test relies on the harness reaching
+# api.anthropic.com so the proxy can log an L7 event tied to our test
+# policy. Claude boots and POSTs /v1/messages from a deterministic
+# offline-friendly path. Opencode requires reaching models.dev (for
+# model defs) and github.com (for the claude-auth plugin) before it
+# will issue /v1/messages — echoing those endpoints synthetically
+# breaks opencode's parsing and skipping them prevents the messages
+# call. The opencode half was verified manually (bd openlock-zm4
+# 2026-05-19 comment) and the routing path is statically covered by
+# upstream-fork OPA tests; revisit if/when an offline opencode shape
+# becomes viable.
+#
+# api.anthropic.com uses `echo: true` so no real upstream call happens;
+# the proxy returns post-rewrite headers as JSON, and the harness
+# (expectedly) errors on the unrecognized response. The test does not
+# depend on the harness completing a real API exchange, only on the
+# proxy logging an ALLOWED L7 event scoped to our policy name.
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
+  read_write: [/sandbox, /tmp, /dev/null]
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  claude_harness_test:
+    binaries:
+      # The proxy resolves /usr/local/bin/claude (a symlink to
+      # /usr/bin/claude → claude.exe) to the canonical claude.exe path
+      # at sandbox boot, so this entry is what actually grants the
+      # harness binary access. /usr/bin/node is harmless extra surface
+      # for any node-based child processes the harness might spawn.
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        echo: true
+        rules:
+          # Permissive on purpose: when claude/opencode boot, they hit
+          # various /api/* setup endpoints (settings, limits, telemetry)
+          # before /v1/messages. With only "/v1/**" allowed, those
+          # setup calls deny and the harness exits before issuing the
+          # messages POST — making the assertion flaky. Allow GET/POST
+          # everywhere so the messages POST always lands.
+          - allow: { method: POST, path: "/**" }
+          - allow: { method: GET, path: "/**" }
+        cred_inject:
+          provider: harness-binary-test
+          strip_headers: [Authorization, x-api-key, Cookie]
+          inject:
+            - { header: x-test-echo, from_credential: TEST_ECHO_VAL }
+    allowed_secrets: [TEST_ECHO_VAL]
+
