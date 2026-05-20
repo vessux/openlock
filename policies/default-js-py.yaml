@@ -70,5 +70,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-only
+        # scoped packages use %2F in path: GET /@scope%2Fname
+        allow_encoded_slash: true
         trust_check: { registry: npm }
     allowed_secrets: []
