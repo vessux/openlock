@@ -184,3 +184,13 @@ export async function restageMount(containerName: string, mount: Mount): Promise
 export function workdirMount(mounts: readonly Mount[]): Mount | undefined {
   return mounts.find((m) => m.target === "/sandbox/repo");
 }
+
+export function bindMountArgs(mounts: readonly Mount[]): string[] {
+  const args: string[] = [];
+  for (const m of mounts) {
+    if (m.type !== "bind") continue;
+    const spec = m.readOnly ? `${m.source}:${m.target}:ro` : `${m.source}:${m.target}`;
+    args.push("--volume", spec);
+  }
+  return args;
+}

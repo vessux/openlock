@@ -10,7 +10,14 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Mount, parseMounts, stageMounts, stagingPathFor, workdirMount } from "./mounts";
+import {
+  bindMountArgs,
+  type Mount,
+  parseMounts,
+  stageMounts,
+  stagingPathFor,
+  workdirMount,
+} from "./mounts";
 
 let projectRoot: string;
 beforeEach(() => {
@@ -625,5 +632,72 @@ describe("stageMounts", () => {
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
+  });
+});
+
+describe("bindMountArgs", () => {
+  it("returns [] when no bind mounts", () => {
+    const src = join(projectRoot, "x");
+    mkdirSync(src);
+    const ms = parseMounts(
+      [{ source: src, target: "/sandbox/.openlock/x", type: "copy-once" }],
+      projectRoot,
+    );
+    expect(bindMountArgs(ms)).toEqual([]);
+  });
+
+  it("emits --volume host:container for one bind without readOnly", () => {
+    const src = join(projectRoot, "x");
+    mkdirSync(src);
+    const ms = parseMounts(
+      [{ source: src, target: "/sandbox/.openlock/x", type: "bind" }],
+      projectRoot,
+    );
+    expect(bindMountArgs(ms)).toEqual(["--volume", `${src}:/sandbox/.openlock/x`]);
+  });
+
+  it("emits --volume host:container:ro for one bind with readOnly: true", () => {
+    const src = join(projectRoot, "x");
+    mkdirSync(src);
+    const ms = parseMounts(
+      [{ source: src, target: "/sandbox/.openlock/x", type: "bind", readOnly: true }],
+      projectRoot,
+    );
+    expect(bindMountArgs(ms)).toEqual(["--volume", `${src}:/sandbox/.openlock/x:ro`]);
+  });
+
+  it("emits multiple --volume args for multiple bind entries", () => {
+    const a = join(projectRoot, "a");
+    const b = join(projectRoot, "b");
+    mkdirSync(a);
+    mkdirSync(b);
+    const ms = parseMounts(
+      [
+        { source: a, target: "/sandbox/.openlock/a", type: "bind" },
+        { source: b, target: "/home/sandbox/b", type: "bind", readOnly: true },
+      ],
+      projectRoot,
+    );
+    expect(bindMountArgs(ms)).toEqual([
+      "--volume",
+      `${a}:/sandbox/.openlock/a`,
+      "--volume",
+      `${b}:/home/sandbox/b:ro`,
+    ]);
+  });
+
+  it("skips non-bind entries", () => {
+    const a = join(projectRoot, "a");
+    const b = join(projectRoot, "b");
+    mkdirSync(a);
+    mkdirSync(b);
+    const ms = parseMounts(
+      [
+        { source: a, target: "/sandbox/.openlock/a", type: "copy-once" },
+        { source: b, target: "/sandbox/.openlock/b", type: "bind" },
+      ],
+      projectRoot,
+    );
+    expect(bindMountArgs(ms)).toEqual(["--volume", `${b}:/sandbox/.openlock/b`]);
   });
 });
