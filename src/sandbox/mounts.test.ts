@@ -295,6 +295,77 @@ describe("parseMounts", () => {
       ),
     ).toThrow(/not a directory/);
   });
+
+  it("accepts readOnly: true on type: bind", () => {
+    const src = join(projectRoot, "bind-ro");
+    mkdirSync(src);
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/.openlock/ro", type: "bind", readOnly: true }],
+      projectRoot,
+    );
+    expect(m?.readOnly).toBe(true);
+  });
+
+  it("accepts readOnly: false on type: bind (or absent)", () => {
+    const src = join(projectRoot, "bind-rw");
+    mkdirSync(src);
+    const ms = parseMounts(
+      [
+        { source: src, target: "/sandbox/.openlock/a", type: "bind", readOnly: false },
+        { source: src, target: "/sandbox/.openlock/b", type: "bind" },
+      ],
+      projectRoot,
+    );
+    expect(ms[0]?.readOnly).toBe(false);
+    expect(ms[1]?.readOnly).toBeUndefined();
+  });
+
+  it("rejects readOnly on type: copy-once", () => {
+    const src = join(projectRoot, "co");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/x", type: "copy-once", readOnly: true }],
+        projectRoot,
+      ),
+    ).toThrow(/readOnly is only valid on type: bind/);
+  });
+
+  it("rejects readOnly on type: copy-refresh", () => {
+    const src = join(projectRoot, "cr");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/x", type: "copy-refresh", readOnly: true }],
+        projectRoot,
+      ),
+    ).toThrow(/readOnly is only valid on type: bind/);
+  });
+
+  it("rejects readOnly on type: git-bundle", () => {
+    const src = join(projectRoot, "gb");
+    mkdirSync(src);
+    mkdirSync(join(src, ".git"));
+    writeFileSync(join(src, ".git/HEAD"), "ref: refs/heads/main\n");
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/repo", type: "git-bundle", readOnly: true }],
+        projectRoot,
+      ),
+    ).toThrow(/readOnly is only valid on type: bind/);
+  });
+
+  it("rejects non-boolean readOnly", () => {
+    const src = join(projectRoot, "bind");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        // biome-ignore lint/suspicious/noExplicitAny: testing invalid input
+        [{ source: src, target: "/sandbox/.openlock/x", type: "bind", readOnly: "yes" as any }],
+        projectRoot,
+      ),
+    ).toThrow(/readOnly must be a boolean/);
+  });
 });
 
 describe("stagingPathFor", () => {

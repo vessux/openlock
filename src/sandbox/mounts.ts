@@ -9,6 +9,7 @@ export interface Mount {
   source: string;
   target: string;
   type: MountType;
+  readOnly?: boolean;
 }
 
 const SANDBOX_MOUNT_PREFIX = "/sandbox/.openlock/";
@@ -88,6 +89,7 @@ interface RawMount {
   source?: unknown;
   target?: unknown;
   type?: unknown;
+  readOnly?: unknown;
 }
 
 function parseOne(raw: RawMount, projectRoot: string, index: number): Mount {
@@ -109,6 +111,16 @@ function parseOne(raw: RawMount, projectRoot: string, index: number): Mount {
       `${where}: unknown type '${type}' (allowed: copy-once, copy-refresh, bind, git-bundle)`,
     );
   }
+  let readOnly: boolean | undefined;
+  if (raw.readOnly !== undefined) {
+    if (typeof raw.readOnly !== "boolean") {
+      throw new Error(`${where}: readOnly must be a boolean`);
+    }
+    if (type !== "bind") {
+      throw new Error(`${where}: readOnly is only valid on type: bind`);
+    }
+    readOnly = raw.readOnly;
+  }
   validateTargetForType(raw.target, type, where);
   const source = resolveSource(projectRoot, raw.source);
   if (!existsSync(source)) {
@@ -121,7 +133,9 @@ function parseOne(raw: RawMount, projectRoot: string, index: number): Mount {
   if (type === "git-bundle") {
     assertGitWorkingTree(source, where);
   }
-  return { source, target: raw.target, type };
+  return readOnly !== undefined
+    ? { source, target: raw.target, type, readOnly }
+    : { source, target: raw.target, type };
 }
 
 export function parseMounts(raw: unknown, projectRoot: string): Mount[] {
