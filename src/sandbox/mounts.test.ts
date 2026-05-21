@@ -260,6 +260,41 @@ describe("parseMounts", () => {
     expect(m?.type).toBe("bind");
     expect(m?.source).toBe(f);
   });
+
+  it("accepts type: git-bundle with a git working tree source", () => {
+    const src = join(projectRoot, "repo");
+    mkdirSync(src);
+    mkdirSync(join(src, ".git"));
+    writeFileSync(join(src, ".git/HEAD"), "ref: refs/heads/main\n");
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/repo", type: "git-bundle" }],
+      projectRoot,
+    );
+    expect(m?.type).toBe("git-bundle");
+    expect(m?.source).toBe(src);
+  });
+
+  it("rejects type: git-bundle with non-git directory source", () => {
+    const src = join(projectRoot, "not-a-repo");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/repo", type: "git-bundle" }],
+        projectRoot,
+      ),
+    ).toThrow(/not a git working tree/);
+  });
+
+  it("rejects type: git-bundle with file source", () => {
+    const f = join(projectRoot, "file");
+    writeFileSync(f, "");
+    expect(() =>
+      parseMounts(
+        [{ source: f, target: "/sandbox/repo", type: "git-bundle" }],
+        projectRoot,
+      ),
+    ).toThrow(/not a directory/);
+  });
 });
 
 describe("stagingPathFor", () => {

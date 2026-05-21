@@ -45,6 +45,40 @@ function validateTarget(target: string): void {
   }
 }
 
+function validateTargetForType(target: string, type: MountType, where: string): void {
+  if (!isAbsolute(target)) {
+    throw new Error(`${where}: mount target must be absolute: ${target}`);
+  }
+  if (target.split("/").includes("..")) {
+    throw new Error(`${where}: mount target must not contain '..' segments: ${target}`);
+  }
+  if (target.startsWith(SANDBOX_MOUNT_PREFIX)) {
+    const rel = target.slice(SANDBOX_MOUNT_PREFIX.length);
+    const topSegment = rel.split("/")[0];
+    if (topSegment !== undefined && RESERVED_MOUNT_NAMES.has(topSegment)) {
+      throw new Error(
+        `${where}: mount target conflicts with openlock-internal name '${topSegment}': ${target}`,
+      );
+    }
+  }
+  if (type === "copy-once" || type === "copy-refresh") {
+    if (!target.startsWith(SANDBOX_MOUNT_PREFIX) || target.length <= SANDBOX_MOUNT_PREFIX.length) {
+      throw new Error(
+        `${where}: mount target must be under /sandbox/.openlock/ for type '${type}': ${target}`,
+      );
+    }
+  }
+  // bind + git-bundle: no further prefix restriction at this point (Task 5 will add
+  // git-bundle exclusion of /sandbox/.openlock/).
+}
+
+function assertGitWorkingTree(source: string, where: string): void {
+  const dotGit = join(source, ".git");
+  if (!existsSync(dotGit)) {
+    throw new Error(`${where}: source ${source} is not a git working tree (missing .git)`);
+  }
+}
+
 export function stagingPathFor(target: string): string {
   validateTarget(target);
   return target.slice(SANDBOX_MOUNT_PREFIX.length);
@@ -75,7 +109,7 @@ function parseOne(raw: RawMount, projectRoot: string, index: number): Mount {
       `${where}: unknown type '${type}' (allowed: copy-once, copy-refresh, bind, git-bundle)`,
     );
   }
-  validateTarget(raw.target);
+  validateTargetForType(raw.target, type, where);
   const source = resolveSource(projectRoot, raw.source);
   if (!existsSync(source)) {
     throw new Error(`${where}: source ${source} does not exist`);
@@ -83,6 +117,9 @@ function parseOne(raw: RawMount, projectRoot: string, index: number): Mount {
   const isDir = statSync(source).isDirectory();
   if ((type === "copy-once" || type === "copy-refresh" || type === "git-bundle") && !isDir) {
     throw new Error(`${where}: source ${source} is not a directory`);
+  }
+  if (type === "git-bundle") {
+    assertGitWorkingTree(source, where);
   }
   return { source, target: raw.target, type };
 }
