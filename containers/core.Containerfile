@@ -14,6 +14,7 @@ RUN groupadd -r supervisor && useradd -r -g supervisor -d /home/supervisor -s /u
 
 USER sandbox
 WORKDIR /sandbox
+RUN mkdir -p /sandbox/repo
 
 ENV HOME=/sandbox
 RUN git config --global user.name "Sandbox" \

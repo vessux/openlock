@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { podmanMachineRunning, podmanSocketActive, runDoctorChecks } from "../doctor";
@@ -166,7 +166,8 @@ async function createSession(
     // Setup runs once at create + on every podman start (idempotent).
     // Final `exec sleep infinity` keeps PID 1 alive so the container
     // outlives the foreground command between attaches.
-    const wd = workdirMount(mounts);
+    // /sandbox/repo provisioning lives in the image (RUN mkdir) so it
+    // exists before openshell's PID 1 chdir, regardless of workdir mount.
     const setupLines = [
       "cd /sandbox",
       "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
@@ -176,11 +177,8 @@ async function createSession(
       const isWorkdir = bm.target === "/sandbox/repo";
       const branchFlag = isWorkdir && branch !== undefined ? `-b '${branch}' ` : "";
       setupLines.push(
-        `[ -d ${bm.target} ] || git clone ${branchFlag}.openlock/bundles/${bundleName} ${bm.target}`,
+        `[ -d ${bm.target}/.git ] || git clone ${branchFlag}.openlock/bundles/${bundleName} ${bm.target}`,
       );
-    }
-    if (wd === undefined) {
-      setupLines.push("mkdir -p /sandbox/repo");
     }
     setupLines.push("exec sleep infinity");
     const setupCmd = setupLines.join(" ; ");
@@ -205,6 +203,7 @@ async function createSession(
     }
 
     await waitForContainerRunning(containerName);
+    await waitForStagingUploaded(containerName, staging);
 
     const meta: SessionMeta = {
       id,
@@ -224,6 +223,32 @@ async function createSession(
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+// openshell sandbox create uploads --upload contents asynchronously; the
+// staging tmp dir is removed in finally once createSession returns. Without
+// this wait the rmSync races the upload and openshell errors with
+// "local path does not exist". Empty staging short-circuits (nothing to wait for).
+async function waitForStagingUploaded(
+  containerName: string,
+  stagingDir: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const entries = readdirSync(stagingDir);
+  if (entries.length === 0) return;
+  const sentinel = entries[0]!;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const proc = Bun.spawn(
+      ["podman", "exec", containerName, "test", "-e", `/sandbox/.openlock/${sentinel}`],
+      { stdout: "ignore", stderr: "ignore" },
+    );
+    if ((await proc.exited) === 0) return;
+    await Bun.sleep(200);
+  }
+  console.warn(
+    `staging upload to /sandbox/.openlock/${sentinel} not visible within ${timeoutMs}ms`,
+  );
 }
 
 async function syncBackToHost(

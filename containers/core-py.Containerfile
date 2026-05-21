@@ -22,6 +22,7 @@ RUN HOME=/root bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh" \
 
 USER sandbox
 WORKDIR /sandbox
+RUN mkdir -p /sandbox/repo
 
 ENV HOME=/sandbox
 RUN git config --global user.name "Sandbox" \
