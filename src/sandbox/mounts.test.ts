@@ -309,10 +309,7 @@ describe("parseMounts", () => {
     const src = join(projectRoot, "not-a-repo");
     mkdirSync(src);
     expect(() =>
-      parseMounts(
-        [{ source: src, target: "/sandbox/repo", type: "git-bundle" }],
-        projectRoot,
-      ),
+      parseMounts([{ source: src, target: "/sandbox/repo", type: "git-bundle" }], projectRoot),
     ).toThrow(/not a git working tree/);
   });
 
@@ -320,10 +317,7 @@ describe("parseMounts", () => {
     const f = join(projectRoot, "file");
     writeFileSync(f, "");
     expect(() =>
-      parseMounts(
-        [{ source: f, target: "/sandbox/repo", type: "git-bundle" }],
-        projectRoot,
-      ),
+      parseMounts([{ source: f, target: "/sandbox/repo", type: "git-bundle" }], projectRoot),
     ).toThrow(/not a directory/);
   });
 
@@ -412,10 +406,7 @@ describe("parseMounts", () => {
   it("bind: accepts target /sandbox/repo (workdir override)", () => {
     const src = join(projectRoot, "bind-repo");
     mkdirSync(src);
-    const [m] = parseMounts(
-      [{ source: src, target: "/sandbox/repo", type: "bind" }],
-      projectRoot,
-    );
+    const [m] = parseMounts([{ source: src, target: "/sandbox/repo", type: "bind" }], projectRoot);
     expect(m?.target).toBe("/sandbox/repo");
     expect(m?.type).toBe("bind");
   });
@@ -457,10 +448,7 @@ describe("parseMounts", () => {
     const src = join(projectRoot, "bind-dd");
     mkdirSync(src);
     expect(() =>
-      parseMounts(
-        [{ source: src, target: "/sandbox/../etc", type: "bind" }],
-        projectRoot,
-      ),
+      parseMounts([{ source: src, target: "/sandbox/../etc", type: "bind" }], projectRoot),
     ).toThrow(/must not contain '\.\.'/);
   });
 
@@ -468,10 +456,7 @@ describe("parseMounts", () => {
     const src = join(projectRoot, "bind-rel");
     mkdirSync(src);
     expect(() =>
-      parseMounts(
-        [{ source: src, target: "sandbox/extras", type: "bind" }],
-        projectRoot,
-      ),
+      parseMounts([{ source: src, target: "sandbox/extras", type: "bind" }], projectRoot),
     ).toThrow(/must be absolute/);
   });
 
@@ -516,10 +501,7 @@ describe("parseMounts", () => {
     const src = join(projectRoot, "co-repo");
     mkdirSync(src);
     expect(() =>
-      parseMounts(
-        [{ source: src, target: "/sandbox/repo", type: "copy-once" }],
-        projectRoot,
-      ),
+      parseMounts([{ source: src, target: "/sandbox/repo", type: "copy-once" }], projectRoot),
     ).toThrow(/\/sandbox\/repo not supported with type 'copy-once'/);
   });
 
@@ -527,10 +509,7 @@ describe("parseMounts", () => {
     const src = join(projectRoot, "cr-repo");
     mkdirSync(src);
     expect(() =>
-      parseMounts(
-        [{ source: src, target: "/sandbox/repo", type: "copy-refresh" }],
-        projectRoot,
-      ),
+      parseMounts([{ source: src, target: "/sandbox/repo", type: "copy-refresh" }], projectRoot),
     ).toThrow(/\/sandbox\/repo not supported with type 'copy-refresh'/);
   });
 
@@ -550,9 +529,7 @@ describe("workdirMount", () => {
   it("returns undefined when no mount targets /sandbox/repo", () => {
     const src = join(projectRoot, "x");
     mkdirSync(src);
-    const mounts: Mount[] = [
-      { source: src, target: "/sandbox/.openlock/x", type: "copy-once" },
-    ];
+    const mounts: Mount[] = [{ source: src, target: "/sandbox/.openlock/x", type: "copy-once" }];
     expect(workdirMount(mounts)).toBeUndefined();
   });
 
@@ -642,9 +619,7 @@ describe("stageMounts", () => {
     writeFileSync(join(src, "file.txt"), "should not be copied");
     const staging = mkdtempSync(join(tmpdir(), "openlock-stage-"));
     try {
-      stageMounts(staging, [
-        { source: src, target: "/sandbox/.openlock/x", type: "bind" },
-      ]);
+      stageMounts(staging, [{ source: src, target: "/sandbox/.openlock/x", type: "bind" }]);
       // No directory created under staging for bind targets.
       expect(existsSync(join(staging, "x"))).toBe(false);
     } finally {
@@ -659,9 +634,7 @@ describe("stageMounts", () => {
     writeFileSync(join(src, ".git/HEAD"), "ref: refs/heads/main\n");
     const staging = mkdtempSync(join(tmpdir(), "openlock-stage-"));
     try {
-      stageMounts(staging, [
-        { source: src, target: "/sandbox/repo", type: "git-bundle" },
-      ]);
+      stageMounts(staging, [{ source: src, target: "/sandbox/repo", type: "git-bundle" }]);
       expect(existsSync(join(staging, "repo"))).toBe(false);
     } finally {
       rmSync(staging, { recursive: true, force: true });
