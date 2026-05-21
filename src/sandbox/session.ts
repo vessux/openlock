@@ -32,7 +32,7 @@ import {
 import { type Harness, resolveHarness } from "./harness";
 import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureImage } from "./image-build";
-import { type Mount, restageMount, stageMounts } from "./mounts";
+import { bindMountArgs, type Mount, restageMount, stageMounts } from "./mounts";
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
@@ -159,6 +159,7 @@ async function createSession(
       uploadDir: staging,
       policy,
       command: ["/bin/bash", "-c", setupCmd],
+      volumeArgs: bindMountArgs(mounts),
     });
 
     // Don't await handle.exited — it blocks until the container stops.
