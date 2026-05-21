@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
+  existsSync,
   readFileSync as fsReadFileSync,
   lstatSync,
   mkdirSync,
@@ -630,6 +631,38 @@ describe("stageMounts", () => {
         { source: src, target: "/sandbox/.openlock/a/b/c/d", type: "copy-once" },
       ]);
       expect(fsReadFileSync(join(staging, "a/b/c/d/x"), "utf-8")).toBe("");
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("skips bind entries (no cp)", () => {
+    const src = join(projectRoot, "bind-src");
+    mkdirSync(src);
+    writeFileSync(join(src, "file.txt"), "should not be copied");
+    const staging = mkdtempSync(join(tmpdir(), "openlock-stage-"));
+    try {
+      stageMounts(staging, [
+        { source: src, target: "/sandbox/.openlock/x", type: "bind" },
+      ]);
+      // No directory created under staging for bind targets.
+      expect(existsSync(join(staging, "x"))).toBe(false);
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  });
+
+  it("skips git-bundle entries (no cp)", () => {
+    const src = join(projectRoot, "gb");
+    mkdirSync(src);
+    mkdirSync(join(src, ".git"));
+    writeFileSync(join(src, ".git/HEAD"), "ref: refs/heads/main\n");
+    const staging = mkdtempSync(join(tmpdir(), "openlock-stage-"));
+    try {
+      stageMounts(staging, [
+        { source: src, target: "/sandbox/repo", type: "git-bundle" },
+      ]);
+      expect(existsSync(join(staging, "repo"))).toBe(false);
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }

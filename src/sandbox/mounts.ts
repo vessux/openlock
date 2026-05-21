@@ -172,6 +172,7 @@ export function parseMounts(raw: unknown, projectRoot: string): Mount[] {
 
 export function stageMounts(stagingDir: string, mounts: readonly Mount[]): void {
   for (const m of mounts) {
+    if (m.type === "bind" || m.type === "git-bundle") continue;
     const rel = stagingPathFor(m.target);
     const dest = join(stagingDir, rel);
     mkdirSync(dirname(dest), { recursive: true });
@@ -180,6 +181,7 @@ export function stageMounts(stagingDir: string, mounts: readonly Mount[]): void 
 }
 
 export async function restageMount(containerName: string, mount: Mount): Promise<void> {
+  if (mount.type === "bind" || mount.type === "git-bundle") return;
   const targetParent = dirname(mount.target);
   const targetLeaf = basename(mount.target);
   const tmp = mkdtempSync(join(tmpdir(), "openlock-restage-"));
