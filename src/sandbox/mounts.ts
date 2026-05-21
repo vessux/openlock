@@ -154,6 +154,19 @@ export function parseMounts(raw: unknown, projectRoot: string): Mount[] {
     targets.add(m.target);
     out.push(m);
   }
+  const bundleBasenames = new Map<string, number>();
+  for (let i = 0; i < out.length; i++) {
+    const m = out[i]!;
+    if (m.type !== "git-bundle") continue;
+    const base = basename(m.source);
+    const prev = bundleBasenames.get(base);
+    if (prev !== undefined) {
+      throw new Error(
+        `mounts[${i}]: source basename '${base}' collides between git-bundle mounts (already used by mounts[${prev}])`,
+      );
+    }
+    bundleBasenames.set(base, i);
+  }
   return out;
 }
 
@@ -183,6 +196,10 @@ export async function restageMount(containerName: string, mount: Mount): Promise
 
 export function workdirMount(mounts: readonly Mount[]): Mount | undefined {
   return mounts.find((m) => m.target === "/sandbox/repo");
+}
+
+export function gitBundleMounts(mounts: readonly Mount[]): Mount[] {
+  return mounts.filter((m) => m.type === "git-bundle");
 }
 
 export function bindMountArgs(mounts: readonly Mount[]): string[] {

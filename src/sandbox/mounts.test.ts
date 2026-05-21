@@ -12,6 +12,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   bindMountArgs,
+  gitBundleMounts,
   type Mount,
   parseMounts,
   stageMounts,
@@ -699,5 +700,65 @@ describe("bindMountArgs", () => {
       projectRoot,
     );
     expect(bindMountArgs(ms)).toEqual(["--volume", `${b}:/sandbox/.openlock/b`]);
+  });
+});
+
+describe("gitBundleMounts", () => {
+  function makeGitRepo(p: string) {
+    mkdirSync(p);
+    mkdirSync(join(p, ".git"));
+    writeFileSync(join(p, ".git/HEAD"), "ref: refs/heads/main\n");
+  }
+
+  it("returns [] when no git-bundle mounts", () => {
+    expect(gitBundleMounts([])).toEqual([]);
+  });
+
+  it("returns the workdir git-bundle mount", () => {
+    const src = join(projectRoot, "repo");
+    makeGitRepo(src);
+    const ms = parseMounts(
+      [{ source: src, target: "/sandbox/repo", type: "git-bundle" }],
+      projectRoot,
+    );
+    expect(gitBundleMounts(ms).map((m) => m.target)).toEqual(["/sandbox/repo"]);
+  });
+
+  it("returns multiple git-bundle mounts (workdir + extras)", () => {
+    const a = join(projectRoot, "alpha");
+    const b = join(projectRoot, "beta");
+    makeGitRepo(a);
+    makeGitRepo(b);
+    const ms = parseMounts(
+      [
+        { source: a, target: "/sandbox/repo", type: "git-bundle" },
+        { source: b, target: "/sandbox/extra-repo", type: "git-bundle" },
+      ],
+      projectRoot,
+    );
+    expect(gitBundleMounts(ms).map((m) => m.target)).toEqual([
+      "/sandbox/repo",
+      "/sandbox/extra-repo",
+    ]);
+  });
+
+  it("rejects two git-bundle mounts whose source basenames collide", () => {
+    const a = join(projectRoot, "outer/app");
+    const b = join(projectRoot, "inner/app");
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    mkdirSync(join(a, ".git"));
+    mkdirSync(join(b, ".git"));
+    writeFileSync(join(a, ".git/HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(b, ".git/HEAD"), "ref: refs/heads/main\n");
+    expect(() =>
+      parseMounts(
+        [
+          { source: a, target: "/sandbox/repo", type: "git-bundle" },
+          { source: b, target: "/sandbox/extra-repo", type: "git-bundle" },
+        ],
+        projectRoot,
+      ),
+    ).toThrow(/source basename 'app' collides between git-bundle mounts/);
   });
 });
