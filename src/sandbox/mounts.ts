@@ -12,7 +12,7 @@ export interface Mount {
   readOnly?: boolean;
 }
 
-const SANDBOX_MOUNT_PREFIX = "/sandbox/.openlock/";
+const SANDBOX_OPENLOCK_PREFIX = "/sandbox/.openlock/";
 
 const RESERVED_MOUNT_NAMES: ReadonlySet<string> = new Set(["repo.bundle", ".gitconfig", "bundles"]);
 
@@ -27,34 +27,15 @@ function resolveSource(projectRoot: string, raw: string): string {
   return isAbsolute(expanded) ? expanded : resolve(projectRoot, expanded);
 }
 
-function validateTarget(target: string): void {
-  if (!isAbsolute(target)) {
-    throw new Error(`mount target must be absolute: ${target}`);
-  }
-  if (target.split("/").includes("..")) {
-    throw new Error(`mount target must not contain '..' segments: ${target}`);
-  }
-  if (!target.startsWith(SANDBOX_MOUNT_PREFIX) || target.length <= SANDBOX_MOUNT_PREFIX.length) {
-    throw new Error(`mount target must be under /sandbox/.openlock/: ${target}`);
-  }
-  const rel = target.slice(SANDBOX_MOUNT_PREFIX.length);
-  const topSegment = rel.split("/")[0];
-  if (topSegment !== undefined && RESERVED_MOUNT_NAMES.has(topSegment)) {
-    throw new Error(
-      `mount target conflicts with openlock-internal name '${topSegment}': ${target}`,
-    );
-  }
-}
-
-function validateTargetForType(target: string, type: MountType, where: string): void {
+function commonTargetChecks(target: string, where: string): void {
   if (!isAbsolute(target)) {
     throw new Error(`${where}: mount target must be absolute: ${target}`);
   }
   if (target.split("/").includes("..")) {
     throw new Error(`${where}: mount target must not contain '..' segments: ${target}`);
   }
-  if (target.startsWith(SANDBOX_MOUNT_PREFIX)) {
-    const rel = target.slice(SANDBOX_MOUNT_PREFIX.length);
+  if (target.startsWith(SANDBOX_OPENLOCK_PREFIX)) {
+    const rel = target.slice(SANDBOX_OPENLOCK_PREFIX.length);
     const topSegment = rel.split("/")[0];
     if (topSegment !== undefined && RESERVED_MOUNT_NAMES.has(topSegment)) {
       throw new Error(
@@ -62,15 +43,27 @@ function validateTargetForType(target: string, type: MountType, where: string): 
       );
     }
   }
+}
+
+function validateTargetForType(target: string, type: MountType, where: string): void {
+  commonTargetChecks(target, where);
   if (type === "copy-once" || type === "copy-refresh") {
-    if (!target.startsWith(SANDBOX_MOUNT_PREFIX) || target.length <= SANDBOX_MOUNT_PREFIX.length) {
+    if (!target.startsWith(SANDBOX_OPENLOCK_PREFIX) || target.length <= SANDBOX_OPENLOCK_PREFIX.length) {
       throw new Error(
         `${where}: mount target must be under /sandbox/.openlock/ for type '${type}': ${target}`,
       );
     }
+    return;
   }
-  // bind + git-bundle: no further prefix restriction at this point (Task 5 will add
-  // git-bundle exclusion of /sandbox/.openlock/).
+  if (type === "git-bundle") {
+    if (target.startsWith(SANDBOX_OPENLOCK_PREFIX)) {
+      throw new Error(
+        `${where}: git-bundle target must not be under /sandbox/.openlock/: ${target}`,
+      );
+    }
+    return;
+  }
+  // type === "bind": no further restriction
 }
 
 function assertGitWorkingTree(source: string, where: string): void {
@@ -81,8 +74,11 @@ function assertGitWorkingTree(source: string, where: string): void {
 }
 
 export function stagingPathFor(target: string): string {
-  validateTarget(target);
-  return target.slice(SANDBOX_MOUNT_PREFIX.length);
+  commonTargetChecks(target, "stagingPathFor");
+  if (!target.startsWith(SANDBOX_OPENLOCK_PREFIX) || target.length <= SANDBOX_OPENLOCK_PREFIX.length) {
+    throw new Error(`stagingPathFor: target must be under /sandbox/.openlock/: ${target}`);
+  }
+  return target.slice(SANDBOX_OPENLOCK_PREFIX.length);
 }
 
 interface RawMount {

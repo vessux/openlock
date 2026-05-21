@@ -388,6 +388,120 @@ describe("parseMounts", () => {
       ),
     ).toThrow(/readOnly must be a boolean/);
   });
+
+  it("bind: accepts target outside /sandbox/.openlock/", () => {
+    const src = join(projectRoot, "bind-out");
+    mkdirSync(src);
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/extras", type: "bind" }],
+      projectRoot,
+    );
+    expect(m?.target).toBe("/sandbox/extras");
+    expect(m?.type).toBe("bind");
+  });
+
+  it("bind: accepts target /sandbox/repo (workdir override)", () => {
+    const src = join(projectRoot, "bind-repo");
+    mkdirSync(src);
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/repo", type: "bind" }],
+      projectRoot,
+    );
+    expect(m?.target).toBe("/sandbox/repo");
+    expect(m?.type).toBe("bind");
+  });
+
+  it("bind: rejects target reserved repo.bundle", () => {
+    const src = join(projectRoot, "bind-rb");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/repo.bundle", type: "bind" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name 'repo\.bundle'/);
+  });
+
+  it("bind: rejects target reserved .gitconfig", () => {
+    const src = join(projectRoot, "bind-gc");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/.gitconfig", type: "bind" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name '\.gitconfig'/);
+  });
+
+  it("bind: rejects target reserved bundles", () => {
+    const src = join(projectRoot, "bind-bn");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/bundles", type: "bind" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name 'bundles'/);
+  });
+
+  it("bind: rejects target with '..' segment", () => {
+    const src = join(projectRoot, "bind-dd");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/../etc", type: "bind" }],
+        projectRoot,
+      ),
+    ).toThrow(/must not contain '\.\.'/);
+  });
+
+  it("bind: rejects non-absolute target", () => {
+    const src = join(projectRoot, "bind-rel");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "sandbox/extras", type: "bind" }],
+        projectRoot,
+      ),
+    ).toThrow(/must be absolute/);
+  });
+
+  it("git-bundle: accepts target /sandbox/repo", () => {
+    const src = join(projectRoot, "gb-repo");
+    mkdirSync(src);
+    mkdirSync(join(src, ".git"));
+    writeFileSync(join(src, ".git/HEAD"), "ref: refs/heads/main\n");
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/repo", type: "git-bundle" }],
+      projectRoot,
+    );
+    expect(m?.target).toBe("/sandbox/repo");
+  });
+
+  it("git-bundle: accepts target /sandbox/extra-repo", () => {
+    const src = join(projectRoot, "gb-extra");
+    mkdirSync(src);
+    mkdirSync(join(src, ".git"));
+    writeFileSync(join(src, ".git/HEAD"), "ref: refs/heads/main\n");
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/extra-repo", type: "git-bundle" }],
+      projectRoot,
+    );
+    expect(m?.target).toBe("/sandbox/extra-repo");
+  });
+
+  it("git-bundle: rejects target under /sandbox/.openlock/", () => {
+    const src = join(projectRoot, "gb-bad");
+    mkdirSync(src);
+    mkdirSync(join(src, ".git"));
+    writeFileSync(join(src, ".git/HEAD"), "ref: refs/heads/main\n");
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/some-repo", type: "git-bundle" }],
+        projectRoot,
+      ),
+    ).toThrow(/git-bundle target must not be under \/sandbox\/\.openlock\//);
+  });
 });
 
 describe("stagingPathFor", () => {
