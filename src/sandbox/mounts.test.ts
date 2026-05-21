@@ -217,8 +217,11 @@ describe("parseMounts", () => {
     const src = join(projectRoot, "s");
     mkdirSync(src);
     expect(() =>
-      parseMounts([{ source: src, target: "/sandbox/.openlock/x", type: "bind" }], projectRoot),
-    ).toThrow(/bind.*not yet supported|unknown type/);
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/x", type: "no-such-type" }],
+        projectRoot,
+      ),
+    ).toThrow(/unknown type/);
   });
 
   it("accepts type copy-once and copy-refresh", () => {
@@ -234,6 +237,28 @@ describe("parseMounts", () => {
       projectRoot,
     );
     expect(ms.map((m) => m.type)).toEqual(["copy-once", "copy-refresh"]);
+  });
+
+  it("accepts type: bind with a directory source", () => {
+    const src = join(projectRoot, "bind-dir");
+    mkdirSync(src);
+    const [m] = parseMounts(
+      [{ source: src, target: "/sandbox/.openlock/bound", type: "bind" }],
+      projectRoot,
+    );
+    expect(m?.type).toBe("bind");
+    expect(m?.source).toBe(src);
+  });
+
+  it("accepts type: bind with a file source", () => {
+    const f = join(projectRoot, "bind-file");
+    writeFileSync(f, "hello");
+    const [m] = parseMounts(
+      [{ source: f, target: "/sandbox/.openlock/file", type: "bind" }],
+      projectRoot,
+    );
+    expect(m?.type).toBe("bind");
+    expect(m?.source).toBe(f);
   });
 });
 

@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { podmanCpInto, podmanExecChownSandbox, podmanExecRmRf } from "./container";
 
-type MountType = "copy-once" | "copy-refresh";
+type MountType = "copy-once" | "copy-refresh" | "bind" | "git-bundle";
 
 export interface Mount {
   source: string;
@@ -65,22 +65,26 @@ function parseOne(raw: RawMount, projectRoot: string, index: number): Mount {
     throw new Error(`${where}: 'target' must be a non-empty string`);
   }
   if (typeof raw.type !== "string") {
-    throw new Error(`${where}: 'type' must be one of copy-once, copy-refresh`);
-  }
-  validateTarget(raw.target);
-  if (raw.type !== "copy-once" && raw.type !== "copy-refresh") {
     throw new Error(
-      `${where}: unknown type '${raw.type}' (allowed: copy-once, copy-refresh; bind+git-bundle are not yet supported, see bd openlock-71j/openlock-bkk)`,
+      `${where}: 'type' must be one of copy-once, copy-refresh, bind, git-bundle`,
     );
   }
+  const type = raw.type;
+  if (type !== "copy-once" && type !== "copy-refresh" && type !== "bind" && type !== "git-bundle") {
+    throw new Error(
+      `${where}: unknown type '${type}' (allowed: copy-once, copy-refresh, bind, git-bundle)`,
+    );
+  }
+  validateTarget(raw.target);
   const source = resolveSource(projectRoot, raw.source);
   if (!existsSync(source)) {
     throw new Error(`${where}: source ${source} does not exist`);
   }
-  if (!statSync(source).isDirectory()) {
+  const isDir = statSync(source).isDirectory();
+  if ((type === "copy-once" || type === "copy-refresh" || type === "git-bundle") && !isDir) {
     throw new Error(`${where}: source ${source} is not a directory`);
   }
-  return { source, target: raw.target, type: raw.type };
+  return { source, target: raw.target, type };
 }
 
 export function parseMounts(raw: unknown, projectRoot: string): Mount[] {
