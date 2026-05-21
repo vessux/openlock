@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Mount, parseMounts, stageMounts, stagingPathFor } from "./mounts";
+import { type Mount, parseMounts, stageMounts, stagingPathFor, workdirMount } from "./mounts";
 
 let projectRoot: string;
 beforeEach(() => {
@@ -501,6 +501,64 @@ describe("parseMounts", () => {
         projectRoot,
       ),
     ).toThrow(/git-bundle target must not be under \/sandbox\/\.openlock\//);
+  });
+
+  it("rejects copy-once targeting /sandbox/repo", () => {
+    const src = join(projectRoot, "co-repo");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/repo", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/\/sandbox\/repo not supported with type 'copy-once'/);
+  });
+
+  it("rejects copy-refresh targeting /sandbox/repo", () => {
+    const src = join(projectRoot, "cr-repo");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/repo", type: "copy-refresh" }],
+        projectRoot,
+      ),
+    ).toThrow(/\/sandbox\/repo not supported with type 'copy-refresh'/);
+  });
+
+  it("accepts zero workdir mounts (no mount targets /sandbox/repo)", () => {
+    const src = join(projectRoot, "no-wd");
+    mkdirSync(src);
+    const ms = parseMounts(
+      [{ source: src, target: "/sandbox/.openlock/x", type: "copy-once" }],
+      projectRoot,
+    );
+    expect(ms).toHaveLength(1);
+    expect(ms.find((m) => m.target === "/sandbox/repo")).toBeUndefined();
+  });
+});
+
+describe("workdirMount", () => {
+  it("returns undefined when no mount targets /sandbox/repo", () => {
+    const src = join(projectRoot, "x");
+    mkdirSync(src);
+    const mounts: Mount[] = [
+      { source: src, target: "/sandbox/.openlock/x", type: "copy-once" },
+    ];
+    expect(workdirMount(mounts)).toBeUndefined();
+  });
+
+  it("returns the bind mount when it targets /sandbox/repo", () => {
+    const src = join(projectRoot, "bind-wd");
+    mkdirSync(src);
+    const m: Mount = { source: src, target: "/sandbox/repo", type: "bind" };
+    expect(workdirMount([m])).toEqual(m);
+  });
+
+  it("returns the git-bundle mount when it targets /sandbox/repo", () => {
+    const src = join(projectRoot, "gb-wd");
+    mkdirSync(src);
+    const m: Mount = { source: src, target: "/sandbox/repo", type: "git-bundle" };
+    expect(workdirMount([m])).toEqual(m);
   });
 });
 

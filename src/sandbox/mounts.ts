@@ -48,6 +48,11 @@ function commonTargetChecks(target: string, where: string): void {
 function validateTargetForType(target: string, type: MountType, where: string): void {
   commonTargetChecks(target, where);
   if (type === "copy-once" || type === "copy-refresh") {
+    if (target === "/sandbox/repo") {
+      throw new Error(
+        `${where}: target /sandbox/repo not supported with type '${type}'; use git-bundle (host repo bundled in) or bind (live host sync), or omit the workdir mount`,
+      );
+    }
     if (!target.startsWith(SANDBOX_OPENLOCK_PREFIX) || target.length <= SANDBOX_OPENLOCK_PREFIX.length) {
       throw new Error(
         `${where}: mount target must be under /sandbox/.openlock/ for type '${type}': ${target}`,
@@ -174,4 +179,8 @@ export async function restageMount(containerName: string, mount: Mount): Promise
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+export function workdirMount(mounts: readonly Mount[]): Mount | undefined {
+  return mounts.find((m) => m.target === "/sandbox/repo");
 }
