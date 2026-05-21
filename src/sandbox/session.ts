@@ -32,7 +32,14 @@ import {
 import { type Harness, resolveHarness } from "./harness";
 import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureImage } from "./image-build";
-import { bindMountArgs, type Mount, restageMount, stageMounts } from "./mounts";
+import {
+  bindMountArgs,
+  gitBundleMounts,
+  type Mount,
+  restageMount,
+  stageMounts,
+  workdirMount,
+} from "./mounts";
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
@@ -131,8 +138,18 @@ async function createSession(
   try {
     const staging = join(tmp, ".openlock");
     mkdirSync(staging);
-    await createBundle(projectPath, join(staging, "repo.bundle"));
-    console.log("Git bundle created.");
+
+    const bundleMounts = gitBundleMounts(mounts);
+    const bundlesDir = join(staging, "bundles");
+    if (bundleMounts.length > 0) {
+      mkdirSync(bundlesDir);
+    }
+    for (const bm of bundleMounts) {
+      const bundleFile = join(bundlesDir, `${basename(bm.source)}.bundle`);
+      await createBundle(bm.source, bundleFile);
+      console.log(`Git bundle created for ${bm.target}.`);
+    }
+
     stageMounts(staging, mounts);
 
     const gitconfigPath = await prepareGitIdentity(staging);
@@ -146,12 +163,22 @@ async function createSession(
     // Setup runs once at create + on every podman start (idempotent).
     // Final `exec sleep infinity` keeps PID 1 alive so the container
     // outlives the foreground command between attaches.
-    const setupCmd = [
+    const wd = workdirMount(mounts);
+    const setupLines = [
       "cd /sandbox",
       "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
-      "[ -d repo ] || git clone .openlock/repo.bundle repo",
-      "exec sleep infinity",
-    ].join(" ; ");
+    ];
+    for (const bm of bundleMounts) {
+      const bundleName = `${basename(bm.source)}.bundle`;
+      setupLines.push(
+        `[ -d ${bm.target} ] || git clone .openlock/bundles/${bundleName} ${bm.target}`,
+      );
+    }
+    if (wd === undefined) {
+      setupLines.push("mkdir -p /sandbox/repo");
+    }
+    setupLines.push("exec sleep infinity");
+    const setupCmd = setupLines.join(" ; ");
 
     const handle = await openshellSandboxCreateAsync({
       sessionName: name,
