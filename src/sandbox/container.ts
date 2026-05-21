@@ -96,6 +96,7 @@ export interface OpenshellCreateArgs {
   uploadDir: string;
   policy: string;
   command: string[];
+  volumeArgs?: readonly string[];
 }
 
 export interface OpenshellHandle {
@@ -104,27 +105,31 @@ export interface OpenshellHandle {
   exited: Promise<number>;
 }
 
+export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
+  return [
+    "sandbox",
+    "create",
+    "--name",
+    args.sessionName,
+    "--from",
+    args.imageTag,
+    "--upload",
+    `${args.uploadDir}:/sandbox/`,
+    "--no-git-ignore",
+    "--policy",
+    args.policy,
+    "--provider",
+    "anthropic",
+    "--no-tty",
+    ...(args.volumeArgs ?? []),
+    "--",
+    ...args.command,
+  ];
+}
+
 export function openshellSandboxCreateAsync(args: OpenshellCreateArgs): Promise<OpenshellHandle> {
   return getCliInvocation().then((cli) => {
-    const argv = [
-      ...cli.argv,
-      "sandbox",
-      "create",
-      "--name",
-      args.sessionName,
-      "--from",
-      args.imageTag,
-      "--upload",
-      `${args.uploadDir}:/sandbox/`,
-      "--no-git-ignore",
-      "--policy",
-      args.policy,
-      "--provider",
-      "anthropic",
-      "--no-tty",
-      "--",
-      ...args.command,
-    ];
+    const argv = [...cli.argv, ...buildOpenshellCreateArgv(args)];
     const proc = Bun.spawn(argv, {
       cwd: cli.cwd,
       stdin: "ignore",
