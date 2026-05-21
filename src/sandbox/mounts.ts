@@ -14,7 +14,7 @@ export interface Mount {
 
 const SANDBOX_MOUNT_PREFIX = "/sandbox/.openlock/";
 
-const RESERVED_MOUNT_NAMES: ReadonlySet<string> = new Set(["repo.bundle", ".gitconfig"]);
+const RESERVED_MOUNT_NAMES: ReadonlySet<string> = new Set(["repo.bundle", ".gitconfig", "bundles"]);
 
 function expandHome(p: string): string {
   if (p === "~") return homedir();

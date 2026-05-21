@@ -189,6 +189,28 @@ describe("parseMounts", () => {
     ).toThrow(/conflicts with openlock-internal name 'repo\.bundle'/);
   });
 
+  it("throws when target's top segment is reserved 'bundles' (copy-once)", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/bundles", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name 'bundles'/);
+  });
+
+  it("throws when target nests under reserved 'bundles' (copy-once)", () => {
+    const src = join(projectRoot, "s");
+    mkdirSync(src);
+    expect(() =>
+      parseMounts(
+        [{ source: src, target: "/sandbox/.openlock/bundles/sub", type: "copy-once" }],
+        projectRoot,
+      ),
+    ).toThrow(/conflicts with openlock-internal name 'bundles'/);
+  });
+
   it("throws when two mounts share a target", () => {
     const a = join(projectRoot, "a");
     const b = join(projectRoot, "b");
