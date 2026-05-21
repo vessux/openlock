@@ -235,10 +235,12 @@ mounts:
 ```yaml
 mounts:
   - source: ./logs
-    target: /sandbox/.openlock/logs
+    target: /home/sandbox/logs
     type: bind
     readOnly: true
 ```
+
+Note: avoid binding under `/sandbox/.openlock/` — that prefix is openlock's `--upload` destination and a bind there collides with the staging upload.
 
 #### Example — no workdir mount (in-container clone / scratch)
 
