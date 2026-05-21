@@ -235,7 +235,12 @@ async function syncBackToHost(
     console.log("Bind workdir; no sync-back needed.");
     return;
   }
-  // wd.type === "git-bundle"
+  if (wd.type !== "git-bundle") {
+    // Defense against future relaxation of validateTargetForType permitting
+    // copy-* at /sandbox/repo: the bundle/clone flow below assumes a git
+    // working tree, not a copy.
+    throw new Error(`syncBackToHost: unexpected workdir mount type ${wd.type}`);
+  }
   // Read the active branch while the container is still running.
   // null = detached HEAD; auto-promote will skip silently.
   const activeBranch = await readSandboxActiveBranch(containerName, wd.target);
