@@ -222,13 +222,37 @@ async function createSession(
 }
 
 async function syncBackToHost(
-  projectPath: string,
   containerName: string,
   sessionName: string,
+  mounts: readonly Mount[],
 ): Promise<void> {
+  const wd = workdirMount(mounts);
+  if (wd === undefined) {
+    console.log("No workdir mount; skipping sync-back.");
+    return;
+  }
+  if (wd.type === "bind") {
+    console.log("Bind workdir; no sync-back needed.");
+    return;
+  }
+  // wd.type === "git-bundle"
   // Read the active branch while the container is still running.
   // null = detached HEAD; auto-promote will skip silently.
-  const activeBranch = await readSandboxActiveBranch(containerName);
+  // Pass an inline exec running in wd.target so we don't depend on
+  // readSandboxActiveBranch's default /sandbox/repo cwd. Task 14 will
+  // parameterise the default and let us drop this wrapper.
+  const activeBranch = await readSandboxActiveBranch(containerName, async (name, args) => {
+    const proc = Bun.spawn(["podman", "exec", "-u", "sandbox", "-w", wd.target, name, ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const exitCode = await proc.exited;
+    return { exitCode, stdout, stderr };
+  });
 
   // Pre-prune: defensive against stale refs from prior sessions reusing
   // this name. The bundle is the source of truth for current refs.
@@ -236,7 +260,7 @@ async function syncBackToHost(
   // prior namespaced refs are already gone. Reachability of any prior
   // tip is preserved via refs/heads/openlock/<session> when auto-promote
   // ran on a previous sync; otherwise the next successful sync recovers.
-  await pruneSandboxRefs(projectPath, sessionName);
+  await pruneSandboxRefs(wd.source, sessionName);
 
   const tmp = mkdtempSync(join(tmpdir(), "openlock-syncback-"));
   try {
@@ -244,9 +268,9 @@ async function syncBackToHost(
     // Always regenerate the bundle inside the container before copying it
     // out. Prior implementations preferred a stale /sandbox/out.bundle if
     // one existed, which broke re-attach: a second sync would resurface
-    // refs from the first sync only. Run as `sandbox` with cwd
-    // /sandbox/repo so git can open the repo (root trips safe.directory)
-    // and write /sandbox/out.bundle (owned by sandbox).
+    // refs from the first sync only. Run as `sandbox` with cwd wd.target
+    // so git can open the repo (root trips safe.directory) and write
+    // /sandbox/out.bundle (owned by sandbox).
     const regen = Bun.spawn(
       [
         "podman",
@@ -254,7 +278,7 @@ async function syncBackToHost(
         "-u",
         "sandbox",
         "-w",
-        "/sandbox/repo",
+        wd.target,
         containerName,
         "git",
         "bundle",
@@ -274,9 +298,9 @@ async function syncBackToHost(
       console.warn("No commits to sync.");
       return;
     }
-    await fetchBundle(projectPath, outBundle, sessionName);
+    await fetchBundle(wd.source, outBundle, sessionName);
 
-    const promote = await promoteActiveBranch(projectPath, sessionName, activeBranch);
+    const promote = await promoteActiveBranch(wd.source, sessionName, activeBranch);
     console.log(formatSyncBackLog(sessionName, activeBranch, promote));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -299,11 +323,11 @@ interface LaunchOpts {
 async function attachHarnessAndSync(
   containerName: string,
   sessionName: string,
-  projectPath: string,
   launch: LaunchOpts,
+  mounts: readonly Mount[],
 ): Promise<number> {
   const exitCode = await execHarness(launch.harness, containerName, launch.args, launch.env);
-  await syncBackToHost(projectPath, containerName, sessionName);
+  await syncBackToHost(containerName, sessionName, mounts);
   const meta = findSessionByName(sessionName);
   if (meta) {
     updateSessionMeta(sessionsDir(), meta.id, {
@@ -530,7 +554,12 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     harness,
   );
   const launch: LaunchOpts = { args: resolved.args, env: resolved.env, harness };
-  const exitCode = await attachHarnessAndSync(containerName, sessionName, projectPath, launch);
+  const exitCode = await attachHarnessAndSync(
+    containerName,
+    sessionName,
+    launch,
+    resolved.mounts,
+  );
   const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
     (n) => n !== containerName,
   );
