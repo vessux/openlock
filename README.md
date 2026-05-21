@@ -183,11 +183,86 @@ Override with `--policy /abs/path/to/policy.yaml`.
 
 `.openlock/config.yaml` accepts three optional fields that let you inject host content into the sandbox and tweak the agent launch:
 
-- `mounts[]` — host directories copied into the container. Each entry requires `source` (host path, absolute / `~/...` / relative-to-project-root), `target` (absolute container path; must be under `/sandbox/.openlock/`), and `type` (`copy-once` — stage on create only; `copy-refresh` — re-stage on every attach). Targets `/sandbox/.openlock/repo.bundle` and `/sandbox/.openlock/.gitconfig` are reserved for openlock-internal use.
+- `mounts[]` — entries that wire host paths into the container. Each entry requires `source` (host path, absolute / `~/...` / relative-to-project-root), `target` (absolute container path), and `type` (one of `copy-once`, `copy-refresh`, `bind`, `git-bundle`). Optional `readOnly: true` is valid on `bind` only.
 - `args[]` — extra argv appended to the in-container agent launch (today: `claude`).
 - `env{}` — extra environment variables set on the agent process.
 
-Example — Claude Code with a seed-skills plugin:
+### Mount types
+
+| type | semantics | target |
+|---|---|---|
+| `copy-once` | stage once at create | under `/sandbox/.openlock/` (not `/sandbox/repo`) |
+| `copy-refresh` | re-stage on every attach | under `/sandbox/.openlock/` (not `/sandbox/repo`) |
+| `bind` | live `podman -v` passthrough | anywhere; `readOnly: true` supported |
+| `git-bundle` | host repo bundled at create, cloned in container | anywhere outside `/sandbox/.openlock/` |
+
+The container path `/sandbox/repo` is the **workdir**: agent launch + sync-back hardcode `-w /sandbox/repo`. The workdir mount is optional; if present, its `type` must be `bind` or `git-bundle`. If absent, openlock provisions an empty `/sandbox/repo` so existing exec helpers don't fail. Reserved names under `/sandbox/.openlock/`: `repo.bundle`, `.gitconfig`, `bundles`.
+
+#### Example — git-bundle workdir (default / typical)
+
+```yaml
+caps: [js]
+mounts:
+  - source: .
+    target: /sandbox/repo
+    type: git-bundle
+```
+
+Host repo is bundled at session create + cloned to `/sandbox/repo`. Commits sync back via `refs/sandbox/<session>/*` on session exit. `--branch <name>` honoured at clone time.
+
+#### Example — bind workdir (live editor sync)
+
+```yaml
+mounts:
+  - source: .
+    target: /sandbox/repo
+    type: bind
+```
+
+Host directory mounted live. No bundle, no clone, no sync-back — edits propagate both ways immediately.
+
+#### Example — bind host cache for cross-session reuse
+
+```yaml
+mounts:
+  - source: ~/.cache/uv
+    target: /home/sandbox/.cache/uv
+    type: bind
+```
+
+#### Example — read-only bind for log tailing
+
+```yaml
+mounts:
+  - source: ./logs
+    target: /sandbox/.openlock/logs
+    type: bind
+    readOnly: true
+```
+
+#### Example — no workdir mount (in-container clone / scratch)
+
+```yaml
+mounts: []
+```
+
+`/sandbox/repo` is provisioned empty + owned by `sandbox:sandbox`. Agent or user populates via `git clone` or any other means.
+
+#### Example — multi-repo git-bundle (workdir + extras)
+
+```yaml
+mounts:
+  - source: .
+    target: /sandbox/repo
+    type: git-bundle
+  - source: ../shared-lib
+    target: /sandbox/shared-lib
+    type: git-bundle
+```
+
+Each git-bundle source basename must be unique. Sync-back applies to the workdir bundle only; non-workdir bundles are snapshot-at-create.
+
+#### Example — Claude Code with seed-skills plugin (copy-refresh)
 
 ```yaml
 caps: [js]
@@ -198,20 +273,17 @@ mounts:
 args: ["--plugin-dir", "/sandbox/.openlock/skills"]
 ```
 
-Example — opencode (when supported via openlock-9bw multi-harness):
+### Notes
 
-```yaml
-mounts:
-  - source: ./opencode-bundle
-    target: /sandbox/.openlock/opencode-config
-    type: copy-once
-env:
-  OPENCODE_CONFIG_DIR: /sandbox/.openlock/opencode-config
-```
+**Security (bind).** Bind mounts grant the container live access to host files. Container-side compromise reaches host. You decide the exposure surface.
 
-Symlinks in `mounts[].source` are dereferenced at copy time, so producers that compile to host-symlinked caches (e.g., seed-skills) materialize as real files inside the container. User maintains consistency between `target` values and container paths referenced in `args[]` / `env{}` — there is no cross-validation.
+**Ownership (Linux bind).** On rootless podman, the openshell fork auto-applies `--userns=keep-id:uid=N,gid=N` (sandbox uid from the image's `USER` directive) whenever any `--volume` is set, so bind files are bidirectionally editable across host ↔ container without manual prep. On rootless docker, ownership depends on daemon-wide `userns-remap`; for cross-uid bind on docker, prefer copy-* mounts. On Mac the virtiofs layer handles this transparently.
 
-Future mount types `bind` (live podman `-v`) and `git-bundle` (workdir unification) are tracked under bd `openlock-71j` and `openlock-bkk`.
+**VM driver.** Bind mounts are NOT supported when openshell uses its VM driver. The driver rejects bind mounts at sandbox create.
+
+**Symlinks (copy-*).** Symlinks in `mounts[].source` are dereferenced at copy time, so producers that compile to host-symlinked caches (e.g., seed-skills) materialize as real files inside the container.
+
+**Validation.** Openlock does not cross-validate `target` paths against references in `args[]` / `env{}`.
 
 ## Repo layout
 
