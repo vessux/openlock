@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureSupervisorImage } from "./build-supervisor-image";
@@ -129,6 +138,25 @@ async function resolvePodmanSocket(): Promise<string> {
   return out.trim();
 }
 
+export function spawnDaemonToLog(args: string[], cwd: string, logPath: string): { pid: number } {
+  const logFd = openSync(logPath, "a");
+  try {
+    const proc = Bun.spawn(args, {
+      cwd,
+      stdout: logFd,
+      stderr: logFd,
+    });
+    // The gateway is a daemon — don't hold the parent CLI's event loop open
+    // after this function returns. `bun src/cli.ts` (interpreter) auto-exits
+    // when the script ends; `bun build --compile`d binaries don't, so the
+    // parent hangs after "Gateway ready." until the child dies.
+    proc.unref();
+    return { pid: proc.pid };
+  } finally {
+    closeSync(logFd);
+  }
+}
+
 export async function startGateway(): Promise<void> {
   const { running, pid } = gatewayStatus();
   if (running) {
@@ -161,27 +189,15 @@ export async function startGateway(): Promise<void> {
     `sqlite:${dbPath}?mode=rwc`,
   ];
 
-  const proc = Bun.spawn(
-    ["bash", "-c", `exec ${args.map((a) => `'${a}'`).join(" ")} >> "${LOG_FILE}" 2>&1`],
-    {
-      cwd: STATE_DIR,
-      stdout: "ignore",
-      stderr: "ignore",
-    },
-  );
-  // The gateway is a daemon — don't hold the parent CLI's event loop open
-  // after this function returns. `bun src/cli.ts` (interpreter) auto-exits
-  // when the script ends; `bun build --compile`d binaries don't, so the
-  // parent hangs after "Gateway ready." until the child dies.
-  proc.unref();
+  const { pid: gwPid } = spawnDaemonToLog(args, STATE_DIR, LOG_FILE);
 
-  writeFileSync(PID_FILE, String(proc.pid));
-  console.log(`Gateway starting (pid ${proc.pid}), log: ${LOG_FILE}`);
+  writeFileSync(PID_FILE, String(gwPid));
+  console.log(`Gateway starting (pid ${gwPid}), log: ${LOG_FILE}`);
 
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     await Bun.sleep(1000);
-    if (!pidAlive(proc.pid)) {
+    if (!pidAlive(gwPid)) {
       const tail = existsSync(LOG_FILE)
         ? readFileSync(LOG_FILE, "utf-8").split("\n").slice(-20).join("\n")
         : "(no log)";
