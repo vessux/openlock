@@ -238,21 +238,7 @@ async function syncBackToHost(
   // wd.type === "git-bundle"
   // Read the active branch while the container is still running.
   // null = detached HEAD; auto-promote will skip silently.
-  // Pass an inline exec running in wd.target so we don't depend on
-  // readSandboxActiveBranch's default /sandbox/repo cwd. Task 14 will
-  // parameterise the default and let us drop this wrapper.
-  const activeBranch = await readSandboxActiveBranch(containerName, async (name, args) => {
-    const proc = Bun.spawn(["podman", "exec", "-u", "sandbox", "-w", wd.target, name, ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
-    return { exitCode, stdout, stderr };
-  });
+  const activeBranch = await readSandboxActiveBranch(containerName, wd.target);
 
   // Pre-prune: defensive against stale refs from prior sessions reusing
   // this name. The bundle is the source of truth for current refs.
@@ -554,12 +540,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     harness,
   );
   const launch: LaunchOpts = { args: resolved.args, env: resolved.env, harness };
-  const exitCode = await attachHarnessAndSync(
-    containerName,
-    sessionName,
-    launch,
-    resolved.mounts,
-  );
+  const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
   const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
     (n) => n !== containerName,
   );
