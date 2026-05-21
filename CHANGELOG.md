@@ -40,7 +40,9 @@
 | 4 | no workdir mount → empty `/sandbox/repo` provisioned by image, "No workdir mount; skipping sync-back." | ✅ |
 | 5 | `--branch` rejection on bind + absent workdir → exit 2 with spec messages | ✅ |
 | 6 | invalid configs (copy-* at `/sandbox/repo`, git-bundle basename collision) → parse errors | ✅ |
-| 7-8 | Lima ARM64 bind cross-uid + VM-driver bind rejection | pending user |
+| 7a | Lima ARM64 --branch validators (5+6) | ✅ |
+| 7b | Lima ARM64 container create (1/2/4) | ❌ local env (fork v0.3.0 also fails; not mount-v2) |
+| 8 | VM-driver bind rejection | pending (separate openshell config) |
 
 Fixes discovered during smoke that landed in PR #30:
 - Image-level `/sandbox/repo` provisioning.
