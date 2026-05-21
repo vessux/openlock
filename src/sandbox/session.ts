@@ -5,6 +5,7 @@ import { podmanMachineRunning, podmanSocketActive, runDoctorChecks } from "../do
 import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
 import { readToken } from "../tokens";
+import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import { SANDBOX_PREFIX } from "./constants";
 import {
   copyOutOfContainer,
@@ -57,6 +58,7 @@ export interface SandboxOpts {
   path: string;
   policy?: string;
   harness?: string;
+  branch?: string;
 }
 
 async function buildSandboxImage(caps: Cap[]): Promise<string> {
@@ -119,6 +121,7 @@ async function createSession(
   projectPath: string,
   resolved: ResolvedRepo,
   harness: Harness,
+  branch: string | undefined,
 ): Promise<NewSession> {
   const { caps, policy, mounts } = resolved;
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
@@ -170,8 +173,10 @@ async function createSession(
     ];
     for (const bm of bundleMounts) {
       const bundleName = `${basename(bm.source)}.bundle`;
+      const isWorkdir = bm.target === "/sandbox/repo";
+      const branchFlag = isWorkdir && branch !== undefined ? `-b '${branch}' ` : "";
       setupLines.push(
-        `[ -d ${bm.target} ] || git clone .openlock/bundles/${bundleName} ${bm.target}`,
+        `[ -d ${bm.target} ] || git clone ${branchFlag}.openlock/bundles/${bundleName} ${bm.target}`,
       );
     }
     if (wd === undefined) {
@@ -430,11 +435,12 @@ async function resolveOrCreateSession(
   projectPath: string,
   resolved: ResolvedRepo,
   harness: Harness,
+  branch: string | undefined,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
-    const created = await createSession(projectPath, resolved, harness);
+    const created = await createSession(projectPath, resolved, harness, branch);
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
@@ -513,6 +519,12 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   announceRepoAction(repoResult.action, projectPath);
   const resolved = resolveRepoPolicyAndCaps(projectPath, opts.policy);
 
+  const branchErr = validateBranchFlagAgainstWorkdir(opts.branch, workdirMount(resolved.mounts));
+  if (branchErr !== null) {
+    console.error(branchErr);
+    process.exit(2);
+  }
+
   // Decide the effective harness BEFORE create-or-reattach so we can persist
   // the right value on first create and reject explicit mismatches on reattach.
   const existingMatches = findSessionsByPath(sessionsDir(), projectPath);
@@ -543,6 +555,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     projectPath,
     resolved,
     harness,
+    opts.branch,
   );
   const launch: LaunchOpts = { args: resolved.args, env: resolved.env, harness };
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
