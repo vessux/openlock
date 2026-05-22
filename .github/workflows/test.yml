@@ -53,6 +53,15 @@ jobs:
 
       - run: bun install
 
+      - name: Start rootless podman socket
+        # The gateway resolves /run/user/$UID/podman/podman.sock at startup
+        # (see resolvePodmanSocket in ensure-gateway.ts), so the runner needs
+        # a live podman.socket before the gateway starts.
+        run: |
+          systemctl --user enable --now podman.socket
+          # Verify the socket landed where the gateway expects it.
+          podman info --format '{{.Host.RemoteSocket.Path}}'
+
       - name: Integration tests (OPENLOCK_LIVE_INTEGRATION=1)
         env:
           OPENLOCK_LIVE_INTEGRATION: "1"
