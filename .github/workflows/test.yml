@@ -34,3 +34,60 @@ jobs:
 
       - name: Dead code (knip)
         run: bun run knip
+
+  live-integration:
+    # Live end-to-end tests gated behind OPENLOCK_LIVE_INTEGRATION=1 because
+    # they build the sandbox image (~minutes first run), start the gateway,
+    # and create real containers. Kept off the default `bun test` path so
+    # local dev stays fast; this job runs them in CI so they're never
+    # silently broken.
+    #
+    # `continue-on-error: true` because the job currently surfaces a CI
+    # environment gap (ubuntu-24.04 ships podman 4.x which mis-parses the
+    # shell-heredoc in containers/core.Containerfile; the same Containerfile
+    # builds fine on podman 5.x — Mac live integration suite passes 3/3).
+    # Marking informational so PR review isn't blocked while the runner is
+    # brought up to a heredoc-aware podman. See bd openlock-sjr.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: test
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Extend rootless subuid/subgid range
+        # openlock-core images pin sandbox uid 999999 (see containers/
+        # core.Containerfile for rationale). GH Actions ubuntu-24.04 ships
+        # `runner` with /etc/subuid `runner:165536:65536` — too small for
+        # uid 999999, so `podman build` hits `crun: setgroups: Invalid
+        # argument` at `USER sandbox`. Widen the range to 1.1M before any
+        # podman work, then re-migrate podman's user-namespace state.
+        run: |
+          # `$USER` must expand in the outer shell, not inside sudo (where it
+          # would resolve to root). Pipe + tee handles that cleanly.
+          echo "$USER:100000:1100000" | sudo tee /etc/subuid > /dev/null
+          echo "$USER:100000:1100000" | sudo tee /etc/subgid > /dev/null
+          podman system migrate
+          # Surface effective config in the log so future drift is obvious.
+          getent passwd "$USER" | cut -d: -f1,3
+          grep "^$USER:" /etc/subuid /etc/subgid
+
+      - name: Start rootless podman socket
+        # The gateway resolves /run/user/$UID/podman/podman.sock at startup
+        # (see resolvePodmanSocket in ensure-gateway.ts), so the runner needs
+        # a live podman.socket before the gateway starts.
+        run: |
+          systemctl --user enable --now podman.socket
+          # Verify the socket landed where the gateway expects it.
+          podman info --format '{{.Host.RemoteSocket.Path}}'
+
+      - name: Integration tests (OPENLOCK_LIVE_INTEGRATION=1)
+        env:
+          OPENLOCK_LIVE_INTEGRATION: "1"
+        run: bun test tests/integration/

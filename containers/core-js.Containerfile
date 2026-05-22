@@ -9,8 +9,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Sandbox uid 999999 — see containers/core.Containerfile for rationale.
 RUN groupadd -r supervisor && useradd -r -g supervisor -d /home/supervisor -s /usr/sbin/nologin supervisor \
-    && groupadd -r sandbox && useradd -r -g sandbox -d /sandbox -s /bin/bash -m sandbox
+    && groupadd -g 999999 sandbox && useradd -u 999999 -g 999999 -d /sandbox -s /bin/bash -m sandbox
 
 RUN HOME=/root bash -c "curl -fsSL https://bun.sh/install | bash" \
     && mv /root/.bun/bin/bun /usr/local/bin/ \
@@ -20,6 +21,7 @@ RUN corepack enable
 
 USER sandbox
 WORKDIR /sandbox
+RUN mkdir -p /sandbox/repo
 
 ENV HOME=/sandbox
 RUN git config --global user.name "Sandbox" \
@@ -51,4 +53,4 @@ JSON
 USER root
 RUN npm install -g opencode-ai@1.15.5 \
     && ln -sf /usr/bin/opencode /usr/local/bin/opencode
-USER sandbox
+USER 999999:999999

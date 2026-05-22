@@ -9,11 +9,21 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Pin sandbox uid to 999999 (within both Mac podman-machine's default subuid
+# range 100000-1099999 and Linux's typical 524288+ range). The openshell fork
+# reads Config.User and applies `--userns=keep-id:uid=N,gid=N` when any bind
+# mount is present, so the in-image sandbox uid must match the fork's parsed
+# Config.User uid for host-owned bind sources to be writable from inside the
+# container on rootless podman (Linux). The fork's parser requires Config.User
+# to be numeric, so the final USER directive at the bottom of this file is
+# also `999999:999999`. On macOS the podman-machine VM bridges file ownership
+# separately, so the alignment is harmless there.
 RUN groupadd -r supervisor && useradd -r -g supervisor -d /home/supervisor -s /usr/sbin/nologin supervisor \
-    && groupadd -r sandbox && useradd -r -g sandbox -d /sandbox -s /bin/bash -m sandbox
+    && groupadd -g 999999 sandbox && useradd -u 999999 -g 999999 -d /sandbox -s /bin/bash -m sandbox
 
 USER sandbox
 WORKDIR /sandbox
+RUN mkdir -p /sandbox/repo
 
 ENV HOME=/sandbox
 RUN git config --global user.name "Sandbox" \
@@ -45,4 +55,4 @@ JSON
 USER root
 RUN npm install -g opencode-ai@1.15.5 \
     && ln -sf /usr/bin/opencode /usr/local/bin/opencode
-USER sandbox
+USER 999999:999999

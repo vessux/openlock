@@ -9,8 +9,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Sandbox uid 999999 — see containers/core.Containerfile for rationale.
 RUN groupadd -r supervisor && useradd -r -g supervisor -d /home/supervisor -s /usr/sbin/nologin supervisor \
-    && groupadd -r sandbox && useradd -r -g sandbox -d /sandbox -s /bin/bash -m sandbox
+    && groupadd -g 999999 sandbox && useradd -u 999999 -g 999999 -d /sandbox -s /bin/bash -m sandbox
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
@@ -22,6 +23,7 @@ RUN HOME=/root bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh" \
 
 USER sandbox
 WORKDIR /sandbox
+RUN mkdir -p /sandbox/repo
 
 ENV HOME=/sandbox
 RUN git config --global user.name "Sandbox" \
@@ -53,4 +55,4 @@ JSON
 USER root
 RUN npm install -g opencode-ai@1.15.5 \
     && ln -sf /usr/bin/opencode /usr/local/bin/opencode
-USER sandbox
+USER 999999:999999

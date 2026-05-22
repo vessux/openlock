@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildHarnessExecArgv,
+  buildOpenshellCreateArgv,
   buildPodmanChownArgv,
   buildPodmanCpArgv,
   buildPodmanRmArgv,
@@ -159,6 +160,36 @@ describe("buildPodmanChownArgv", () => {
       "-R",
       "sandbox:sandbox",
       "/sandbox/.openlock/skills",
+    ]);
+  });
+});
+
+describe("buildOpenshellCreateArgv", () => {
+  const base = {
+    sessionName: "s",
+    imageTag: "img",
+    uploadDir: "/tmp/staging",
+    policy: "/tmp/policy.yaml",
+    command: ["/bin/bash"],
+  };
+
+  it("emits no --volume when volumeArgs is empty/absent", () => {
+    const argv = buildOpenshellCreateArgv(base);
+    expect(argv).not.toContain("--volume");
+  });
+
+  it("emits --volume args verbatim when provided", () => {
+    const argv = buildOpenshellCreateArgv({
+      ...base,
+      volumeArgs: ["--volume", "/host:/sandbox/repo", "--volume", "/cache:/home/sandbox/.cache:ro"],
+    });
+    const idx = argv.indexOf("--volume");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv.slice(idx, idx + 4)).toEqual([
+      "--volume",
+      "/host:/sandbox/repo",
+      "--volume",
+      "/cache:/home/sandbox/.cache:ro",
     ]);
   });
 });

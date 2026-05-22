@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { podmanMachineRunning, podmanSocketActive, runDoctorChecks } from "../doctor";
 import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
 import { readToken } from "../tokens";
+import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import { SANDBOX_PREFIX } from "./constants";
 import {
   copyOutOfContainer,
@@ -32,7 +33,14 @@ import {
 import { type Harness, resolveHarness } from "./harness";
 import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureImage } from "./image-build";
-import { type Mount, restageMount, stageMounts } from "./mounts";
+import {
+  bindMountArgs,
+  gitBundleMounts,
+  type Mount,
+  restageMount,
+  stageMounts,
+  workdirMount,
+} from "./mounts";
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
@@ -50,6 +58,7 @@ export interface SandboxOpts {
   path: string;
   policy?: string;
   harness?: string;
+  branch?: string;
 }
 
 async function buildSandboxImage(caps: Cap[]): Promise<string> {
@@ -112,6 +121,7 @@ async function createSession(
   projectPath: string,
   resolved: ResolvedRepo,
   harness: Harness,
+  branch: string | undefined,
 ): Promise<NewSession> {
   const { caps, policy, mounts } = resolved;
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
@@ -131,8 +141,18 @@ async function createSession(
   try {
     const staging = join(tmp, ".openlock");
     mkdirSync(staging);
-    await createBundle(projectPath, join(staging, "repo.bundle"));
-    console.log("Git bundle created.");
+
+    const bundleMounts = gitBundleMounts(mounts);
+    const bundlesDir = join(staging, "bundles");
+    if (bundleMounts.length > 0) {
+      mkdirSync(bundlesDir);
+    }
+    for (const bm of bundleMounts) {
+      const bundleFile = join(bundlesDir, `${basename(bm.source)}.bundle`);
+      await createBundle(bm.source, bundleFile);
+      console.log(`Git bundle created for ${bm.target}.`);
+    }
+
     stageMounts(staging, mounts);
 
     const gitconfigPath = await prepareGitIdentity(staging);
@@ -146,12 +166,22 @@ async function createSession(
     // Setup runs once at create + on every podman start (idempotent).
     // Final `exec sleep infinity` keeps PID 1 alive so the container
     // outlives the foreground command between attaches.
-    const setupCmd = [
+    // /sandbox/repo provisioning lives in the image (RUN mkdir) so it
+    // exists before openshell's PID 1 chdir, regardless of workdir mount.
+    const setupLines = [
       "cd /sandbox",
       "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
-      "[ -d repo ] || git clone .openlock/repo.bundle repo",
-      "exec sleep infinity",
-    ].join(" ; ");
+    ];
+    for (const bm of bundleMounts) {
+      const bundleName = `${basename(bm.source)}.bundle`;
+      const isWorkdir = bm.target === "/sandbox/repo";
+      const branchFlag = isWorkdir && branch !== undefined ? `-b '${branch}' ` : "";
+      setupLines.push(
+        `[ -d ${bm.target}/.git ] || git clone ${branchFlag}.openlock/bundles/${bundleName} ${bm.target}`,
+      );
+    }
+    setupLines.push("exec sleep infinity");
+    const setupCmd = setupLines.join(" ; ");
 
     const handle = await openshellSandboxCreateAsync({
       sessionName: name,
@@ -159,6 +189,7 @@ async function createSession(
       uploadDir: staging,
       policy,
       command: ["/bin/bash", "-c", setupCmd],
+      volumeArgs: bindMountArgs(mounts),
     });
 
     // Don't await handle.exited — it blocks until the container stops.
@@ -172,6 +203,7 @@ async function createSession(
     }
 
     await waitForContainerRunning(containerName);
+    await waitForStagingUploaded(containerName, staging);
 
     const meta: SessionMeta = {
       id,
@@ -193,14 +225,55 @@ async function createSession(
   }
 }
 
+// openshell sandbox create uploads --upload contents asynchronously; the
+// staging tmp dir is removed in finally once createSession returns. Without
+// this wait the rmSync races the upload and openshell errors with
+// "local path does not exist". Empty staging short-circuits (nothing to wait for).
+async function waitForStagingUploaded(
+  containerName: string,
+  stagingDir: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const entries = readdirSync(stagingDir);
+  if (entries.length === 0) return;
+  const sentinel = entries[0]!;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const proc = Bun.spawn(
+      ["podman", "exec", containerName, "test", "-e", `/sandbox/.openlock/${sentinel}`],
+      { stdout: "ignore", stderr: "ignore" },
+    );
+    if ((await proc.exited) === 0) return;
+    await Bun.sleep(200);
+  }
+  console.warn(
+    `staging upload to /sandbox/.openlock/${sentinel} not visible within ${timeoutMs}ms`,
+  );
+}
+
 async function syncBackToHost(
-  projectPath: string,
   containerName: string,
   sessionName: string,
+  mounts: readonly Mount[],
 ): Promise<void> {
+  const wd = workdirMount(mounts);
+  if (wd === undefined) {
+    console.log("No workdir mount; skipping sync-back.");
+    return;
+  }
+  if (wd.type === "bind") {
+    console.log("Bind workdir; no sync-back needed.");
+    return;
+  }
+  if (wd.type !== "git-bundle") {
+    // Defense against future relaxation of validateTargetForType permitting
+    // copy-* at /sandbox/repo: the bundle/clone flow below assumes a git
+    // working tree, not a copy.
+    throw new Error(`syncBackToHost: unexpected workdir mount type ${wd.type}`);
+  }
   // Read the active branch while the container is still running.
   // null = detached HEAD; auto-promote will skip silently.
-  const activeBranch = await readSandboxActiveBranch(containerName);
+  const activeBranch = await readSandboxActiveBranch(containerName, wd.target);
 
   // Pre-prune: defensive against stale refs from prior sessions reusing
   // this name. The bundle is the source of truth for current refs.
@@ -208,7 +281,7 @@ async function syncBackToHost(
   // prior namespaced refs are already gone. Reachability of any prior
   // tip is preserved via refs/heads/openlock/<session> when auto-promote
   // ran on a previous sync; otherwise the next successful sync recovers.
-  await pruneSandboxRefs(projectPath, sessionName);
+  await pruneSandboxRefs(wd.source, sessionName);
 
   const tmp = mkdtempSync(join(tmpdir(), "openlock-syncback-"));
   try {
@@ -216,9 +289,9 @@ async function syncBackToHost(
     // Always regenerate the bundle inside the container before copying it
     // out. Prior implementations preferred a stale /sandbox/out.bundle if
     // one existed, which broke re-attach: a second sync would resurface
-    // refs from the first sync only. Run as `sandbox` with cwd
-    // /sandbox/repo so git can open the repo (root trips safe.directory)
-    // and write /sandbox/out.bundle (owned by sandbox).
+    // refs from the first sync only. Run as `sandbox` with cwd wd.target
+    // so git can open the repo (root trips safe.directory) and write
+    // /sandbox/out.bundle (owned by sandbox).
     const regen = Bun.spawn(
       [
         "podman",
@@ -226,7 +299,7 @@ async function syncBackToHost(
         "-u",
         "sandbox",
         "-w",
-        "/sandbox/repo",
+        wd.target,
         containerName,
         "git",
         "bundle",
@@ -246,9 +319,9 @@ async function syncBackToHost(
       console.warn("No commits to sync.");
       return;
     }
-    await fetchBundle(projectPath, outBundle, sessionName);
+    await fetchBundle(wd.source, outBundle, sessionName);
 
-    const promote = await promoteActiveBranch(projectPath, sessionName, activeBranch);
+    const promote = await promoteActiveBranch(wd.source, sessionName, activeBranch);
     console.log(formatSyncBackLog(sessionName, activeBranch, promote));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -271,11 +344,11 @@ interface LaunchOpts {
 async function attachHarnessAndSync(
   containerName: string,
   sessionName: string,
-  projectPath: string,
   launch: LaunchOpts,
+  mounts: readonly Mount[],
 ): Promise<number> {
   const exitCode = await execHarness(launch.harness, containerName, launch.args, launch.env);
-  await syncBackToHost(projectPath, containerName, sessionName);
+  await syncBackToHost(containerName, sessionName, mounts);
   const meta = findSessionByName(sessionName);
   if (meta) {
     updateSessionMeta(sessionsDir(), meta.id, {
@@ -387,11 +460,12 @@ async function resolveOrCreateSession(
   projectPath: string,
   resolved: ResolvedRepo,
   harness: Harness,
+  branch: string | undefined,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
-    const created = await createSession(projectPath, resolved, harness);
+    const created = await createSession(projectPath, resolved, harness, branch);
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
@@ -470,6 +544,12 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   announceRepoAction(repoResult.action, projectPath);
   const resolved = resolveRepoPolicyAndCaps(projectPath, opts.policy);
 
+  const branchErr = validateBranchFlagAgainstWorkdir(opts.branch, workdirMount(resolved.mounts));
+  if (branchErr !== null) {
+    console.error(branchErr);
+    process.exit(2);
+  }
+
   // Decide the effective harness BEFORE create-or-reattach so we can persist
   // the right value on first create and reject explicit mismatches on reattach.
   const existingMatches = findSessionsByPath(sessionsDir(), projectPath);
@@ -500,9 +580,10 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     projectPath,
     resolved,
     harness,
+    opts.branch,
   );
   const launch: LaunchOpts = { args: resolved.args, env: resolved.env, harness };
-  const exitCode = await attachHarnessAndSync(containerName, sessionName, projectPath, launch);
+  const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
   const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
     (n) => n !== containerName,
   );

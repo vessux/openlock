@@ -110,19 +110,19 @@ describe("git-sync", () => {
         stdout: "refs/heads/feature/x\n",
         stderr: "",
       });
-      const result = await readSandboxActiveBranch("any-container", exec);
+      const result = await readSandboxActiveBranch("any-container", "/sandbox/repo", exec);
       expect(result).toBe("feature/x");
     });
 
     it("returns null when HEAD is detached (exit 1)", async () => {
       const exec: PodmanExec = async () => ({ exitCode: 1, stdout: "", stderr: "" });
-      const result = await readSandboxActiveBranch("any-container", exec);
+      const result = await readSandboxActiveBranch("any-container", "/sandbox/repo", exec);
       expect(result).toBeNull();
     });
 
     it("returns null when output has no refs/heads/ prefix (defensive)", async () => {
       const exec: PodmanExec = async () => ({ exitCode: 0, stdout: "garbage\n", stderr: "" });
-      const result = await readSandboxActiveBranch("any-container", exec);
+      const result = await readSandboxActiveBranch("any-container", "/sandbox/repo", exec);
       expect(result).toBeNull();
     });
 
@@ -134,7 +134,7 @@ describe("git-sync", () => {
         capturedArgs = args;
         return { exitCode: 0, stdout: "refs/heads/main\n", stderr: "" };
       };
-      await readSandboxActiveBranch("openlock-foo", exec);
+      await readSandboxActiveBranch("openlock-foo", "/sandbox/repo", exec);
       expect(capturedContainer).toBe("openlock-foo");
       expect(capturedArgs).toEqual(["git", "symbolic-ref", "-q", "HEAD"]);
     });

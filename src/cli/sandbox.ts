@@ -5,6 +5,7 @@ import { printCmdHelp } from "./_help";
 export const flagSchema = {
   policy: { type: "string" },
   harness: { type: "string" },
+  branch: { type: "string", short: "b" },
   help: { type: "boolean", short: "h" },
 } as const satisfies ParseArgsOptionsConfig;
 
@@ -25,6 +26,7 @@ export function sandboxCmd(args: string[]): void {
       path,
       policy: values.policy,
       harness: values.harness,
+      branch: values.branch,
     }),
   );
 }

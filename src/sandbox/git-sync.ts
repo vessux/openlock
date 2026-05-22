@@ -6,26 +6,29 @@ interface PodmanExecResult {
 
 export type PodmanExec = (containerName: string, args: string[]) => Promise<PodmanExecResult>;
 
-// The default runner runs as the `sandbox` user with cwd `/sandbox/repo`
-// to match how claude/openshell touch the sandbox repo. Running as root
-// trips git's safe.directory check ("dubious ownership") and the helper
-// would mis-report HEAD as detached.
-const defaultPodmanExec: PodmanExec = async (containerName, args) => {
-  const proc = Bun.spawn(
-    ["podman", "exec", "-u", "sandbox", "-w", "/sandbox/repo", containerName, ...args],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const exitCode = await proc.exited;
-  return { exitCode, stdout, stderr };
-};
+// The default runner runs as the `sandbox` user with cwd `workdir`
+// (default `/sandbox/repo`) to match how claude/openshell touch the
+// sandbox repo. Running as root trips git's safe.directory check
+// ("dubious ownership") and the helper would mis-report HEAD as detached.
+const defaultPodmanExec =
+  (workdir: string): PodmanExec =>
+  async (containerName, args) => {
+    const proc = Bun.spawn(
+      ["podman", "exec", "-u", "sandbox", "-w", workdir, containerName, ...args],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const exitCode = await proc.exited;
+    return { exitCode, stdout, stderr };
+  };
 
 export async function readSandboxActiveBranch(
   containerName: string,
-  exec: PodmanExec = defaultPodmanExec,
+  workdir: string = "/sandbox/repo",
+  exec: PodmanExec = defaultPodmanExec(workdir),
 ): Promise<string | null> {
   const { exitCode, stdout } = await exec(containerName, ["git", "symbolic-ref", "-q", "HEAD"]);
   if (exitCode !== 0) return null;
