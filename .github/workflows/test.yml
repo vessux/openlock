@@ -34,3 +34,26 @@ jobs:
 
       - name: Dead code (knip)
         run: bun run knip
+
+  live-integration:
+    # Live end-to-end tests gated behind OPENLOCK_LIVE_INTEGRATION=1 because
+    # they build the sandbox image (~minutes first run), start the gateway,
+    # and create real containers. Kept off the default `bun test` path so
+    # local dev stays fast; this job runs them in CI so they're never
+    # silently broken.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: test
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Integration tests (OPENLOCK_LIVE_INTEGRATION=1)
+        env:
+          OPENLOCK_LIVE_INTEGRATION: "1"
+        run: bun test tests/integration/
