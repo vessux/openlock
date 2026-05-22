@@ -165,17 +165,6 @@ describe("parseMounts", () => {
     ).toThrow(/must not contain '\.\.'/);
   });
 
-  it("throws when target's top segment collides with openlock-internal name (repo.bundle)", () => {
-    const src = join(projectRoot, "s");
-    mkdirSync(src);
-    expect(() =>
-      parseMounts(
-        [{ source: src, target: "/sandbox/.openlock/repo.bundle", type: "copy-once" }],
-        projectRoot,
-      ),
-    ).toThrow(/conflicts with openlock-internal name 'repo\.bundle'/);
-  });
-
   it("throws when target's top segment collides with openlock-internal name (.gitconfig)", () => {
     const src = join(projectRoot, "s");
     mkdirSync(src);
@@ -192,10 +181,10 @@ describe("parseMounts", () => {
     mkdirSync(src);
     expect(() =>
       parseMounts(
-        [{ source: src, target: "/sandbox/.openlock/repo.bundle/sub", type: "copy-once" }],
+        [{ source: src, target: "/sandbox/.openlock/bundles/sub", type: "copy-once" }],
         projectRoot,
       ),
-    ).toThrow(/conflicts with openlock-internal name 'repo\.bundle'/);
+    ).toThrow(/conflicts with openlock-internal name 'bundles'/);
   });
 
   it("throws when target's top segment is reserved 'bundles' (copy-once)", () => {
@@ -409,17 +398,6 @@ describe("parseMounts", () => {
     const [m] = parseMounts([{ source: src, target: "/sandbox/repo", type: "bind" }], projectRoot);
     expect(m?.target).toBe("/sandbox/repo");
     expect(m?.type).toBe("bind");
-  });
-
-  it("bind: rejects target reserved repo.bundle", () => {
-    const src = join(projectRoot, "bind-rb");
-    mkdirSync(src);
-    expect(() =>
-      parseMounts(
-        [{ source: src, target: "/sandbox/.openlock/repo.bundle", type: "bind" }],
-        projectRoot,
-      ),
-    ).toThrow(/conflicts with openlock-internal name 'repo\.bundle'/);
   });
 
   it("bind: rejects target reserved .gitconfig", () => {

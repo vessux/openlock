@@ -196,7 +196,7 @@ Override with `--policy /abs/path/to/policy.yaml`.
 | `bind` | live `podman -v` passthrough | anywhere; `readOnly: true` supported |
 | `git-bundle` | host repo bundled at create, cloned in container | anywhere outside `/sandbox/.openlock/` |
 
-The container path `/sandbox/repo` is the **workdir**: agent launch + sync-back hardcode `-w /sandbox/repo`. The workdir mount is optional; if present, its `type` must be `bind` or `git-bundle`. If absent, openlock provisions an empty `/sandbox/repo` so existing exec helpers don't fail. Reserved names under `/sandbox/.openlock/`: `repo.bundle`, `.gitconfig`, `bundles`.
+The container path `/sandbox/repo` is the **workdir**: agent launch + sync-back hardcode `-w /sandbox/repo`. The workdir mount is optional; if present, its `type` must be `bind` or `git-bundle`. If absent, openlock provisions an empty `/sandbox/repo` so existing exec helpers don't fail. Reserved names under `/sandbox/.openlock/`: `.gitconfig`, `bundles`.
 
 #### Example — git-bundle workdir (default / typical)
 
