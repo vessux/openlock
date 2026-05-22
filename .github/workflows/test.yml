@@ -41,17 +41,9 @@ jobs:
     # and create real containers. Kept off the default `bun test` path so
     # local dev stays fast; this job runs them in CI so they're never
     # silently broken.
-    #
-    # `continue-on-error: true` because the job currently surfaces a CI
-    # environment gap (ubuntu-24.04 ships podman 4.x which mis-parses the
-    # shell-heredoc in containers/core.Containerfile; the same Containerfile
-    # builds fine on podman 5.x — Mac live integration suite passes 3/3).
-    # Marking informational so PR review isn't blocked while the runner is
-    # brought up to a heredoc-aware podman. See bd openlock-sjr.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: test
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
 
@@ -60,6 +52,24 @@ jobs:
           bun-version: latest
 
       - run: bun install
+
+      - name: Install podman 5.x (heredoc-aware)
+        # ubuntu-24.04 ships podman 4.9.3 which mis-parses the shell-heredoc
+        # `RUN cat > /sandbox/.claude.json <<'JSON'` block in containers/
+        # core.Containerfile. Mac (5.8.2) and Lima (5.4.2) build fine. Pull
+        # podman 5.x .deb from the alvistack OBS project (canonical source
+        # for current-version containers stack on noble). See bd
+        # openlock-sjr.
+        run: |
+          sudo apt-get remove -y podman buildah || true
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL "https://download.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04/Release.key" \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/alvistack.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/alvistack.gpg] https://download.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04/ /" \
+            | sudo tee /etc/apt/sources.list.d/alvistack.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y podman podman-gvproxy podman-aardvark-dns podman-netavark
+          podman --version
 
       - name: Extend rootless subuid/subgid range
         # openlock-core images pin sandbox uid 999999 (see containers/
