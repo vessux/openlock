@@ -53,6 +53,21 @@ jobs:
 
       - run: bun install
 
+      - name: Extend rootless subuid/subgid range
+        # openlock-core images pin sandbox uid 999999 (see containers/
+        # core.Containerfile for rationale). GH Actions ubuntu-24.04 ships
+        # `runner` with /etc/subuid `runner:165536:65536` — too small for
+        # uid 999999, so `podman build` hits `crun: setgroups: Invalid
+        # argument` at `USER sandbox`. Widen the range to 1.1M before any
+        # podman work, then re-migrate podman's user-namespace state.
+        run: |
+          sudo bash -c 'echo "$USER:100000:1100000" > /etc/subuid'
+          sudo bash -c 'echo "$USER:100000:1100000" > /etc/subgid'
+          podman system migrate
+          # Surface effective config in the log so future drift is obvious.
+          getent passwd "$USER" | cut -d: -f1,3
+          grep "^$USER:" /etc/subuid /etc/subgid
+
       - name: Start rootless podman socket
         # The gateway resolves /run/user/$UID/podman/podman.sock at startup
         # (see resolvePodmanSocket in ensure-gateway.ts), so the runner needs
