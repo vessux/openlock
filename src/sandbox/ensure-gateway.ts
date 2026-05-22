@@ -187,6 +187,12 @@ export async function startGateway(): Promise<void> {
     String(GATEWAY_PORT),
     "--db-url",
     `sqlite:${dbPath}?mode=rwc`,
+    // On Linux, rootless podman containers see `host.containers.internal` as
+    // the slirp4netns/pasta gateway IP, not loopback — so the gateway must
+    // bind on a non-loopback interface to be reachable. On macOS the podman
+    // machine VM bridges container traffic back to the host's 127.0.0.1, so
+    // the default bind is fine.
+    ...(process.platform === "linux" ? ["--bind-address", "0.0.0.0"] : []),
   ];
 
   const { pid: gwPid } = spawnDaemonToLog(args, STATE_DIR, LOG_FILE);
