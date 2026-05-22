@@ -41,7 +41,7 @@
 | 5 | `--branch` rejection on bind + absent workdir → exit 2 with spec messages | ✅ |
 | 6 | invalid configs (copy-* at `/sandbox/repo`, git-bundle basename collision) → parse errors | ✅ |
 | 7a | Lima ARM64 --branch validators (5+6) | ✅ |
-| 7b | Lima ARM64 container create (1/2/4) | ❌ local env (fork v0.3.0 also fails; not mount-v2) |
+| 7b | Lima ARM64 container create (1/2/3/4) | ✅ (after Linux fixes below) |
 | 8 | VM-driver bind rejection | pending (separate openshell config) |
 
 Fixes discovered during smoke that landed in PR #30:
@@ -50,3 +50,5 @@ Fixes discovered during smoke that landed in PR #30:
 - Bundle clone idempotency check (`.git` instead of dir).
 - Fork pin bump v0.3.0 → v0.4.0-rc.1.
 - README: bind log example moved to `/home/sandbox/logs` (avoid `/sandbox/.openlock/` upload collision).
+- **Gateway `--bind-address 0.0.0.0` on Linux** — on rootless podman, containers see `host.containers.internal` as the slirp4netns/pasta gateway IP (not loopback), so the gateway must bind a non-loopback interface. Mac unaffected (podman-machine VM bridges back to host 127.0.0.1).
+- **Sandbox uid 1000660000 in `openlock-core` images** — aligns the in-container `sandbox` user with the openshell fork's `COMMUNITY_SANDBOX_UID`, the value applied to podman's `--userns=keep-id:uid=N,gid=N` when any bind mount is present. Without this, host-owned bind sources were unwritable from inside the container on Linux.
