@@ -61,8 +61,10 @@ jobs:
         # argument` at `USER sandbox`. Widen the range to 1.1M before any
         # podman work, then re-migrate podman's user-namespace state.
         run: |
-          sudo bash -c 'echo "$USER:100000:1100000" > /etc/subuid'
-          sudo bash -c 'echo "$USER:100000:1100000" > /etc/subgid'
+          # `$USER` must expand in the outer shell, not inside sudo (where it
+          # would resolve to root). Pipe + tee handles that cleanly.
+          echo "$USER:100000:1100000" | sudo tee /etc/subuid > /dev/null
+          echo "$USER:100000:1100000" | sudo tee /etc/subgid > /dev/null
           podman system migrate
           # Surface effective config in the log so future drift is obvious.
           getent passwd "$USER" | cut -d: -f1,3
