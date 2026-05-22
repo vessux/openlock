@@ -61,14 +61,26 @@ jobs:
         # for current-version containers stack on noble). See bd
         # openlock-sjr.
         run: |
-          sudo apt-get remove -y podman buildah || true
+          # Remove ubuntu-shipped podman + buildah and the golang-* helper
+          # packages that own files (/etc/containers/policy.json,
+          # registries.conf, etc.) which alvistack's containers-common also
+          # ships — otherwise dpkg refuses to overwrite. Keep the purge
+          # tolerant: not every package is present on every runner image.
+          sudo apt-get purge -y podman buildah \
+            golang-github-containers-common \
+            golang-github-containers-image \
+            containers-storage skopeo || true
           sudo mkdir -p /etc/apt/keyrings
           curl -fsSL "https://download.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04/Release.key" \
             | sudo gpg --dearmor -o /etc/apt/keyrings/alvistack.gpg
           echo "deb [signed-by=/etc/apt/keyrings/alvistack.gpg] https://download.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04/ /" \
             | sudo tee /etc/apt/sources.list.d/alvistack.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y podman podman-gvproxy podman-aardvark-dns podman-netavark
+          # `--force-overwrite` as belt-and-suspenders: catch any
+          # /etc/containers/* file we didn't purge above.
+          sudo apt-get install -y \
+            -o Dpkg::Options::=--force-overwrite \
+            podman podman-gvproxy podman-aardvark-dns podman-netavark
           podman --version
 
       - name: Extend rootless subuid/subgid range
