@@ -7,6 +7,7 @@ import { flagSchema as execFlags } from "./exec";
 import { flagSchema as gatewayFlags } from "./gateway";
 import { flagSchema as listFlags } from "./list";
 import { flagSchema as loginFlags } from "./login";
+import { flagSchema as providersFlags } from "./providers";
 import { flagSchema as reapFlags } from "./reap";
 import { flagSchema as refsFlags } from "./refs";
 import { flagSchema as reportFlags } from "./report";
@@ -29,6 +30,7 @@ export const COMMAND_FLAGS = {
   "cred-refresh": credRefreshFlags,
   "validate-policy": validatePolicyFlags,
   login: loginFlags,
+  providers: providersFlags,
   gateway: gatewayFlags,
   doctor: doctorFlags,
   "update-images": updateImagesFlags,

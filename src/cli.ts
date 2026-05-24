@@ -20,6 +20,7 @@ Other:
   cred-refresh       Start the credential refresh service
   validate-policy    Validate a sandbox policy YAML file
   login              Authenticate with the gateway
+  providers          List configured providers
   gateway            Manage the gateway
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
@@ -95,6 +96,9 @@ function main(): void {
       return;
     case "sandbox":
       import("./cli/sandbox").then(({ sandboxCmd }) => sandboxCmd(args.slice(1)));
+      return;
+    case "providers":
+      import("./cli/providers").then(({ providersCmd }) => providersCmd(args.slice(1)));
       return;
     case "login":
       import("./login").then(async ({ login }) => {
