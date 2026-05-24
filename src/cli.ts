@@ -97,7 +97,16 @@ function main(): void {
       import("./cli/sandbox").then(({ sandboxCmd }) => sandboxCmd(args.slice(1)));
       return;
     case "login":
-      import("./login").then(({ login }) => login());
+      import("./login").then(async ({ login }) => {
+        const { parseArgs } = await import("node:util");
+        const { flagSchema } = await import("./cli/login");
+        const { values } = parseArgs({
+          args: args.slice(1),
+          options: flagSchema,
+          allowPositionals: false,
+        });
+        await login({ providerFlag: values.provider });
+      });
       return;
     case "gateway":
       import("./cli/gateway").then(({ gatewayCmd }) => gatewayCmd(args.slice(1)));
