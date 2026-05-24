@@ -29,6 +29,7 @@ network_policies:
     binaries:
       - path: /usr/local/bin/claude
       - path: /usr/bin/node
+      - path: /usr/bin/python3
     endpoints:
       - host: api.anthropic.com
         port: 443
@@ -53,6 +54,7 @@ network_policies:
     binaries:
       - path: /usr/local/bin/opencode
       - path: /usr/bin/node
+      - path: /usr/bin/python3
     endpoints:
       - host: api.anthropic.com
         port: 443

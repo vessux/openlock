@@ -9,12 +9,19 @@ type CapVariant = "default" | "default-js" | "default-py" | "default-js-py";
 
 const CAP_VARIANTS: readonly CapVariant[] = ["default", "default-js", "default-py", "default-js-py"];
 
-const HARNESS_BINARIES: Record<Harness, Array<{ path: string }>> = {
-  claude_code: [{ path: "/usr/local/bin/claude" }, { path: "/usr/bin/node" }],
-  opencode: [{ path: "/usr/local/bin/opencode" }, { path: "/usr/bin/node" }],
+const HARNESS_BIN: Record<Harness, string> = {
+  claude_code: "/usr/local/bin/claude",
+  opencode: "/usr/local/bin/opencode",
 };
 
-function harnessBlock(harness: Harness): Record<string, unknown> {
+function harnessBinaries(harness: Harness, variant: CapVariant): Array<{ path: string }> {
+  const out: Array<{ path: string }> = [{ path: HARNESS_BIN[harness] }];
+  if (variant !== "default-py") out.push({ path: "/usr/bin/node" });
+  if (variant === "default-py" || variant === "default-js-py") out.push({ path: "/usr/bin/python3" });
+  return out;
+}
+
+function harnessBlock(harness: Harness, variant: CapVariant): Record<string, unknown> {
   const endpoints: PolicyEndpointSpec[] = [];
   const allowedSecrets = new Set<string>();
   for (const id of PROVIDER_IDS) {
@@ -28,7 +35,7 @@ function harnessBlock(harness: Harness): Record<string, unknown> {
     }
   }
   return {
-    binaries: HARNESS_BINARIES[harness],
+    binaries: harnessBinaries(harness, variant),
     endpoints: endpoints.map((ep) => ({
       host: ep.host,
       port: ep.port,
@@ -73,7 +80,7 @@ export function renderDefaultPolicy(variant: string): string {
 
   const harnessNames: Harness[] = [...HARNESSES];
   const newNetwork: Record<string, unknown> = {};
-  for (const h of harnessNames) newNetwork[h] = harnessBlock(h);
+  for (const h of harnessNames) newNetwork[h] = harnessBlock(h, v);
   for (const [k, val] of Object.entries(existingNetwork)) {
     if (harnessNames.includes(k as Harness)) continue;
     newNetwork[k] = val;
