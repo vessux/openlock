@@ -54,6 +54,27 @@ describe("parseGlobalConfig", () => {
   });
 });
 
+describe("default_provider parsing", () => {
+  test("parses default_provider: openrouter", () => {
+    expect(parseGlobalConfig("default_provider: openrouter", "/x.yaml")).toEqual({
+      defaultProvider: "openrouter",
+    });
+  });
+
+  test("rejects unknown provider", () => {
+    expect(() => parseGlobalConfig("default_provider: openai", "/x.yaml")).toThrow(/openai/);
+  });
+
+  test("parses both default_harness and default_provider", () => {
+    expect(
+      parseGlobalConfig("default_harness: opencode\ndefault_provider: openrouter\n", "/x.yaml"),
+    ).toEqual({
+      defaultHarness: "opencode",
+      defaultProvider: "openrouter",
+    });
+  });
+});
+
 describe("readGlobalConfigFrom", () => {
   test("returns null when file absent", () => {
     expect(readGlobalConfigFrom(join(tmp, "missing.yaml"))).toBeNull();

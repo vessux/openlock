@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { EnvSource } from "./sources";
+import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { writeProvider } from "../tokens";
+import { createSource, EnvSource, FileSource } from "./sources";
 
 describe("EnvSource", () => {
   test("resolves existing env var", async () => {
@@ -37,5 +41,52 @@ describe("EnvSource", () => {
   test("type property is 'env'", () => {
     const source = new EnvSource("KEY");
     expect(source.type).toBe("env");
+  });
+});
+
+describe("FileSource", () => {
+  let _dir: string;
+  let _originalHome: string | undefined;
+
+  beforeEach(() => {
+    _dir = mkdtempSync(join(tmpdir(), "openlock-fs-"));
+    _originalHome = process.env.HOME;
+    process.env.HOME = _dir;
+  });
+  afterEach(() => {
+    if (_originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = _originalHome;
+    rmSync(_dir, { recursive: true, force: true });
+  });
+
+  it("reads providers.<id>.credentials.<envName> from credentials.json", async () => {
+    writeProvider("openrouter", {
+      type: "openrouter",
+      credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-x" },
+      created_at: "t",
+    });
+    const src = new FileSource("OPENROUTER_BEARER_TOKEN", { providerId: "openrouter" });
+    expect(await src.resolve()).toBe("Bearer sk-or-v1-x");
+  });
+
+  it("returns null when the credential is missing", async () => {
+    const src = new FileSource("OPENROUTER_BEARER_TOKEN", { providerId: "openrouter" });
+    expect(await src.resolve()).toBeNull();
+  });
+});
+
+describe("createSource recognizes source: file", () => {
+  it("returns a FileSource with type 'file'", () => {
+    const s = createSource("OPENROUTER_BEARER_TOKEN", {
+      source: "file",
+      provider_id: "openrouter",
+    });
+    expect(s.type).toBe("file");
+  });
+
+  it("throws if provider_id is missing", () => {
+    expect(() => createSource("OPENROUTER_BEARER_TOKEN", { source: "file" })).toThrow(
+      /provider_id/,
+    );
   });
 });

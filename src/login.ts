@@ -1,34 +1,62 @@
-import { credentialsPath, writeToken } from "./tokens";
+import { stderr, stdin, stdout } from "node:process";
+import { createInterface } from "node:readline";
+import { PROVIDERS, validateProviderId } from "./providers/registry";
+import type { LoginIO, ProviderId } from "./providers/types";
+import { writeProvider } from "./tokens";
 
-export async function login(): Promise<void> {
-  console.log("Running claude setup-token to generate a long-lived OAuth token...\n");
+function makeRealIO(): LoginIO {
+  return {
+    isTTY: Boolean(stdin.isTTY),
+    writeStdout: (s) => stdout.write(s),
+    writeStderr: (s) => stderr.write(s),
+    async readLine(prompt: string): Promise<string> {
+      const rl = createInterface({ input: stdin, output: stdout, terminal: stdin.isTTY });
+      return new Promise<string>((resolve) => {
+        rl.question(prompt, (answer) => {
+          rl.close();
+          resolve(answer);
+        });
+      });
+    },
+  };
+}
 
-  const proc = Bun.spawn(["claude", "setup-token"], {
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
+async function defaultPicker(io: LoginIO): Promise<ProviderId> {
+  const ids = Object.keys(PROVIDERS) as ProviderId[];
+  io.writeStdout("Select a provider:\n");
+  ids.forEach((id, i) => {
+    io.writeStdout(`  ${i + 1}. ${id}  (${PROVIDERS[id].displayName})\n`);
   });
-
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    console.error("\nclaude setup-token failed.");
-    process.exit(1);
+  const answer = (await io.readLine("> ")).trim();
+  const asNumber = Number.parseInt(answer, 10);
+  if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= ids.length) {
+    return ids[asNumber - 1];
   }
+  return validateProviderId(answer);
+}
 
-  console.log("\nPaste the token printed above:");
-  process.stdout.write("> ");
+export interface LoginArgs {
+  providerFlag?: string;
+}
 
-  const reader = Bun.stdin.stream().getReader();
-  const { value } = await reader.read();
-  reader.releaseLock();
-  const token = new TextDecoder().decode(value).trim();
+export async function login(args: LoginArgs = {}): Promise<void> {
+  const io = makeRealIO();
+  await _loginForTests({ providerFlag: args.providerFlag, io, pick: defaultPicker });
+}
 
-  if (!token) {
-    console.error("No token provided. Aborting.");
-    process.exit(1);
-  }
-
-  const path = credentialsPath();
-  writeToken(path, token);
-  console.log(`Token saved to ${path}`);
+export async function _loginForTests(args: {
+  providerFlag?: string;
+  io: LoginIO;
+  pick: (io: LoginIO) => Promise<ProviderId>;
+}): Promise<void> {
+  const id = args.providerFlag ? validateProviderId(args.providerFlag) : await args.pick(args.io);
+  const plugin = PROVIDERS[id];
+  args.io.writeStdout(`\nAuthenticating with ${plugin.displayName}...\n`);
+  const creds = await plugin.loginInteractive(args.io);
+  writeProvider(id, {
+    type: plugin.openshellType,
+    credentials: creds,
+    created_at: new Date().toISOString(),
+  });
+  args.io.writeStdout(`\nCredentials saved for provider '${id}'.\n`);
 }

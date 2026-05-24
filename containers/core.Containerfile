@@ -54,5 +54,6 @@ JSON
 # --- opencode ---
 USER root
 RUN npm install -g opencode-ai@1.15.5 \
-    && ln -sf /usr/bin/opencode /usr/local/bin/opencode
+    && ln -sf /usr/bin/opencode /usr/local/bin/opencode \
+    && chown -R sandbox:sandbox /sandbox
 USER 999999:999999

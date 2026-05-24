@@ -98,3 +98,21 @@ describe("resolveEndpoint", () => {
     expect(result).toBe("localhost:9090");
   });
 });
+
+describe("file source", () => {
+  test("parses credentials with source: file and provider_id", () => {
+    const path = writeYaml(
+      `interval_secs: 60
+providers:
+  - name: openrouter
+    type: openrouter
+    credentials:
+      OPENROUTER_BEARER_TOKEN:
+        source: file
+        provider_id: openrouter
+`,
+    );
+    const cfg = loadConfig(path);
+    expect(cfg.providers[0].credentials.OPENROUTER_BEARER_TOKEN.source).toBe("file");
+  });
+});

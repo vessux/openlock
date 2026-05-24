@@ -5,6 +5,7 @@ import {
   buildPodmanChownArgv,
   buildPodmanCpArgv,
   buildPodmanRmArgv,
+  buildSandboxEnv,
 } from "./container";
 
 describe('buildHarnessExecArgv("claude_code", ...)', () => {
@@ -164,18 +165,64 @@ describe("buildPodmanChownArgv", () => {
   });
 });
 
+describe("buildSandboxEnv (provider placeholders)", () => {
+  it("injects OPENROUTER_API_KEY placeholder when provider=openrouter, harness=opencode", () => {
+    const env = buildSandboxEnv({
+      providerId: "openrouter",
+      harness: "opencode",
+      repoConfigEnv: {},
+    });
+    expect(env.OPENROUTER_API_KEY).toBe("managed-by-openlock-do-not-leak");
+  });
+
+  it("does NOT inject anthropic placeholder for claude_code (OAuth-bearer flow)", () => {
+    const env = buildSandboxEnv({
+      providerId: "anthropic",
+      harness: "claude_code",
+      repoConfigEnv: {},
+    });
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("injects ANTHROPIC_API_KEY placeholder for opencode+anthropic", () => {
+    const env = buildSandboxEnv({
+      providerId: "anthropic",
+      harness: "opencode",
+      repoConfigEnv: {},
+    });
+    expect(env.ANTHROPIC_API_KEY).toBe("managed-by-openlock-do-not-leak");
+  });
+
+  it("repo-config env wins over placeholder when user explicitly sets the same key", () => {
+    const env = buildSandboxEnv({
+      providerId: "openrouter",
+      harness: "opencode",
+      repoConfigEnv: { OPENROUTER_API_KEY: "user-explicitly-set" },
+    });
+    expect(env.OPENROUTER_API_KEY).toBe("user-explicitly-set");
+  });
+});
+
 describe("buildOpenshellCreateArgv", () => {
   const base = {
     sessionName: "s",
     imageTag: "img",
     uploadDir: "/tmp/staging",
     policy: "/tmp/policy.yaml",
+    providerId: "anthropic" as const,
     command: ["/bin/bash"],
   };
 
   it("emits no --volume when volumeArgs is empty/absent", () => {
     const argv = buildOpenshellCreateArgv(base);
     expect(argv).not.toContain("--volume");
+  });
+
+  it("passes providerId verbatim as --provider", () => {
+    const argv = buildOpenshellCreateArgv({ ...base, providerId: "openrouter" });
+    const idx = argv.indexOf("--provider");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv[idx + 1]).toBe("openrouter");
   });
 
   it("emits --volume args verbatim when provided", () => {

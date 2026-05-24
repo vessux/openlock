@@ -1,0 +1,37 @@
+# Test-only policy: proves cred_inject applies to the openrouter provider
+# via the proxy's echo mode. Synthetic identifiers only; no production
+# provider names or credentials.
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
+  read_write: [/sandbox, /tmp, /dev/null]
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  openrouter_echo_test:
+    binaries:
+      - { path: /usr/local/bin/opencode }
+      - { path: /usr/lib/node_modules/opencode-ai/bin/* }
+      - { path: /usr/bin/node }
+      - { path: /usr/bin/curl }
+    endpoints:
+      - host: mock.openrouter.test
+        port: 8443
+        protocol: rest
+        enforcement: enforce
+        echo: true
+        rules: [{ allow: { method: POST, path: "/api/v1/**" } }]
+        cred_inject:
+          provider: openrouter
+          strip_headers: [Authorization, x-api-key, Cookie]
+          inject:
+            - { header: Authorization, from_credential: OPENROUTER_BEARER_TOKEN }
+    allowed_secrets: [OPENROUTER_BEARER_TOKEN]

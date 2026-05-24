@@ -12,3 +12,10 @@ providers:
     credentials:
       ANTHROPIC_API_KEY:
         source: env
+
+  - name: openrouter
+    type: generic
+    credentials:
+      OPENROUTER_BEARER_TOKEN:
+        source: file
+        provider_id: openrouter

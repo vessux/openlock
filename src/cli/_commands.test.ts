@@ -15,6 +15,8 @@ describe("COMMAND_FLAGS", () => {
       "cred-refresh",
       "validate-policy",
       "login",
+      "logout",
+      "providers",
       "gateway",
       "doctor",
       "update-images",

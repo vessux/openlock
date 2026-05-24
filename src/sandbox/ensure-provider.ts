@@ -1,9 +1,15 @@
-import { readToken } from "../tokens";
+import { PROVIDERS } from "../providers/registry";
+import type { ProviderId } from "../providers/types";
+import { readProvider } from "../tokens";
 import { getCliInvocation } from "./fork-binaries";
 
-async function openshell(
-  args: string[],
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+interface ShellResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+async function realOpenshell(args: string[]): Promise<ShellResult> {
   const cli = await getCliInvocation();
   const proc = Bun.spawn([...cli.argv, ...args], {
     cwd: cli.cwd,
@@ -16,34 +22,61 @@ async function openshell(
   return { exitCode, stdout, stderr };
 }
 
-export async function ensureProvider(): Promise<void> {
-  const token = readToken();
-  if (!token) {
-    console.error("No credentials found. Run `openlock login` first.");
-    process.exit(1);
+// `openshell provider list` prints a space-aligned table:
+//   NAME      TYPE     CREDENTIAL_KEYS  CONFIG_KEYS
+//   anthropic claude   2                0
+//   ...
+// (with ANSI bold on the header). Match a line whose first whitespace-
+// separated token equals the provider id, after stripping ANSI escapes.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI ESC requires the 0x1b control byte.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+export function providerExistsInGateway(listStdout: string, providerId: ProviderId): boolean {
+  return listStdout
+    .replace(ANSI_RE, "")
+    .split(/\r?\n/)
+    .some((line) => line.trim().split(/\s+/)[0] === providerId);
+}
+
+export async function ensureProvider(providerId: ProviderId): Promise<void> {
+  await _ensureProviderForTests(providerId, realOpenshell);
+}
+
+export async function _ensureProviderForTests(
+  providerId: ProviderId,
+  shell: (args: string[]) => Promise<ShellResult>,
+): Promise<void> {
+  const record = readProvider(providerId);
+  if (!record) {
+    throw new Error(
+      `No credentials for provider '${providerId}'. Run \`openlock login --provider ${providerId}\` first.`,
+    );
   }
 
-  const { stdout } = await openshell(["provider", "list"]);
-  if (stdout.includes("anthropic")) {
-    return;
+  const list = await shell(["provider", "list"]);
+  if (list.exitCode !== 0) {
+    throw new Error(`Failed to query gateway providers: ${list.stderr || list.stdout}`);
   }
+  const exists = providerExistsInGateway(list.stdout, providerId);
 
-  console.log("Creating anthropic provider...");
-  const { exitCode, stderr } = await openshell([
-    "provider",
-    "create",
-    "--name",
-    "anthropic",
-    "--type",
-    "claude",
+  const credArgs = Object.entries(record.credentials).flatMap(([k, v]) => [
     "--credential",
-    `ANTHROPIC_BEARER_TOKEN=Bearer ${token}`,
-    "--credential",
-    `ANTHROPIC_AUTH_TOKEN=${token}`,
+    `${k}=${v}`,
   ]);
-  if (exitCode !== 0) {
-    console.error(`Failed to create provider: ${stderr}`);
-    process.exit(1);
+  const args = exists
+    ? ["provider", "update", "--name", providerId, ...credArgs]
+    : ["provider", "create", "--name", providerId, "--type", record.type, ...credArgs];
+
+  const result = await shell(args);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Failed to ${exists ? "update" : "create"} provider '${providerId}' in gateway: ${result.stderr}`,
+    );
   }
-  console.log("Provider created.");
+
+  // Defensive: warn if the plugin's declared openshellType drifts from the stored record.
+  if (PROVIDERS[providerId].openshellType !== record.type) {
+    console.warn(
+      `openlock: provider '${providerId}' stored type='${record.type}' differs from plugin openshellType='${PROVIDERS[providerId].openshellType}'.`,
+    );
+  }
 }

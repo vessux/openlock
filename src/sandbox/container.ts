@@ -1,3 +1,5 @@
+import { PROVIDERS } from "../providers/registry";
+import type { ProviderId } from "../providers/types";
 import { getCliInvocation } from "./fork-binaries";
 import { type Harness, harnessLaunchArgv } from "./harness";
 import { filterOpenshellStderr } from "./openshell-stderr";
@@ -63,6 +65,17 @@ export function buildHarnessExecArgv(
   ];
 }
 
+export interface BuildSandboxEnvArgs {
+  providerId: ProviderId;
+  harness: Harness;
+  repoConfigEnv: Readonly<Record<string, string>>;
+}
+
+export function buildSandboxEnv(args: BuildSandboxEnvArgs): Record<string, string> {
+  const placeholders = PROVIDERS[args.providerId].sandboxEnvPlaceholders(args.harness);
+  return { ...placeholders, ...args.repoConfigEnv };
+}
+
 export async function execHarness(
   harness: Harness,
   name: string,
@@ -95,6 +108,7 @@ export interface OpenshellCreateArgs {
   imageTag: string;
   uploadDir: string;
   policy: string;
+  providerId: ProviderId;
   command: string[];
   volumeArgs?: readonly string[];
 }
@@ -119,7 +133,7 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
     "--policy",
     args.policy,
     "--provider",
-    "anthropic",
+    args.providerId,
     "--no-tty",
     ...(args.volumeArgs ?? []),
     "--",
