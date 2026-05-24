@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ProviderId } from "./providers/types";
@@ -53,7 +53,6 @@ function writeAtomic(path: string, data: CredentialsFileV2): void {
 
 export function readCredentials(path?: string): CredentialsFileV2 {
   const p = path ?? credentialsPath();
-  if (!existsSync(p)) return emptyFile();
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(p, "utf-8"));
