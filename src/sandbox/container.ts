@@ -41,28 +41,53 @@ export async function removeContainer(name: string, force = true): Promise<void>
   await proc.exited;
 }
 
-export function buildHarnessExecArgv(
-  harness: Harness,
+// Wrap a command in `env K=V ...` so extra env vars apply without shell
+// quoting risk. Returns the original argv unchanged when env is empty.
+export function wrapCmdWithEnv(
+  cmd: readonly string[],
+  env: Readonly<Record<string, string>>,
+): string[] {
+  const entries = Object.entries(env);
+  if (entries.length === 0) return [...cmd];
+  const envPairs = entries.map(([k, v]) => `${k}=${v}`);
+  return ["env", ...envPairs, ...cmd];
+}
+
+export interface OpenshellExecArgvOpts {
+  workdir?: string;
+  tty?: "auto" | "force" | "off";
+}
+
+// Build argv for `openshell sandbox exec`. The supervisor spawns the command
+// inside the sandbox netns with HTTPS_PROXY/Landlock/seccomp applied; routing
+// outbound traffic through the proxy is therefore enforced, unlike a raw
+// `podman exec` which bypasses the supervisor and lands in the container's
+// default netns. See openlock-hnp.
+export function buildOpenshellExecArgv(
+  cliPrefix: readonly string[],
   name: string,
+  cmd: readonly string[],
+  opts: OpenshellExecArgvOpts = {},
+): string[] {
+  const flags: string[] = ["--name", name];
+  if (opts.workdir !== undefined) {
+    flags.push("--workdir", opts.workdir);
+  }
+  if (opts.tty === "force") flags.push("--tty");
+  else if (opts.tty === "off") flags.push("--no-tty");
+  return [...cliPrefix, "sandbox", "exec", ...flags, "--", ...cmd];
+}
+
+export function buildHarnessExecArgv(
+  cliPrefix: readonly string[],
+  harness: Harness,
+  sessionName: string,
   extraArgs: readonly string[],
   extraEnv: Readonly<Record<string, string>>,
 ): string[] {
-  const envFlags: string[] = [];
-  for (const [k, v] of Object.entries(extraEnv)) {
-    envFlags.push("--env", `${k}=${v}`);
-  }
-  return [
-    "podman",
-    "exec",
-    "-it",
-    "-u",
-    "sandbox",
-    "-w",
-    "/sandbox/repo",
-    ...envFlags,
-    name,
-    ...harnessLaunchArgv(harness, extraArgs),
-  ];
+  const harnessCmd = harnessLaunchArgv(harness, extraArgs);
+  const wrapped = wrapCmdWithEnv(harnessCmd, extraEnv);
+  return buildOpenshellExecArgv(cliPrefix, sessionName, wrapped, { workdir: "/sandbox/repo" });
 }
 
 export interface BuildSandboxEnvArgs {
@@ -78,28 +103,44 @@ export function buildSandboxEnv(args: BuildSandboxEnvArgs): Record<string, strin
 
 export async function execHarness(
   harness: Harness,
-  name: string,
+  sessionName: string,
   extraArgs: readonly string[] = [],
   extraEnv: Readonly<Record<string, string>> = {},
 ): Promise<number> {
-  const argv = buildHarnessExecArgv(harness, name, extraArgs, extraEnv);
-  const proc = Bun.spawn(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+  const cli = await getCliInvocation();
+  const argv = buildHarnessExecArgv(cli.argv, harness, sessionName, extraArgs, extraEnv);
+  const proc = Bun.spawn(argv, {
+    cwd: cli.cwd,
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
   return await proc.exited;
 }
 
-export async function execBash(name: string): Promise<number> {
-  const proc = Bun.spawn(
-    ["podman", "exec", "-it", "-u", "sandbox", "-w", "/sandbox/repo", name, "/bin/bash"],
-    { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
-  );
+export async function execBash(sessionName: string): Promise<number> {
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellExecArgv(cli.argv, sessionName, ["/bin/bash"], {
+    workdir: "/sandbox/repo",
+  });
+  const proc = Bun.spawn(argv, {
+    cwd: cli.cwd,
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
   return await proc.exited;
 }
 
-export async function execCmd(name: string, cmd: string[]): Promise<number> {
-  const proc = Bun.spawn(
-    ["podman", "exec", "-it", "-u", "sandbox", "-w", "/sandbox/repo", name, ...cmd],
-    { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
-  );
+export async function execCmd(sessionName: string, cmd: string[]): Promise<number> {
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellExecArgv(cli.argv, sessionName, cmd, { workdir: "/sandbox/repo" });
+  const proc = Bun.spawn(argv, {
+    cwd: cli.cwd,
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
   return await proc.exited;
 }
 
@@ -190,6 +231,28 @@ export async function waitForContainerRunning(name: string, timeoutMs = 60_000):
     await Bun.sleep(500);
   }
   throw new Error(`container ${name} did not reach running state within ${timeoutMs}ms`);
+}
+
+// Wait until the openshell-sandbox supervisor reports the sandbox in Ready
+// phase. `openshell sandbox exec` returns "sandbox not ready" / "sandbox not
+// found" until the supervisor finishes provisioning, so probe with a no-op
+// /bin/true and retry. Required before any subsequent execHarness/execBash/
+// execCmd call.
+export async function waitForSandboxReady(name: string, timeoutMs = 60_000): Promise<void> {
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellExecArgv(cli.argv, name, ["/bin/true"], { tty: "off" });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const proc = Bun.spawn(argv, {
+      cwd: cli.cwd,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    if ((await proc.exited) === 0) return;
+    await Bun.sleep(500);
+  }
+  throw new Error(`sandbox ${name} did not reach Ready state within ${timeoutMs}ms`);
 }
 
 export async function copyOutOfContainer(

@@ -30,5 +30,5 @@ export async function shellCmd(args: string[]): Promise<number> {
   if (state === "exited") {
     await startContainer(containerName);
   }
-  return await execBash(containerName);
+  return await execBash(name);
 }

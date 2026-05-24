@@ -37,5 +37,5 @@ export async function execCmd(args: string[]): Promise<number> {
   if (state === "exited") {
     await startContainer(containerName);
   }
-  return await runExec(containerName, after);
+  return await runExec(name, after);
 }

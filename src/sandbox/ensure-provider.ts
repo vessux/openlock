@@ -63,7 +63,7 @@ export async function _ensureProviderForTests(
     `${k}=${v}`,
   ]);
   const args = exists
-    ? ["provider", "update", "--name", providerId, ...credArgs]
+    ? ["provider", "update", providerId, ...credArgs]
     : ["provider", "create", "--name", providerId, "--type", record.type, ...credArgs];
 
   const result = await shell(args);
