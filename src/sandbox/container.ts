@@ -1,3 +1,5 @@
+import { PROVIDERS } from "../providers/registry";
+import type { ProviderId } from "../providers/types";
 import { getCliInvocation } from "./fork-binaries";
 import { type Harness, harnessLaunchArgv } from "./harness";
 import { filterOpenshellStderr } from "./openshell-stderr";
@@ -61,6 +63,17 @@ export function buildHarnessExecArgv(
     name,
     ...harnessLaunchArgv(harness, extraArgs),
   ];
+}
+
+export interface BuildSandboxEnvArgs {
+  providerId: ProviderId;
+  harness: Harness;
+  repoConfigEnv: Readonly<Record<string, string>>;
+}
+
+export function buildSandboxEnv(args: BuildSandboxEnvArgs): Record<string, string> {
+  const placeholders = PROVIDERS[args.providerId].sandboxEnvPlaceholders(args.harness);
+  return { ...placeholders, ...args.repoConfigEnv };
 }
 
 export async function execHarness(

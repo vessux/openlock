@@ -10,6 +10,7 @@ import { readToken } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import { SANDBOX_PREFIX } from "./constants";
 import {
+  buildSandboxEnv,
   copyOutOfContainer,
   execHarness,
   inspectContainerState,
@@ -599,7 +600,11 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     providerId,
     opts.branch,
   );
-  const launch: LaunchOpts = { args: resolved.args, env: resolved.env, harness };
+  const launch: LaunchOpts = {
+    args: resolved.args,
+    env: buildSandboxEnv({ providerId, harness, repoConfigEnv: resolved.env }),
+    harness,
+  };
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
   const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
     (n) => n !== containerName,
