@@ -19,6 +19,7 @@ export const COMMAND_DESCRIPTIONS = {
   "cred-refresh": "Start the credential refresh service",
   "validate-policy": "Validate a sandbox policy YAML file",
   login: "Authenticate with the gateway",
+  logout: "Remove stored provider credentials",
   providers: "List configured providers",
   gateway: "Manage the gateway",
   doctor: "Check system health and prerequisites",
