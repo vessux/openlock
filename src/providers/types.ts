@@ -1,7 +1,7 @@
 import type { Harness } from "../sandbox/harness";
 
 export type ProviderId = "anthropic" | "openrouter";
-type OpenshellProviderType = "claude" | "openrouter";
+type OpenshellProviderType = "claude" | "generic";
 
 export interface ProviderCredentials {
   [envName: string]: string;

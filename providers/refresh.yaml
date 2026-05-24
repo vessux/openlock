@@ -14,7 +14,7 @@ providers:
         source: env
 
   - name: openrouter
-    type: openrouter
+    type: generic
     credentials:
       OPENROUTER_BEARER_TOKEN:
         source: file

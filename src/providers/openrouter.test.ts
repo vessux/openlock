@@ -16,7 +16,7 @@ function makeIO(line: string): LoginIO {
 describe("OPENROUTER plugin", () => {
   it("declares identity", () => {
     expect(OPENROUTER.id).toBe("openrouter");
-    expect(OPENROUTER.openshellType).toBe("openrouter");
+    expect(OPENROUTER.openshellType).toBe("generic");
     expect(OPENROUTER.credentialEnvVars).toEqual(["OPENROUTER_BEARER_TOKEN"]);
   });
 

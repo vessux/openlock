@@ -16,7 +16,7 @@ function validateOpenRouterKey(raw: string): string {
 export const OPENROUTER: ProviderPlugin = {
   id: "openrouter",
   displayName: "OpenRouter",
-  openshellType: "openrouter",
+  openshellType: "generic",
   credentialEnvVars: ["OPENROUTER_BEARER_TOKEN"],
   compatibleHarnesses: new Set<Harness>(["opencode"]),
 
