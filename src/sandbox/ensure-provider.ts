@@ -22,8 +22,19 @@ async function realOpenshell(args: string[]): Promise<ShellResult> {
   return { exitCode, stdout, stderr };
 }
 
+// `openshell provider list` prints a space-aligned table:
+//   NAME      TYPE     CREDENTIAL_KEYS  CONFIG_KEYS
+//   anthropic claude   2                0
+//   ...
+// (with ANSI bold on the header). Match a line whose first whitespace-
+// separated token equals the provider id, after stripping ANSI escapes.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI ESC requires the 0x1b control byte.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
 export function providerExistsInGateway(listStdout: string, providerId: ProviderId): boolean {
-  return listStdout.split(/\r?\n/).some((line) => line.includes(`name=${providerId}`));
+  return listStdout
+    .replace(ANSI_RE, "")
+    .split(/\r?\n/)
+    .some((line) => line.trim().split(/\s+/)[0] === providerId);
 }
 
 export async function ensureProvider(providerId: ProviderId): Promise<void> {

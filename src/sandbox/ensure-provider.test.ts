@@ -20,13 +20,22 @@ afterEach(() => {
 });
 
 describe("providerExistsInGateway", () => {
-  it("returns true when stdout contains name=<id>", () => {
-    expect(
-      providerExistsInGateway("name=anthropic type=claude\nname=openrouter ...\n", "openrouter"),
-    ).toBe(true);
+  const tableStdout =
+    "\x1b[1mNAME      \x1b[0m  \x1b[1mTYPE   \x1b[0m  \x1b[1mCREDENTIAL_KEYS\x1b[0m  \x1b[1mCONFIG_KEYS\x1b[0m\n" +
+    "anthropic   claude-code  2                0\n" +
+    "openrouter  generic      1                0\n";
+  it("matches a row's first column against the provider id (ANSI-tolerant)", () => {
+    expect(providerExistsInGateway(tableStdout, "openrouter")).toBe(true);
+    expect(providerExistsInGateway(tableStdout, "anthropic")).toBe(true);
   });
-  it("returns false for absent name", () => {
-    expect(providerExistsInGateway("name=anthropic type=claude\n", "openrouter")).toBe(false);
+  it("returns false when the name is absent", () => {
+    const onlyAnthropic =
+      "NAME      TYPE         CREDENTIAL_KEYS  CONFIG_KEYS\nanthropic claude-code  2                0\n";
+    expect(providerExistsInGateway(onlyAnthropic, "openrouter")).toBe(false);
+  });
+  it("does not match substring-only collisions", () => {
+    const tricky = "NAME    TYPE\nopenrouter-other  generic\n";
+    expect(providerExistsInGateway(tricky, "openrouter")).toBe(false);
   });
 });
 
@@ -40,7 +49,7 @@ describe("_ensureProviderForTests", () => {
         if (args[0] === "provider" && args[1] === "list") {
           return {
             exitCode: 0,
-            stdout: state.existing.map((n) => `name=${n}`).join("\n"),
+            stdout: `NAME  TYPE\n${state.existing.map((n) => `${n}  generic`).join("\n")}\n`,
             stderr: "",
           };
         }
