@@ -168,6 +168,8 @@ If `[name]` is omitted and exactly one session exists, it is selected. Multiple 
 | `validate-policy <file.yaml>` | Lint a sandbox policy |
 | `cred-refresh` | Run the credential refresh service |
 
+**Sandbox boundary.** Always reach into a session via `openlock shell` / `openlock exec` — these route through the openshell supervisor, which applies `HTTPS_PROXY`, Landlock, seccomp, and netns enforcement. Direct `podman exec sandbox-<name> ...` from the host bypasses the supervisor and lands the process in the container's netns without proxy enforcement, so egress policy, `cred_inject`, and the per-binary credential gate do not apply. Treat podman socket access as part of your trust boundary.
+
 ## Policies
 
 Default policies live in `policies/` and are selected by detected capabilities:
