@@ -31,7 +31,7 @@ network_policies:
         rules: [{ allow: { method: POST, path: "/api/v1/**" } }]
         cred_inject:
           provider: openrouter
-          strip_headers: [Authorization, x-api-key, Cookie]
+          strip_headers: [Authorization, x-api-key, Cookie, X-Original-Header]
           inject:
             - { header: Authorization, from_credential: OPENROUTER_BEARER_TOKEN }
     allowed_secrets: [OPENROUTER_BEARER_TOKEN]
