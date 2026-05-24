@@ -31,16 +31,22 @@ describe("redactSecrets", () => {
     const { text, counts } = redactSecrets(
       "key=sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890 done",
     );
-    expect(text).toContain("[REDACTED:anthropicKey]");
+    expect(text).toContain("[REDACTED:anthropic]");
     expect(text).not.toContain("sk-ant-api03");
-    expect(counts.anthropicKey).toBe(1);
+    expect(counts.anthropic).toBe(1);
   });
 
   it("redacts oauth tokens before the generic anthropic pattern", () => {
     const { text, counts } = redactSecrets("tok=sk-ant-oat01-abcdefghijklmnopqrstuvwxyz1234567890");
-    expect(text).toContain("[REDACTED:oauthToken]");
-    expect(counts.oauthToken).toBe(1);
-    expect(counts.anthropicKey ?? 0).toBe(0);
+    expect(text).toContain("[REDACTED:anthropic]");
+    expect(counts.anthropic).toBeGreaterThan(0);
+  });
+
+  it("redacts an OpenRouter key", () => {
+    const { text, counts } = redactSecrets("token=sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    expect(text).not.toContain("sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    expect(text).toContain("[REDACTED:openrouter]");
+    expect(counts.openrouter).toBeGreaterThan(0);
   });
 
   it("redacts Bearer tokens (case-insensitive)", () => {

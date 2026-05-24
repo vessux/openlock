@@ -1,3 +1,5 @@
+import { PROVIDER_IDS, PROVIDERS } from "../providers/registry";
+
 export function capLines(text: string, n: number = 5000): string {
   const hadTrailingNewline = text.endsWith("\n");
   const body = hadTrailingNewline ? text.slice(0, -1) : text;
@@ -18,18 +20,17 @@ interface Pattern {
   replace: string;
 }
 
-// Order matters: more specific patterns first so their counts win.
-const PATTERNS: Pattern[] = [
-  {
-    kind: "oauthToken",
-    re: /sk-ant-oat[0-9]{2}-[a-zA-Z0-9_-]{20,}/g,
-    replace: "[REDACTED:oauthToken]",
-  },
-  {
-    kind: "anthropicKey",
-    re: /sk-ant-[a-zA-Z0-9_-]{20,}/g,
-    replace: "[REDACTED:anthropicKey]",
-  },
+// Provider-specific patterns sourced from each plugin (more specific — applied first).
+const PROVIDER_PATTERNS: Pattern[] = PROVIDER_IDS.flatMap((id) =>
+  PROVIDERS[id].redactionPatterns().map((re) => ({
+    kind: id,
+    re,
+    replace: `[REDACTED:${id}]`,
+  })),
+);
+
+// Generic security patterns that apply regardless of provider (applied after provider patterns).
+const GENERIC_PATTERNS: Pattern[] = [
   {
     kind: "bearer",
     re: /Bearer\s+[a-zA-Z0-9._\-+=]{20,}/gi,
@@ -51,6 +52,9 @@ const PATTERNS: Pattern[] = [
     replace: "x-api-key: [REDACTED:xApiKey]",
   },
 ];
+
+// Order: provider-specific FIRST (more specific), generic AFTER (catch-all).
+const PATTERNS: Pattern[] = [...PROVIDER_PATTERNS, ...GENERIC_PATTERNS];
 
 export function redactSecrets(input: string): RedactResult {
   let text = input;
