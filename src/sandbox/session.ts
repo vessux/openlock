@@ -18,6 +18,7 @@ import {
   openshellSandboxCreateAsync,
   startContainer,
   waitForContainerRunning,
+  waitForSandboxReady,
 } from "./container";
 import { containerfileKeyForCaps, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
 import { type Cap, detectCaps } from "./detect-caps";
@@ -210,6 +211,7 @@ async function createSession(
 
     await waitForContainerRunning(containerName);
     await waitForStagingUploaded(containerName, staging);
+    await waitForSandboxReady(name);
 
     const meta: SessionMeta = {
       id,
@@ -353,7 +355,7 @@ async function attachHarnessAndSync(
   launch: LaunchOpts,
   mounts: readonly Mount[],
 ): Promise<number> {
-  const exitCode = await execHarness(launch.harness, containerName, launch.args, launch.env);
+  const exitCode = await execHarness(launch.harness, sessionName, launch.args, launch.env);
   await syncBackToHost(containerName, sessionName, mounts);
   const meta = findSessionByName(sessionName);
   if (meta) {
@@ -454,6 +456,7 @@ async function reattachSession(
   }
   await startGateway();
   await ensureProvider(providerId);
+  await waitForSandboxReady(m.name);
   for (const mount of mounts) {
     if (mount.type !== "copy-refresh") continue;
     console.log(`Refreshing mount ${mount.target}...`);
