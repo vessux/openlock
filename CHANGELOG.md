@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.7.0
+
+### Added
+
+- **Provider abstraction (xoz).** `openlock login` is now a wizard that supports multiple providers. New `openrouter` provider works with the `opencode` harness. Same strip-and-replace credential protection as the existing Claude Code / Anthropic path — real key never enters the sandbox; gateway rewrites `Authorization` at HTTP egress.
+- `--provider <id>` flag on `sandbox`, `login`, `logout`. Selection precedence: flag > `OPENLOCK_PROVIDER` env > `~/.config/openlock/config.yaml` `default_provider:` > error.
+- `openlock providers` — list configured providers (stored / in-gateway / compatible harnesses).
+- `openlock logout [--provider <id>]` — delete stored provider credentials (interactive picker when no flag).
+- Global config `default_provider:` key.
+- `bun run render:policies` script. Default policies (`policies/default*.yaml`) are now generated from the provider registry; CI drift test fails if committed files diverge.
+
+### Changed
+
+- `~/.config/openlock/credentials.json` is now multi-provider (v2 shape). Existing v1 files migrate silently on first read.
+- `providers/refresh.yaml` accepts a new `source: file` kind for credentials stored in the multi-provider file. `openrouter` provider entry uses it.
+- Default policies (`policies/default*.yaml`) now include an `opencode` block with both `api.anthropic.com` (x-api-key cred_inject) and `openrouter.ai` (Authorization Bearer cred_inject) endpoints. Per-binary cap-aware binaries (claude+node / claude+python3 / claude+node+python3) preserved.
+
+### Deprecated
+
+- For the `claude_code` harness with no provider signal AND a stored anthropic record, openlock auto-selects `anthropic` and prints a one-shot deprecation hint. The auto-default is removed in v0.8.0; users should set `--provider`, `OPENLOCK_PROVIDER`, or `default_provider:` to silence.
+- Legacy `readToken()` / `writeToken()` shims in `src/tokens.ts` are removed in v0.8.0.
+
 ## v0.6.0
 
 ### Breaking
