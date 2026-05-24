@@ -4,6 +4,8 @@ import { basename, join, resolve } from "node:path";
 import { podmanMachineRunning, podmanSocketActive, runDoctorChecks } from "../doctor";
 import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
+import { resolveProvider } from "../providers/resolve";
+import type { ProviderId } from "../providers/types";
 import { readToken } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import { SANDBOX_PREFIX } from "./constants";
@@ -58,6 +60,7 @@ export interface SandboxOpts {
   path: string;
   policy?: string;
   harness?: string;
+  provider?: string;
   branch?: string;
 }
 
@@ -121,13 +124,14 @@ async function createSession(
   projectPath: string,
   resolved: ResolvedRepo,
   harness: Harness,
+  providerId: ProviderId,
   branch: string | undefined,
 ): Promise<NewSession> {
   const { caps, policy, mounts } = resolved;
   console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
 
   await startGateway();
-  await ensureProvider();
+  await ensureProvider(providerId);
 
   const imageTag = await buildSandboxImage(caps);
   console.log(`Policy: ${policy}`);
@@ -423,7 +427,11 @@ function exitOnAmbiguousSessions(projectPath: string, matches: SessionMeta[]): v
   process.exit(2);
 }
 
-async function reattachSession(m: SessionMeta, mounts: readonly Mount[]): Promise<ResolvedSession> {
+async function reattachSession(
+  m: SessionMeta,
+  mounts: readonly Mount[],
+  providerId: ProviderId,
+): Promise<ResolvedSession> {
   const containerName = `${SANDBOX_PREFIX}${m.name}`;
   const state = await inspectContainerState(containerName);
   if (state === "missing") {
@@ -443,7 +451,7 @@ async function reattachSession(m: SessionMeta, mounts: readonly Mount[]): Promis
     console.log(`Attaching to running session ${m.name}...`);
   }
   await startGateway();
-  await ensureProvider();
+  await ensureProvider(providerId);
   for (const mount of mounts) {
     if (mount.type !== "copy-refresh") continue;
     console.log(`Refreshing mount ${mount.target}...`);
@@ -460,19 +468,20 @@ async function resolveOrCreateSession(
   projectPath: string,
   resolved: ResolvedRepo,
   harness: Harness,
+  providerId: ProviderId,
   branch: string | undefined,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
-    const created = await createSession(projectPath, resolved, harness, branch);
+    const created = await createSession(projectPath, resolved, harness, providerId, branch);
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
     });
     return { containerName: created.containerName, sessionName: created.name };
   }
-  return reattachSession(matches[0]!, resolved.mounts);
+  return reattachSession(matches[0]!, resolved.mounts, providerId);
 }
 
 /**
@@ -576,10 +585,18 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   }
   const harness = pick.harness;
 
+  const providerId: ProviderId = resolveProvider({
+    harness,
+    cliFlag: opts.provider,
+    env: process.env,
+    readGlobalConfig,
+  });
+
   const { containerName, sessionName } = await resolveOrCreateSession(
     projectPath,
     resolved,
     harness,
+    providerId,
     opts.branch,
   );
   const launch: LaunchOpts = { args: resolved.args, env: resolved.env, harness };

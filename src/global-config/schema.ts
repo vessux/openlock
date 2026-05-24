@@ -2,9 +2,10 @@ import { HARNESSES, type Harness } from "../sandbox/harness";
 
 export interface GlobalConfig {
   defaultHarness?: Harness;
+  defaultProvider?: string;
 }
 
-const ALLOWED_KEYS = new Set(["default_harness"]);
+const ALLOWED_KEYS = new Set(["default_harness", "default_provider"]);
 
 export function validateAndShape(raw: unknown, source: string): GlobalConfig {
   if (raw === null || raw === undefined) return {};
@@ -32,6 +33,13 @@ export function validateAndShape(raw: unknown, source: string): GlobalConfig {
       );
     }
     out.defaultHarness = v as Harness;
+  }
+  if ("default_provider" in obj) {
+    const v = obj.default_provider;
+    if (typeof v !== "string") {
+      throw new Error(`${source}: default_provider must be a string`);
+    }
+    out.defaultProvider = v;
   }
   return out;
 }
