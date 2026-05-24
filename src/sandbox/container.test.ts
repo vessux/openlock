@@ -209,12 +209,20 @@ describe("buildOpenshellCreateArgv", () => {
     imageTag: "img",
     uploadDir: "/tmp/staging",
     policy: "/tmp/policy.yaml",
+    providerId: "anthropic" as const,
     command: ["/bin/bash"],
   };
 
   it("emits no --volume when volumeArgs is empty/absent", () => {
     const argv = buildOpenshellCreateArgv(base);
     expect(argv).not.toContain("--volume");
+  });
+
+  it("passes providerId verbatim as --provider", () => {
+    const argv = buildOpenshellCreateArgv({ ...base, providerId: "openrouter" });
+    const idx = argv.indexOf("--provider");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv[idx + 1]).toBe("openrouter");
   });
 
   it("emits --volume args verbatim when provided", () => {

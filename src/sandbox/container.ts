@@ -108,6 +108,7 @@ export interface OpenshellCreateArgs {
   imageTag: string;
   uploadDir: string;
   policy: string;
+  providerId: ProviderId;
   command: string[];
   volumeArgs?: readonly string[];
 }
@@ -132,7 +133,7 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
     "--policy",
     args.policy,
     "--provider",
-    "anthropic",
+    args.providerId,
     "--no-tty",
     ...(args.volumeArgs ?? []),
     "--",

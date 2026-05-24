@@ -193,6 +193,7 @@ async function createSession(
       imageTag,
       uploadDir: staging,
       policy,
+      providerId,
       command: ["/bin/bash", "-c", setupCmd],
       volumeArgs: bindMountArgs(mounts),
     });
