@@ -2,23 +2,89 @@ import { describe, expect, it } from "bun:test";
 import {
   buildHarnessExecArgv,
   buildOpenshellCreateArgv,
+  buildOpenshellExecArgv,
   buildPodmanChownArgv,
   buildPodmanCpArgv,
   buildPodmanRmArgv,
   buildSandboxEnv,
+  wrapCmdWithEnv,
 } from "./container";
+
+const CLI = ["openshell"] as const;
+
+describe("wrapCmdWithEnv", () => {
+  it("returns cmd unchanged when env is empty", () => {
+    expect(wrapCmdWithEnv(["claude"], {})).toEqual(["claude"]);
+  });
+
+  it("prepends `env K=V ...` when env has entries", () => {
+    const out = wrapCmdWithEnv(["claude", "--print"], { FOO: "bar", BAZ: "qux" });
+    expect(out[0]).toBe("env");
+    expect(out).toContain("FOO=bar");
+    expect(out).toContain("BAZ=qux");
+    // Original cmd tail preserved verbatim, after env pairs.
+    expect(out.slice(-2)).toEqual(["claude", "--print"]);
+  });
+
+  it("does not shell-escape values (Bun.spawn passes argv literally)", () => {
+    const out = wrapCmdWithEnv(["sh"], { KEY: 'value with "spaces" and $shell' });
+    expect(out).toContain('KEY=value with "spaces" and $shell');
+  });
+});
+
+describe("buildOpenshellExecArgv", () => {
+  it("routes through `openshell sandbox exec --name X -- cmd`", () => {
+    expect(buildOpenshellExecArgv(CLI, "sb-foo", ["/bin/bash"])).toEqual([
+      "openshell",
+      "sandbox",
+      "exec",
+      "--name",
+      "sb-foo",
+      "--",
+      "/bin/bash",
+    ]);
+  });
+
+  it("prepends multi-element cli prefix (e.g. `mise exec -- openshell`)", () => {
+    const cli = ["mise", "exec", "--", "openshell"];
+    const argv = buildOpenshellExecArgv(cli, "sb-foo", ["ls"]);
+    expect(argv.slice(0, 4)).toEqual(["mise", "exec", "--", "openshell"]);
+    expect(argv.slice(4, 8)).toEqual(["sandbox", "exec", "--name", "sb-foo"]);
+  });
+
+  it("emits --workdir when provided", () => {
+    const argv = buildOpenshellExecArgv(CLI, "sb-foo", ["pwd"], { workdir: "/sandbox/repo" });
+    const idx = argv.indexOf("--workdir");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv[idx + 1]).toBe("/sandbox/repo");
+  });
+
+  it("emits --tty when tty=force, --no-tty when tty=off, neither when tty=auto", () => {
+    expect(buildOpenshellExecArgv(CLI, "sb-foo", ["ls"], { tty: "force" })).toContain("--tty");
+    expect(buildOpenshellExecArgv(CLI, "sb-foo", ["ls"], { tty: "off" })).toContain("--no-tty");
+    const auto = buildOpenshellExecArgv(CLI, "sb-foo", ["ls"], { tty: "auto" });
+    expect(auto).not.toContain("--tty");
+    expect(auto).not.toContain("--no-tty");
+  });
+
+  it("never emits raw `podman exec` (regression-proof for openlock-hnp)", () => {
+    const argv = buildOpenshellExecArgv(CLI, "sb-foo", ["/bin/bash"], { workdir: "/sandbox/repo" });
+    const joined = argv.join(" ");
+    expect(joined).not.toMatch(/\bpodman\s+exec\b/);
+  });
+});
 
 describe('buildHarnessExecArgv("claude_code", ...)', () => {
   it("returns the baseline argv when extraArgs and extraEnv are empty", () => {
-    expect(buildHarnessExecArgv("claude_code", "sb-foo", [], {})).toEqual([
-      "podman",
-      "exec",
-      "-it",
-      "-u",
+    expect(buildHarnessExecArgv(CLI, "claude_code", "sb-foo", [], {})).toEqual([
+      "openshell",
       "sandbox",
-      "-w",
-      "/sandbox/repo",
+      "exec",
+      "--name",
       "sb-foo",
+      "--workdir",
+      "/sandbox/repo",
+      "--",
       "claude",
     ]);
   });
@@ -26,99 +92,85 @@ describe('buildHarnessExecArgv("claude_code", ...)', () => {
   it("appends extra args after `claude`", () => {
     expect(
       buildHarnessExecArgv(
+        CLI,
         "claude_code",
         "sb-foo",
         ["--plugin-dir", "/sandbox/.openlock/skills"],
         {},
       ),
     ).toEqual([
-      "podman",
-      "exec",
-      "-it",
-      "-u",
+      "openshell",
       "sandbox",
-      "-w",
-      "/sandbox/repo",
+      "exec",
+      "--name",
       "sb-foo",
+      "--workdir",
+      "/sandbox/repo",
+      "--",
       "claude",
       "--plugin-dir",
       "/sandbox/.openlock/skills",
     ]);
   });
 
-  it("emits one --env KEY=VALUE per env entry, before container name", () => {
-    const argv = buildHarnessExecArgv("claude_code", "sb-foo", [], { FOO: "bar", BAZ: "qux" });
-    const envIdx = argv.indexOf("--env");
-    expect(envIdx).toBeGreaterThan(-1);
-    const containerIdx = argv.indexOf("sb-foo");
-    for (let i = 0; i < argv.length; i++) {
-      if (argv[i] === "--env") expect(i).toBeLessThan(containerIdx);
-    }
+  it("wraps the harness command in `env K=V ...` when extraEnv has entries", () => {
+    const argv = buildHarnessExecArgv(CLI, "claude_code", "sb-foo", [], {
+      FOO: "bar",
+      BAZ: "qux",
+    });
+    // After the `--` separator, the first token must be `env`.
+    const sepIdx = argv.indexOf("--");
+    expect(sepIdx).toBeGreaterThan(-1);
+    expect(argv[sepIdx + 1]).toBe("env");
     expect(argv).toContain("FOO=bar");
     expect(argv).toContain("BAZ=qux");
+    // Harness binary still last (before any extraArgs).
+    expect(argv[argv.length - 1]).toBe("claude");
   });
 
-  it("combines extraArgs and extraEnv", () => {
-    const argv = buildHarnessExecArgv("claude_code", "sb-foo", ["--print"], { FOO: "bar" });
+  it("does NOT wrap with `env` when extraEnv is empty", () => {
+    const argv = buildHarnessExecArgv(CLI, "claude_code", "sb-foo", ["--print"], {});
+    const sepIdx = argv.indexOf("--");
+    expect(argv[sepIdx + 1]).toBe("claude");
+  });
+
+  it("combines extraArgs and extraEnv: env wrapper holds, args trail", () => {
+    const argv = buildHarnessExecArgv(CLI, "claude_code", "sb-foo", ["--print"], { FOO: "bar" });
     expect(argv).toContain("FOO=bar");
     expect(argv[argv.length - 2]).toBe("claude");
     expect(argv[argv.length - 1]).toBe("--print");
   });
 });
 
-describe("buildHarnessExecArgv", () => {
+describe("buildHarnessExecArgv (harness binary selection)", () => {
   it("uses 'claude' binary for claude_code harness", () => {
-    expect(buildHarnessExecArgv("claude_code", "sb-foo", [], {})).toEqual([
-      "podman",
-      "exec",
-      "-it",
-      "-u",
-      "sandbox",
-      "-w",
-      "/sandbox/repo",
-      "sb-foo",
-      "claude",
-    ]);
+    const argv = buildHarnessExecArgv(CLI, "claude_code", "sb-foo", [], {});
+    expect(argv[argv.length - 1]).toBe("claude");
   });
 
   it("uses 'opencode' binary for opencode harness", () => {
-    expect(buildHarnessExecArgv("opencode", "sb-foo", [], {})).toEqual([
-      "podman",
-      "exec",
-      "-it",
-      "-u",
-      "sandbox",
-      "-w",
-      "/sandbox/repo",
-      "sb-foo",
-      "opencode",
-    ]);
+    const argv = buildHarnessExecArgv(CLI, "opencode", "sb-foo", [], {});
+    expect(argv[argv.length - 1]).toBe("opencode");
   });
 
   it("appends extra args after the harness binary for opencode", () => {
-    expect(buildHarnessExecArgv("opencode", "sb-foo", ["run", "hello"], {})).toEqual([
-      "podman",
-      "exec",
-      "-it",
-      "-u",
-      "sandbox",
-      "-w",
-      "/sandbox/repo",
-      "sb-foo",
-      "opencode",
-      "run",
-      "hello",
-    ]);
+    const argv = buildHarnessExecArgv(CLI, "opencode", "sb-foo", ["run", "hello"], {});
+    expect(argv.slice(-3)).toEqual(["opencode", "run", "hello"]);
   });
 
-  it("emits --env flags before container name for both harnesses", () => {
+  it("places `env K=V` immediately after the `--` separator for both harnesses", () => {
     for (const harness of ["claude_code", "opencode"] as const) {
-      const argv = buildHarnessExecArgv(harness, "sb-foo", [], { FOO: "bar" });
-      const envIdx = argv.indexOf("--env");
-      const containerIdx = argv.indexOf("sb-foo");
-      expect(envIdx).toBeGreaterThan(-1);
-      expect(envIdx).toBeLessThan(containerIdx);
+      const argv = buildHarnessExecArgv(CLI, harness, "sb-foo", [], { FOO: "bar" });
+      const sepIdx = argv.indexOf("--");
+      expect(argv[sepIdx + 1]).toBe("env");
       expect(argv).toContain("FOO=bar");
+    }
+  });
+
+  it("never emits raw `podman exec` (regression-proof for openlock-hnp)", () => {
+    for (const harness of ["claude_code", "opencode"] as const) {
+      const argv = buildHarnessExecArgv(CLI, harness, "sb-foo", [], { FOO: "bar" });
+      expect(argv.join(" ")).not.toMatch(/\bpodman\s+exec\b/);
     }
   });
 });
