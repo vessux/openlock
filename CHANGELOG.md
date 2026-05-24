@@ -2,6 +2,10 @@
 
 ## v0.7.0
 
+### Security
+
+- **`openlock-hnp` — sandbox egress bypass fixed.** Pre-v0.7.0 openlock launched the harness via raw `podman exec`, landing it in the container's default netns with no `HTTPS_PROXY`, no Landlock, no `cred_inject`. Outbound HTTPS reached real upstreams directly — the sandbox wasn't actually a sandbox. Affected Mac and Linux equally; CI never caught it because the existing live tests use `openshell sandbox create -- /bin/bash -c "..."` (which goes through the supervisor and gets full enforcement), but the post-create attach path that real openlock invocations use was never exercised. Fix routes the harness via `openshell sandbox exec`, so the supervisor applies the proxy env, TLS bundle, netns enter, and Landlock seccomp. Defense-in-depth follow-up (`openlock-9nv`) tracks closing the host-side `podman exec` bypass too.
+
 ### Added
 
 - **Provider abstraction (xoz).** `openlock login` is now a wizard that supports multiple providers. New `openrouter` provider works with the `opencode` harness. Same strip-and-replace credential protection as the existing Claude Code / Anthropic path — real key never enters the sandbox; gateway rewrites `Authorization` at HTTP egress.
