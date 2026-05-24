@@ -253,6 +253,8 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
         expect(["200", "402", "403", "404", "429", "400"]).toContain(httpCode);
 
         createProc.kill();
+        // Reap to free supervisor + gateway slot for sibling tests.
+        await createProc.exited;
       } finally {
         await removeContainer();
         await removeProvider();

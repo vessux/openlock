@@ -220,6 +220,9 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
         expect(xOriginal).toBeUndefined();
 
         createProc.kill();
+        // Reap to free the supervisor SSH session + gateway slot before the
+        // next test runs (sibling integration tests share the same gateway).
+        await createProc.exited;
       } finally {
         await removeContainer();
         await removeProvider();
