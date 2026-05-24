@@ -98,3 +98,27 @@ describe("resolveEndpoint", () => {
     expect(result).toBe("localhost:9090");
   });
 });
+
+describe("file source", () => {
+  test("parses credentials with source: file and provider_id", () => {
+    const tmpPath = `/tmp/openlock-cred-cfg-${process.pid}-${Date.now()}.yaml`;
+    writeFileSync(
+      tmpPath,
+      `interval_secs: 60
+providers:
+  - name: openrouter
+    type: openrouter
+    credentials:
+      OPENROUTER_API_KEY:
+        source: file
+        provider_id: openrouter
+`,
+    );
+    try {
+      const cfg = loadConfig(tmpPath);
+      expect(cfg.providers[0].credentials.OPENROUTER_API_KEY.source).toBe("file");
+    } finally {
+      rmSync(tmpPath, { force: true });
+    }
+  });
+});

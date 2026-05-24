@@ -4,6 +4,7 @@ import yaml from "js-yaml";
 interface CredentialConfig {
   source: string;
   env_var?: string;
+  provider_id?: string;
 }
 
 export interface ProviderConfig {
