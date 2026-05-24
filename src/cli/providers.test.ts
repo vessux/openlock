@@ -30,7 +30,7 @@ describe("_renderProvidersTable", () => {
   it("reflects stored + gateway state", () => {
     writeProvider("openrouter", {
       type: "openrouter",
-      credentials: { OPENROUTER_API_KEY: "sk-or-v1-x" },
+      credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-x" },
       created_at: "t",
     });
     const lines = _renderProvidersTable({

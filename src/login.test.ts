@@ -46,8 +46,8 @@ describe("_loginForTests", () => {
       io,
       pick: async () => "anthropic" as ProviderId,
     });
-    expect(readProvider("openrouter")?.credentials.OPENROUTER_API_KEY).toBe(
-      "sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    expect(readProvider("openrouter")?.credentials.OPENROUTER_BEARER_TOKEN).toBe(
+      "Bearer sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     );
   });
 

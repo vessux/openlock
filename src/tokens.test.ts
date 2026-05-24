@@ -51,14 +51,14 @@ describe("writeProvider/readProvider roundtrip", () => {
       "openrouter",
       {
         type: "openrouter",
-        credentials: { OPENROUTER_API_KEY: "sk-or-v1-test" },
+        credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-test" },
         created_at: "2026-05-24T00:00:00.000Z",
       },
       path,
     );
     expect(readProvider("openrouter", path)).toEqual({
       type: "openrouter",
-      credentials: { OPENROUTER_API_KEY: "sk-or-v1-test" },
+      credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-test" },
       created_at: "2026-05-24T00:00:00.000Z",
     });
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -82,13 +82,15 @@ describe("writeProvider/readProvider roundtrip", () => {
       "openrouter",
       {
         type: "openrouter",
-        credentials: { OPENROUTER_API_KEY: "sk-or-v1-x" },
+        credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-x" },
         created_at: "2026-05-24T00:00:01.000Z",
       },
       path,
     );
     expect(readProvider("anthropic", path)?.credentials.ANTHROPIC_AUTH_TOKEN).toBe("abc");
-    expect(readProvider("openrouter", path)?.credentials.OPENROUTER_API_KEY).toBe("sk-or-v1-x");
+    expect(readProvider("openrouter", path)?.credentials.OPENROUTER_BEARER_TOKEN).toBe(
+      "Bearer sk-or-v1-x",
+    );
   });
 });
 
@@ -101,7 +103,11 @@ describe("deleteProvider", () => {
     );
     writeProvider(
       "openrouter",
-      { type: "openrouter", credentials: { OPENROUTER_API_KEY: "sk-or-v1-x" }, created_at: "t2" },
+      {
+        type: "openrouter",
+        credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-x" },
+        created_at: "t2",
+      },
       path,
     );
     deleteProvider("openrouter", path);

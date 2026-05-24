@@ -62,22 +62,22 @@ describe("FileSource", () => {
   it("reads providers.<id>.credentials.<envName> from credentials.json", async () => {
     writeProvider("openrouter", {
       type: "openrouter",
-      credentials: { OPENROUTER_API_KEY: "sk-or-v1-x" },
+      credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-x" },
       created_at: "t",
     });
-    const src = new FileSource("OPENROUTER_API_KEY", { providerId: "openrouter" });
-    expect(await src.resolve()).toBe("sk-or-v1-x");
+    const src = new FileSource("OPENROUTER_BEARER_TOKEN", { providerId: "openrouter" });
+    expect(await src.resolve()).toBe("Bearer sk-or-v1-x");
   });
 
   it("returns null when the credential is missing", async () => {
-    const src = new FileSource("OPENROUTER_API_KEY", { providerId: "openrouter" });
+    const src = new FileSource("OPENROUTER_BEARER_TOKEN", { providerId: "openrouter" });
     expect(await src.resolve()).toBeNull();
   });
 });
 
 describe("createSource recognizes source: file", () => {
   it("returns a FileSource with type 'file'", () => {
-    const s = createSource("OPENROUTER_API_KEY", {
+    const s = createSource("OPENROUTER_BEARER_TOKEN", {
       source: "file",
       provider_id: "openrouter",
     });
@@ -85,6 +85,8 @@ describe("createSource recognizes source: file", () => {
   });
 
   it("throws if provider_id is missing", () => {
-    expect(() => createSource("OPENROUTER_API_KEY", { source: "file" })).toThrow(/provider_id/);
+    expect(() => createSource("OPENROUTER_BEARER_TOKEN", { source: "file" })).toThrow(
+      /provider_id/,
+    );
   });
 });

@@ -54,7 +54,7 @@ describe("_ensureProviderForTests", () => {
   it("creates a new provider when absent", async () => {
     writeProvider("openrouter", {
       type: "openrouter",
-      credentials: { OPENROUTER_API_KEY: "sk-or-v1-x" },
+      credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-x" },
       created_at: "t",
     });
     const m = makeShell({ existing: [] });
@@ -64,13 +64,13 @@ describe("_ensureProviderForTests", () => {
     expect(m.calls[1]).toContain("--name");
     expect(m.calls[1]).toContain("openrouter");
     expect(m.calls[1]).toContain("--credential");
-    expect(m.calls[1]).toContain("OPENROUTER_API_KEY=sk-or-v1-x");
+    expect(m.calls[1]).toContain("OPENROUTER_BEARER_TOKEN=Bearer sk-or-v1-x");
   });
 
   it("updates an existing provider (no --type on update)", async () => {
     writeProvider("openrouter", {
       type: "openrouter",
-      credentials: { OPENROUTER_API_KEY: "sk-or-v1-y" },
+      credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-y" },
       created_at: "t",
     });
     const m = makeShell({ existing: ["openrouter"] });

@@ -89,10 +89,10 @@ network_policies:
             - Cookie
           inject:
             - header: Authorization
-              from_credential: OPENROUTER_API_KEY
+              from_credential: OPENROUTER_BEARER_TOKEN
     allowed_secrets:
       - ANTHROPIC_API_KEY
-      - OPENROUTER_API_KEY
+      - OPENROUTER_BEARER_TOKEN
   pip_packages:
     binaries:
       - path: /usr/bin/pip

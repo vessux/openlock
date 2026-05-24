@@ -24,7 +24,7 @@ describe("_logoutForTests", () => {
   it("deletes the named provider", async () => {
     writeProvider("openrouter", {
       type: "openrouter",
-      credentials: { OPENROUTER_API_KEY: "x" },
+      credentials: { OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-x" },
       created_at: "t",
     });
     await _logoutForTests({

@@ -17,13 +17,13 @@ export const OPENROUTER: ProviderPlugin = {
   id: "openrouter",
   displayName: "OpenRouter",
   openshellType: "openrouter",
-  credentialEnvVars: ["OPENROUTER_API_KEY"],
+  credentialEnvVars: ["OPENROUTER_BEARER_TOKEN"],
   compatibleHarnesses: new Set<Harness>(["opencode"]),
 
   async loginInteractive(io: LoginIO): Promise<ProviderCredentials> {
     const raw = await io.readLine("Paste your OpenRouter API key (starts with sk-or-):\n> ");
     const key = validateOpenRouterKey(raw);
-    return { OPENROUTER_API_KEY: key };
+    return { OPENROUTER_BEARER_TOKEN: `Bearer ${key}` };
   },
 
   policyEndpoints(_harness: Harness): readonly PolicyEndpointSpec[] {
@@ -36,7 +36,7 @@ export const OPENROUTER: ProviderPlugin = {
         cred_inject: {
           provider: "openrouter",
           strip_headers: ["Authorization", "x-api-key", "Cookie"],
-          inject: [{ header: "Authorization", from_credential: "OPENROUTER_API_KEY" }],
+          inject: [{ header: "Authorization", from_credential: "OPENROUTER_BEARER_TOKEN" }],
         },
       },
     ];

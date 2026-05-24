@@ -107,12 +107,12 @@ providers:
   - name: openrouter
     type: openrouter
     credentials:
-      OPENROUTER_API_KEY:
+      OPENROUTER_BEARER_TOKEN:
         source: file
         provider_id: openrouter
 `,
     );
     const cfg = loadConfig(path);
-    expect(cfg.providers[0].credentials.OPENROUTER_API_KEY.source).toBe("file");
+    expect(cfg.providers[0].credentials.OPENROUTER_BEARER_TOKEN.source).toBe("file");
   });
 });
