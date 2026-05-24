@@ -5,51 +5,105 @@
 # Per-binary credential scoping prevents cross-provider leakage.
 
 version: 1
-
 filesystem_policy:
   include_workdir: true
-  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
-  read_write: [/sandbox, /tmp, /dev/null]
-
+  read_only:
+    - /usr
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /app
+    - /etc
+    - /var/log
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
 landlock:
   compatibility: best_effort
-
 process:
   run_as_user: sandbox
   run_as_group: sandbox
-
 network_policies:
   claude_code:
     binaries:
-      - { path: /usr/local/bin/claude }
-      - { path: /usr/bin/node }
+      - path: /usr/local/bin/claude
+      - path: /usr/bin/node
     endpoints:
       - host: api.anthropic.com
         port: 443
         protocol: rest
         enforcement: enforce
         rules:
-          - allow: { method: POST, path: "/v1/**" }
+          - allow:
+              method: POST
+              path: /v1/**
         cred_inject:
           provider: anthropic
-          strip_headers: [Authorization, x-api-key, Cookie]
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
           inject:
-            - { header: Authorization, from_credential: ANTHROPIC_BEARER_TOKEN }
-    allowed_secrets: [ANTHROPIC_BEARER_TOKEN, ANTHROPIC_AUTH_TOKEN]
-
+            - header: Authorization
+              from_credential: ANTHROPIC_BEARER_TOKEN
+    allowed_secrets:
+      - ANTHROPIC_BEARER_TOKEN
+  opencode:
+    binaries:
+      - path: /usr/local/bin/opencode
+      - path: /usr/bin/node
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: /v1/**
+        cred_inject:
+          provider: anthropic
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: x-api-key
+              from_credential: ANTHROPIC_API_KEY
+      - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: /api/v1/**
+        cred_inject:
+          provider: openrouter
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: Authorization
+              from_credential: OPENROUTER_API_KEY
+    allowed_secrets:
+      - ANTHROPIC_API_KEY
+      - OPENROUTER_API_KEY
   npm_packages:
     binaries:
-      - { path: /usr/bin/npm }
-      - { path: /usr/bin/node }
-      - { path: /usr/bin/npx }
-      - { path: /usr/local/bin/bun }
+      - path: /usr/bin/npm
+      - path: /usr/bin/node
+      - path: /usr/bin/npx
+      - path: /usr/local/bin/bun
     endpoints:
       - host: registry.npmjs.org
         port: 443
         protocol: rest
         enforcement: enforce
         access: read-only
-        # scoped packages use %2F in path: GET /@scope%2Fname
         allow_encoded_slash: true
-        trust_check: { registry: npm }
+        trust_check:
+          registry: npm
     allowed_secrets: []
