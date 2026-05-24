@@ -37,9 +37,11 @@ const FIXTURE_POLICY = resolve(__dirname, "../fixtures/policies/test-openrouter-
 async function spawnAndCapture(
   argv: string[],
   cwd?: string,
+  extraEnv?: Readonly<Record<string, string>>,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(argv, {
     cwd,
+    env: extraEnv === undefined ? undefined : { ...process.env, ...extraEnv },
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
@@ -127,17 +129,16 @@ describe("openrouter cred_inject mechanism (live integration)", () => {
           tagPrefix: `openlock-${imageKey}`,
         });
 
-        const curlCmd = [
-          "curl",
-          "-sf",
-          "-X",
-          "POST",
-          "-H",
-          "Authorization: Bearer fake",
-          "-H",
-          "X-Original-Header: original-value",
-          "https://mock.openrouter.test:8443/api/v1/chat/completions",
-        ].join(" ");
+        // EH8-DIAG: same probe pattern as harness-cred-inject (verify-eh8 PR).
+        const curlCmd =
+          'echo "EH8-OR T0=$(date +%s.%N)" >&2; ' +
+          "for i in $(seq 1 60); do " +
+          "if (echo > /dev/tcp/10.200.0.1/3128) 2>/dev/null; then " +
+          'echo "EH8-OR PROXY-BOUND T${i}s=$(date +%s.%N)" >&2; break; ' +
+          "fi; sleep 1; done; " +
+          'echo "EH8-OR PRE-CURL=$(date +%s.%N)" >&2; ' +
+          'curl -sf -X POST -H "Authorization: Bearer fake" -H "X-Original-Header: original-value" https://mock.openrouter.test:8443/api/v1/chat/completions; ' +
+          'echo "EH8-OR POST-CURL=$(date +%s.%N) curl=$?" >&2';
 
         const sandboxArgv = [
           ...argvHead,
@@ -161,7 +162,13 @@ describe("openrouter cred_inject mechanism (live integration)", () => {
           curlCmd,
         ];
 
-        const result = await spawnAndCapture(sandboxArgv, cli.cwd);
+        const result = await spawnAndCapture(sandboxArgv, cli.cwd, {
+          OPENSHELL_SSH_LOG_LEVEL: "DEBUG",
+        });
+        // EH8-DIAG: always dump for diagnostic capture (pass and fail).
+        console.log(`EH8-OR result.code=${result.code}`);
+        console.log(`EH8-OR result.stderr=\n${result.stderr}`);
+        console.log(`EH8-OR result.stdout-len=${result.stdout.length}`);
         // openshell exit code reflects the foreground command; the curl
         // output (echo JSON) is what we parse.
         const jsonStart = result.stdout.indexOf("{");
