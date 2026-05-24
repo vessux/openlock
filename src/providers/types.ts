@@ -1,7 +1,7 @@
 import type { Harness } from "../sandbox/harness";
 
 export type ProviderId = "anthropic" | "openrouter";
-export type OpenshellProviderType = "claude" | "openrouter";
+type OpenshellProviderType = "claude" | "openrouter";
 
 export interface ProviderCredentials {
   [envName: string]: string;
@@ -14,7 +14,7 @@ export interface LoginIO {
   readonly isTTY: boolean;
 }
 
-export interface CredInjectSpec {
+interface CredInjectSpec {
   provider: ProviderId;
   strip_headers: readonly string[];
   inject: ReadonlyArray<{ header: string; from_credential: string }>;
