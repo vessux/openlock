@@ -11,13 +11,11 @@ import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import { SANDBOX_PREFIX } from "./constants";
 import {
   buildSandboxEnv,
-  copyOutOfContainer,
+  downloadFromSandbox,
   execHarness,
-  inspectContainerState,
-  listSandboxContainers,
+  getSandboxState,
+  listSandboxes,
   openshellSandboxCreateAsync,
-  startContainer,
-  waitForContainerRunning,
   waitForSandboxReady,
 } from "./container";
 import { containerfileKeyForCaps, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
@@ -209,7 +207,6 @@ async function createSession(
       throw new Error(`openshell sandbox create exited early with code ${earlyFail.code}`);
     }
 
-    await waitForContainerRunning(containerName);
     await waitForStagingUploaded(containerName, staging);
     await waitForSandboxReady(name);
 
@@ -322,7 +319,7 @@ async function syncBackToHost(
       console.warn("No commits to sync.");
       return;
     }
-    const ok = await copyOutOfContainer(containerName, "/sandbox/out.bundle", outBundle);
+    const ok = await downloadFromSandbox(containerName, "/sandbox/out.bundle", outBundle);
     if (!ok) {
       console.warn("No commits to sync.");
       return;
@@ -437,7 +434,7 @@ async function reattachSession(
   providerId: ProviderId,
 ): Promise<ResolvedSession> {
   const containerName = `${SANDBOX_PREFIX}${m.name}`;
-  const state = await inspectContainerState(containerName);
+  const state = await getSandboxState(containerName);
   if (state === "missing") {
     console.error(
       `Session ${m.name} has no container; run \`openlock clean ${m.name}\` to reclaim.`,
@@ -450,7 +447,6 @@ async function reattachSession(
   }
   if (state === "exited") {
     console.log(`Resuming session ${m.name} (container was stopped)...`);
-    await startContainer(containerName);
   } else {
     console.log(`Attaching to running session ${m.name}...`);
   }
@@ -610,9 +606,11 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     harness,
   };
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
-  const stillRunning = (await listSandboxContainers(SANDBOX_PREFIX)).filter(
-    (n) => n !== containerName,
-  );
+  // listSandboxes returns all states; gateway should only stay up for OTHER
+  // currently-running sandboxes, so filter via getSandboxState.
+  const others = (await listSandboxes(SANDBOX_PREFIX)).filter((n) => n !== containerName);
+  const otherStates = await Promise.all(others.map((n) => getSandboxState(n)));
+  const stillRunning = others.filter((_, i) => otherStates[i] === "running");
   handleGatewayShutdown(stillRunning.length);
   await autoReapStaleSessions();
   if (exitCode !== 0) process.exit(exitCode);

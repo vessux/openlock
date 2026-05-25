@@ -1,14 +1,7 @@
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { SANDBOX_PREFIX } from "./constants";
-import {
-  copyOutOfContainer,
-  inspectContainerState,
-  removeContainer,
-  removeSecret,
-  removeVolume,
-  stopContainer,
-} from "./container";
+import { deleteSandbox, downloadFromSandbox, getSandboxState } from "./container";
 import { pruneSandboxRefs } from "./git-sync";
 import { pidAlive } from "./proc";
 import { type Classification, classifySession, type SessionWithState } from "./reap";
@@ -22,7 +15,7 @@ export async function loadSessionByName(name: string): Promise<SessionMeta | nul
 }
 
 async function enrichSession(m: SessionMeta): Promise<SessionWithState> {
-  const containerState = await inspectContainerState(`${SANDBOX_PREFIX}${m.name}`);
+  const containerState = await getSandboxState(`${SANDBOX_PREFIX}${m.name}`);
   return {
     ...m,
     containerState,
@@ -56,7 +49,7 @@ export async function reapIdleStaleSessions(): Promise<{
   const start = Date.now();
   await Promise.all(
     targets.map((r) =>
-      stopContainer(`${SANDBOX_PREFIX}${r.meta.name}`).catch((e) =>
+      deleteSandbox(`${SANDBOX_PREFIX}${r.meta.name}`).catch((e: unknown) =>
         console.error(`stop ${r.meta.name}: ${(e as Error).message}`),
       ),
     ),
@@ -67,7 +60,7 @@ export async function reapIdleStaleSessions(): Promise<{
 export async function stopSession(name: string): Promise<void> {
   const m = await loadSessionByName(name);
   if (!m) throw new Error(`no such session: ${name}`);
-  await stopContainer(`${SANDBOX_PREFIX}${m.name}`);
+  await deleteSandbox(`${SANDBOX_PREFIX}${m.name}`);
   console.log(`stopped ${name}`);
 }
 
@@ -96,7 +89,7 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
       { stdout: "ignore", stderr: "ignore" },
     );
     await regen.exited;
-    const ok = await copyOutOfContainer(containerName, "/sandbox/repo", dest);
+    const ok = await downloadFromSandbox(containerName, "/sandbox/repo", dest);
     if (!ok) {
       console.warn(`failed to copy /sandbox/repo from ${containerName}; continuing teardown`);
     } else {
@@ -104,12 +97,9 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
     }
   }
 
-  await removeContainer(containerName);
-  // Session-scoped: only this session's handshake secret + workspace volume.
-  // Upstream openshell names them `openshell-handshake-<sandboxId>` and
-  // `openshell-sandbox-<sandboxId>-workspace`; sandboxId == m.name here.
-  await removeSecret(`openshell-handshake-${m.name}`);
-  await removeVolume(`${SANDBOX_PREFIX}${m.name}-workspace`);
+  // openshell sandbox delete tears down the container and reaps the
+  // session-scoped handshake secret + workspace volume in one call.
+  await deleteSandbox(containerName);
   await pruneSandboxRefs(opts.hostRepoForRefs ?? m.repoPath, m.name);
   removeSessionDir(sessionsDir(), m.id);
   console.log(`cleaned ${name}`);

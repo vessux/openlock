@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { podmanCpInto, podmanExecChownSandbox, podmanExecRmRf } from "./container";
+import { execAsRoot, uploadToSandbox } from "./container";
 
 type MountType = "copy-once" | "copy-refresh" | "bind" | "git-bundle";
 
@@ -203,9 +203,9 @@ export async function restageMount(containerName: string, mount: Mount): Promise
   try {
     const localCopy = join(tmp, targetLeaf);
     cpSync(mount.source, localCopy, { recursive: true, dereference: true });
-    await podmanExecRmRf(containerName, mount.target);
-    await podmanCpInto(localCopy, containerName, `${targetParent}/`);
-    await podmanExecChownSandbox(containerName, mount.target);
+    await execAsRoot(containerName, ["rm", "-rf", mount.target]);
+    await uploadToSandbox(containerName, localCopy, `${targetParent}/`);
+    await execAsRoot(containerName, ["chown", "-R", "sandbox:sandbox", mount.target]);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
