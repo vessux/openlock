@@ -11,10 +11,12 @@ function makeDeps(overrides: Partial<PreflightDeps> = {}): PreflightDeps {
     ],
     readToken: () => "tok",
     isMac: true,
+    runtime: "podman",
     podmanMachineRunning: async () => true,
     confirmStartMachine: async () => true,
-    startPodmanMachine: async () => true,
+    ensureHostRuntimeReady: async () => true,
     podmanSocketActive: async () => true,
+    dockerDaemonReachable: async () => true,
     login: async () => {
       throw new Error("login should not be called when token present");
     },
@@ -65,7 +67,7 @@ describe("preflight", () => {
         return calls > 1;
       },
       confirmStartMachine: async () => true,
-      startPodmanMachine: async () => {
+      ensureHostRuntimeReady: async () => {
         started = true;
         return true;
       },
@@ -116,5 +118,74 @@ describe("preflight", () => {
     const result = await preflight({ tty: false, deps });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("openlock login");
+  });
+
+  it("uses docker daemon check when runtime is docker", async () => {
+    let dockerCalled = false;
+    const deps = makeDeps({
+      runtime: "docker",
+      runDoctorChecks: async () => [
+        { name: "git", ok: true },
+        { name: "docker", ok: true },
+        { name: "docker daemon reachable", ok: true },
+        { name: "credentials (openlock login)", ok: true },
+      ],
+      dockerDaemonReachable: async () => {
+        dockerCalled = true;
+        return true;
+      },
+    });
+    const result = await preflight({ tty: true, deps });
+    expect(dockerCalled).toBe(true);
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails when docker daemon unreachable on Mac", async () => {
+    const deps = makeDeps({
+      runtime: "docker",
+      isMac: true,
+      runDoctorChecks: async () => [
+        { name: "git", ok: true },
+        { name: "docker", ok: true },
+        { name: "docker daemon reachable", ok: false },
+        { name: "credentials (openlock login)", ok: true },
+      ],
+      dockerDaemonReachable: async () => false,
+    });
+    const result = await preflight({ tty: true, deps });
+    expect(result.ok).toBe(false);
+    expect(result.reason?.toLowerCase()).toContain("docker desktop");
+  });
+
+  it("fails when docker daemon unreachable on linux", async () => {
+    const deps = makeDeps({
+      runtime: "docker",
+      isMac: false,
+      runDoctorChecks: async () => [
+        { name: "git", ok: true },
+        { name: "docker", ok: true },
+        { name: "docker daemon reachable", ok: false },
+        { name: "credentials (openlock login)", ok: true },
+      ],
+      dockerDaemonReachable: async () => false,
+    });
+    const result = await preflight({ tty: true, deps });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("systemctl");
+  });
+
+  it("fails when docker is missing", async () => {
+    const deps = makeDeps({
+      runtime: "docker",
+      runDoctorChecks: async () => [
+        { name: "git", ok: true },
+        { name: "docker", ok: false },
+        { name: "docker daemon reachable", ok: false },
+        { name: "credentials (openlock login)", ok: true },
+      ],
+    });
+    const result = await preflight({ tty: true, deps });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("docker is required");
   });
 });

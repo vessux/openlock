@@ -95,7 +95,12 @@ describe("harness cred_inject mechanism (live integration)", () => {
         await spawnAndCapture([...argvHead, "provider", "delete", PROVIDER_NAME], cli.cwd);
       };
       const removeContainer = async (): Promise<void> => {
-        await spawnAndCapture(["podman", "rm", "-f", containerName]);
+        await spawnAndCapture([
+          process.env.OPENLOCK_RUNTIME ?? "podman",
+          "rm",
+          "-f",
+          containerName,
+        ]);
       };
 
       try {
@@ -127,9 +132,17 @@ describe("harness cred_inject mechanism (live integration)", () => {
           tagPrefix: `openlock-${imageKey}`,
         });
 
+        // --retry 5 + --retry-all-errors covers transient TLS/network
+        // failures (exit 35/56) seen when curl races the supervisor's
+        // CA-bundle + echo-proxy bring-up. ~5s worst-case extra.
         const curlCmd = [
           "curl",
           "-sf",
+          "--retry",
+          "5",
+          "--retry-all-errors",
+          "--retry-delay",
+          "1",
           "-H",
           "X-Original-Header: original-value",
           "https://mock.opencode.test:8443/",

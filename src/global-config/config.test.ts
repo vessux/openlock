@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseGlobalConfig, readGlobalConfigFrom } from "./index";
+import { validateAndShape } from "./schema";
 
 let tmp: string;
 
@@ -72,6 +73,25 @@ describe("default_provider parsing", () => {
       defaultHarness: "opencode",
       defaultProvider: "openrouter",
     });
+  });
+});
+
+describe("default_runtime", () => {
+  it("accepts podman", () => {
+    const cfg = validateAndShape({ default_runtime: "podman" }, "test");
+    expect(cfg.defaultRuntime).toBe("podman");
+  });
+  it("accepts docker", () => {
+    const cfg = validateAndShape({ default_runtime: "docker" }, "test");
+    expect(cfg.defaultRuntime).toBe("docker");
+  });
+  it("rejects unknown runtime", () => {
+    expect(() => validateAndShape({ default_runtime: "nerdctl" }, "test")).toThrow(
+      /not a recognized runtime/,
+    );
+  });
+  it("rejects non-string", () => {
+    expect(() => validateAndShape({ default_runtime: 42 }, "test")).toThrow(/must be a string/);
   });
 });
 

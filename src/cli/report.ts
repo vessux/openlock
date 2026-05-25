@@ -21,6 +21,7 @@ interface SummaryVersions {
   openlock: string;
   openshellForkPin: string;
   podman: string | null;
+  docker: string | null;
   claudeCode: string | null;
   node: string;
   platform: string;
@@ -176,14 +177,16 @@ async function spawnVersion(argv: string[]): Promise<string | null> {
 }
 
 async function collectVersions(): Promise<SummaryVersions> {
-  const [podman, claude] = await Promise.all([
+  const [podman, docker, claude] = await Promise.all([
     spawnVersion(["podman", "--version"]),
+    spawnVersion(["docker", "--version"]),
     spawnVersion(["claude", "--version"]),
   ]);
   return {
     openlock: pkg.version,
     openshellForkPin: OPENSHELL_FORK_TAG,
     podman,
+    docker,
     claudeCode: claude,
     node: process.version,
     platform: process.platform,

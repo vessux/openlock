@@ -3,10 +3,13 @@ import {
   buildHarnessExecArgv,
   buildOpenshellCreateArgv,
   buildOpenshellExecArgv,
-  buildPodmanChownArgv,
-  buildPodmanCpArgv,
-  buildPodmanRmArgv,
+  buildSandboxDeleteArgv,
+  buildSandboxDownloadArgv,
   buildSandboxEnv,
+  buildSandboxExecRootArgv,
+  buildSandboxGetArgv,
+  buildSandboxListNamesArgv,
+  buildSandboxUploadArgv,
   wrapCmdWithEnv,
 } from "./container";
 
@@ -59,6 +62,13 @@ describe("buildOpenshellExecArgv", () => {
     expect(argv[idx + 1]).toBe("/sandbox/repo");
   });
 
+  it("emits --user when provided", () => {
+    const argv = buildOpenshellExecArgv(CLI, "sb-foo", ["whoami"], { user: "root" });
+    const idx = argv.indexOf("--user");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv[idx + 1]).toBe("root");
+  });
+
   it("emits --tty when tty=force, --no-tty when tty=off, neither when tty=auto", () => {
     expect(buildOpenshellExecArgv(CLI, "sb-foo", ["ls"], { tty: "force" })).toContain("--tty");
     expect(buildOpenshellExecArgv(CLI, "sb-foo", ["ls"], { tty: "off" })).toContain("--no-tty");
@@ -84,6 +94,7 @@ describe('buildHarnessExecArgv("claude_code", ...)', () => {
       "sb-foo",
       "--workdir",
       "/sandbox/repo",
+      "--tty",
       "--",
       "claude",
     ]);
@@ -106,6 +117,7 @@ describe('buildHarnessExecArgv("claude_code", ...)', () => {
       "sb-foo",
       "--workdir",
       "/sandbox/repo",
+      "--tty",
       "--",
       "claude",
       "--plugin-dir",
@@ -175,45 +187,96 @@ describe("buildHarnessExecArgv (harness binary selection)", () => {
   });
 });
 
-describe("buildPodmanCpArgv", () => {
-  it("returns the argv to copy a host path into the container", () => {
-    expect(buildPodmanCpArgv("/host/tmp/skills", "sb-foo", "/sandbox/.openlock/")).toEqual([
-      "podman",
-      "cp",
-      "/host/tmp/skills",
-      "sb-foo:/sandbox/.openlock/",
+describe("buildSandboxGetArgv", () => {
+  it("emits `openshell sandbox get <name> -o json`", () => {
+    expect(buildSandboxGetArgv(["cli"], "sess")).toEqual([
+      "cli",
+      "sandbox",
+      "get",
+      "sess",
+      "-o",
+      "json",
+    ]);
+  });
+
+  it("supports a multi-element cli prefix", () => {
+    expect(buildSandboxGetArgv(["mise", "exec", "--", "openshell"], "sess")).toEqual([
+      "mise",
+      "exec",
+      "--",
+      "openshell",
+      "sandbox",
+      "get",
+      "sess",
+      "-o",
+      "json",
     ]);
   });
 });
 
-describe("buildPodmanRmArgv", () => {
-  it("returns the argv to rm -rf a container path as root", () => {
-    expect(buildPodmanRmArgv("sb-foo", "/sandbox/.openlock/skills")).toEqual([
-      "podman",
+describe("buildSandboxDeleteArgv", () => {
+  it("emits `openshell sandbox delete <name>`", () => {
+    expect(buildSandboxDeleteArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "delete", "sess"]);
+  });
+});
+
+describe("buildSandboxUploadArgv", () => {
+  it("emits `openshell sandbox upload <name> <local> <dest>`", () => {
+    expect(buildSandboxUploadArgv(["cli"], "sess", "/host/file", "/sbx/dir")).toEqual([
+      "cli",
+      "sandbox",
+      "upload",
+      "sess",
+      "/host/file",
+      "/sbx/dir",
+    ]);
+  });
+});
+
+describe("buildSandboxDownloadArgv", () => {
+  it("emits `openshell sandbox download <name> <sbxpath> <dest>`", () => {
+    expect(buildSandboxDownloadArgv(["cli"], "sess", "/sbx/file", "/host/dir")).toEqual([
+      "cli",
+      "sandbox",
+      "download",
+      "sess",
+      "/sbx/file",
+      "/host/dir",
+    ]);
+  });
+});
+
+describe("buildSandboxListNamesArgv", () => {
+  it("emits `openshell sandbox list --names`", () => {
+    expect(buildSandboxListNamesArgv(["cli"])).toEqual(["cli", "sandbox", "list", "--names"]);
+  });
+});
+
+describe("buildSandboxExecRootArgv", () => {
+  it("forwards cmd after `--` with --user root", () => {
+    expect(buildSandboxExecRootArgv(["cli"], "sess", ["rm", "-rf", "/x"])).toEqual([
+      "cli",
+      "sandbox",
       "exec",
-      "-u",
+      "--name",
+      "sess",
+      "--user",
       "root",
-      "sb-foo",
+      "--",
       "rm",
       "-rf",
-      "/sandbox/.openlock/skills",
+      "/x",
     ]);
   });
-});
 
-describe("buildPodmanChownArgv", () => {
-  it("returns the argv to chown -R sandbox:sandbox a container path as root", () => {
-    expect(buildPodmanChownArgv("sb-foo", "/sandbox/.openlock/skills")).toEqual([
-      "podman",
-      "exec",
-      "-u",
-      "root",
-      "sb-foo",
+  it("never emits raw `podman exec` (regression-proof for openlock-hnp)", () => {
+    const argv = buildSandboxExecRootArgv(["cli"], "sess", [
       "chown",
       "-R",
       "sandbox:sandbox",
-      "/sandbox/.openlock/skills",
+      "/x",
     ]);
+    expect(argv.join(" ")).not.toMatch(/\bpodman\s+exec\b/);
   });
 });
 

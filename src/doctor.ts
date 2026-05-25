@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
+import { type Runtime, resolveRuntime } from "./runtime";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { readToken } from "./tokens";
 
@@ -32,6 +33,15 @@ export async function podmanMachineRunning(): Promise<boolean> {
     if (code !== 0) return false;
     const output = await new Response(proc.stdout).text();
     return /machinestate:\s*Running/i.test(output);
+  } catch {
+    return false;
+  }
+}
+
+export async function dockerDaemonReachable(): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["docker", "info"], { stdout: "ignore", stderr: "ignore" });
+    return (await proc.exited) === 0;
   } catch {
     return false;
   }
@@ -77,15 +87,20 @@ async function checkGlobalConfig(): Promise<CheckOutcome> {
   }
 }
 
-export async function runDoctorChecks(): Promise<DoctorResult[]> {
+export async function runDoctorChecks(runtime?: Runtime): Promise<DoctorResult[]> {
+  const resolved = runtime ?? (await resolveRuntime());
   const isMac = process.platform === "darwin";
   const dev = isDevMode();
   const checks: Check[] = [
     { name: "git", test: () => commandExists("git") },
-    { name: "podman", test: () => commandExists("podman") },
-    isMac
-      ? { name: "podman machine (running)", test: podmanMachineRunning }
-      : { name: "podman API socket active", test: podmanSocketActive },
+    { name: resolved, test: () => commandExists(resolved) },
+    ...(resolved === "podman"
+      ? [
+          isMac
+            ? { name: "podman machine (running)", test: podmanMachineRunning }
+            : { name: "podman API socket active", test: podmanSocketActive },
+        ]
+      : [{ name: "docker daemon reachable", test: dockerDaemonReachable }]),
     ...(dev
       ? [
           { name: "bun", test: () => commandExists("bun") },

@@ -1,13 +1,15 @@
 import { PROVIDER_IDS } from "../providers/registry";
 import type { ProviderId } from "../providers/types";
+import { RUNTIMES, type Runtime } from "../runtime";
 import { HARNESSES, type Harness } from "../sandbox/harness";
 
 export interface GlobalConfig {
   defaultHarness?: Harness;
   defaultProvider?: ProviderId;
+  defaultRuntime?: Runtime;
 }
 
-const ALLOWED_KEYS = new Set(["default_harness", "default_provider"]);
+const ALLOWED_KEYS = new Set(["default_harness", "default_provider", "default_runtime"]);
 
 function parseDefaultHarness(v: unknown, source: string): Harness {
   if (typeof v !== "string") {
@@ -35,6 +37,19 @@ function parseDefaultProvider(v: unknown, source: string): ProviderId {
   return v as ProviderId;
 }
 
+function parseDefaultRuntime(v: unknown, source: string): Runtime {
+  if (typeof v !== "string") {
+    throw new Error(`${source}: default_runtime must be a string`);
+  }
+  if (!(RUNTIMES as readonly string[]).includes(v)) {
+    throw new Error(
+      `${source}: default_runtime ${JSON.stringify(v)} is not a recognized runtime. ` +
+        `Allowed: ${RUNTIMES.join(", ")}`,
+    );
+  }
+  return v as Runtime;
+}
+
 export function validateAndShape(raw: unknown, source: string): GlobalConfig {
   if (raw === null || raw === undefined) return {};
   if (typeof raw !== "object" || Array.isArray(raw)) {
@@ -54,6 +69,9 @@ export function validateAndShape(raw: unknown, source: string): GlobalConfig {
   }
   if ("default_provider" in obj) {
     out.defaultProvider = parseDefaultProvider(obj.default_provider, source);
+  }
+  if ("default_runtime" in obj) {
+    out.defaultRuntime = parseDefaultRuntime(obj.default_runtime, source);
   }
   return out;
 }

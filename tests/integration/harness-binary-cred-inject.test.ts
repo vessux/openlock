@@ -143,7 +143,13 @@ describe("harness binary triggers cred_inject (live integration)", () => {
         // will issue HTTP requests against api.anthropic.com which the
         // proxy intercepts via echo mode. The harness errors on the
         // unrecognized response, exit code is suppressed by `|| true`.
-        const innerCmd = 'ANTHROPIC_API_KEY=fake-key /usr/local/bin/claude --print "hi" || true';
+        //
+        // 3-attempt loop covers a startup race where claude can fire
+        // before the supervisor's ephemeral CA + proxy listener finish
+        // wiring, leading to a fast-fail with no L7 ALLOWED event in
+        // the proxy log. Loop stops on the first non-error claude exit.
+        const innerCmd =
+          'for i in 1 2 3; do ANTHROPIC_API_KEY=fake-key /usr/local/bin/claude --print "hi" && break; sleep 1; done || true';
 
         const sandboxArgv = [
           ...argvHead,

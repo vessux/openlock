@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { type Runtime, resolveRuntime } from "../runtime";
 import { ensureSupervisorImage } from "./build-supervisor-image";
 import { getGatewayBinary } from "./fork-binaries";
 import { pidAlive } from "./proc";
@@ -19,6 +20,9 @@ const PID_FILE = join(STATE_DIR, "gateway.pid");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
 const CONFIG_FILE = join(STATE_DIR, "gateway-config.toml");
 const GATEWAY_PORT = 18081;
+// Historical name from the podman-only era; now drives podman OR docker per
+// `--drivers` resolution. Kept stable so existing on-disk state under
+// `~/.config/openshell/gateways/podman-dev/` stays valid. Revisit at v1.0.
 export const GATEWAY_NAME = "podman-dev";
 
 const DEFAULT_SANDBOX_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
@@ -96,18 +100,39 @@ function tomlEscape(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-function writeGatewayConfigFile(opts: { supervisorImage: string; podmanSocket: string }): void {
-  const toml = [
-    "[openshell]",
-    "version = 1",
-    "",
-    "[openshell.drivers.podman]",
-    `default_image = "${tomlEscape(DEFAULT_SANDBOX_IMAGE)}"`,
-    `supervisor_image = "${tomlEscape(opts.supervisorImage)}"`,
-    `socket_path = "${tomlEscape(opts.podmanSocket)}"`,
-    "",
-  ].join("\n");
-  writeFileSync(CONFIG_FILE, toml);
+export function renderGatewayConfigToml(
+  runtime: Runtime,
+  opts: { supervisorImage: string; podmanSocket?: string },
+): string {
+  const lines = ["[openshell]", "version = 1", ""];
+  if (runtime === "podman") {
+    if (!opts.podmanSocket) {
+      throw new Error("podmanSocket required for podman runtime");
+    }
+    lines.push(
+      "[openshell.drivers.podman]",
+      `default_image = "${tomlEscape(DEFAULT_SANDBOX_IMAGE)}"`,
+      `supervisor_image = "${tomlEscape(opts.supervisorImage)}"`,
+      `socket_path = "${tomlEscape(opts.podmanSocket)}"`,
+      "",
+    );
+  } else {
+    lines.push(
+      "[openshell.drivers.docker]",
+      `default_image = "${tomlEscape(DEFAULT_SANDBOX_IMAGE)}"`,
+      `supervisor_image = "${tomlEscape(opts.supervisorImage)}"`,
+      "",
+    );
+  }
+  return lines.join("\n");
+}
+
+function writeGatewayConfigFile(opts: {
+  runtime: Runtime;
+  supervisorImage: string;
+  podmanSocket?: string;
+}): void {
+  writeFileSync(CONFIG_FILE, renderGatewayConfigToml(opts.runtime, opts));
 }
 
 async function resolvePodmanSocket(): Promise<string> {
@@ -158,6 +183,7 @@ export function spawnDaemonToLog(args: string[], cwd: string, logPath: string): 
 }
 
 export async function startGateway(): Promise<void> {
+  const runtime = await resolveRuntime();
   const { running, pid } = gatewayStatus();
   if (running) {
     console.log(`Gateway already running (pid ${pid})`);
@@ -172,8 +198,11 @@ export async function startGateway(): Promise<void> {
   ]);
   registerGatewayMetadata();
 
-  const podmanSocket = await resolvePodmanSocket();
-  writeGatewayConfigFile({ supervisorImage, podmanSocket });
+  let podmanSocket: string | undefined;
+  if (runtime === "podman") {
+    podmanSocket = await resolvePodmanSocket();
+  }
+  writeGatewayConfigFile({ runtime, supervisorImage, podmanSocket });
 
   const dbPath = join(STATE_DIR, "gateway.db");
   const args = [
@@ -181,7 +210,7 @@ export async function startGateway(): Promise<void> {
     "--config",
     CONFIG_FILE,
     "--drivers",
-    "podman",
+    runtime,
     "--disable-tls",
     "--port",
     String(GATEWAY_PORT),
