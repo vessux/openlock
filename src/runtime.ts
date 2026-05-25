@@ -23,3 +23,24 @@ export function pickRuntime(s: RuntimeSources): Runtime | null {
   if (s.autodetected !== null) return s.autodetected;
   return null;
 }
+
+export interface BinaryProbes {
+  podman: boolean;
+  docker: boolean;
+}
+
+export function autodetectRuntimeFromProbes(p: BinaryProbes): Runtime | null {
+  if (p.podman) return "podman";
+  if (p.docker) return "docker";
+  return null;
+}
+
+async function commandExists(cmd: string): Promise<boolean> {
+  const proc = Bun.spawn(["which", cmd], { stdout: "ignore", stderr: "ignore" });
+  return (await proc.exited) === 0;
+}
+
+export async function autodetectRuntime(): Promise<Runtime | null> {
+  const [podman, docker] = await Promise.all([commandExists("podman"), commandExists("docker")]);
+  return autodetectRuntimeFromProbes({ podman, docker });
+}

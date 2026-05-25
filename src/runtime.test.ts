@@ -55,3 +55,18 @@ describe("pickRuntime cascade", () => {
     ).toBe("podman");
   });
 });
+
+describe("autodetectRuntime", () => {
+  it("returns podman when podman binary exists first", async () => {
+    const { autodetectRuntimeFromProbes } = await import("./runtime");
+    expect(autodetectRuntimeFromProbes({ podman: true, docker: true })).toBe("podman");
+  });
+  it("returns docker when only docker exists", async () => {
+    const { autodetectRuntimeFromProbes } = await import("./runtime");
+    expect(autodetectRuntimeFromProbes({ podman: false, docker: true })).toBe("docker");
+  });
+  it("returns null when neither exists", async () => {
+    const { autodetectRuntimeFromProbes } = await import("./runtime");
+    expect(autodetectRuntimeFromProbes({ podman: false, docker: false })).toBe(null);
+  });
+});
