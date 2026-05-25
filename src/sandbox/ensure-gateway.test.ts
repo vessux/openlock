@@ -2,8 +2,36 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readGatewayRssKb, spawnDaemonToLog } from "./ensure-gateway";
+import { readGatewayRssKb, renderGatewayConfigToml, spawnDaemonToLog } from "./ensure-gateway";
 import { pidAlive } from "./proc";
+
+describe("renderGatewayConfigToml", () => {
+  it("emits podman driver block when runtime=podman", () => {
+    const out = renderGatewayConfigToml("podman", {
+      supervisorImage: "img:latest",
+      podmanSocket: "/run/podman/podman.sock",
+    });
+    expect(out).toContain("[openshell.drivers.podman]");
+    expect(out).toContain('socket_path = "/run/podman/podman.sock"');
+    expect(out).not.toContain("[openshell.drivers.docker]");
+  });
+
+  it("emits docker driver block when runtime=docker", () => {
+    const out = renderGatewayConfigToml("docker", {
+      supervisorImage: "img:latest",
+    });
+    expect(out).toContain("[openshell.drivers.docker]");
+    expect(out).toContain("default_image =");
+    expect(out).not.toContain("[openshell.drivers.podman]");
+    expect(out).not.toContain("socket_path");
+  });
+
+  it("throws when podman runtime but no podmanSocket", () => {
+    expect(() => renderGatewayConfigToml("podman", { supervisorImage: "x" })).toThrow(
+      /podmanSocket/,
+    );
+  });
+});
 
 describe("readGatewayRssKb", () => {
   it("returns a positive integer for a live PID (this test process)", () => {
