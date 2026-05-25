@@ -94,6 +94,7 @@ describe('buildHarnessExecArgv("claude_code", ...)', () => {
       "sb-foo",
       "--workdir",
       "/sandbox/repo",
+      "--tty",
       "--",
       "claude",
     ]);
@@ -116,6 +117,7 @@ describe('buildHarnessExecArgv("claude_code", ...)', () => {
       "sb-foo",
       "--workdir",
       "/sandbox/repo",
+      "--tty",
       "--",
       "claude",
       "--plugin-dir",

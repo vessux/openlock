@@ -56,7 +56,10 @@ export function buildHarnessExecArgv(
 ): string[] {
   const harnessCmd = harnessLaunchArgv(harness, extraArgs);
   const wrapped = wrapCmdWithEnv(harnessCmd, extraEnv);
-  return buildOpenshellExecArgv(cliPrefix, sessionName, wrapped, { workdir: "/sandbox/repo" });
+  return buildOpenshellExecArgv(cliPrefix, sessionName, wrapped, {
+    workdir: "/sandbox/repo",
+    tty: "force",
+  });
 }
 
 export interface BuildSandboxEnvArgs {
@@ -91,6 +94,7 @@ export async function execBash(sessionName: string): Promise<number> {
   const cli = await getCliInvocation();
   const argv = buildOpenshellExecArgv(cli.argv, sessionName, ["/bin/bash"], {
     workdir: "/sandbox/repo",
+    tty: "force",
   });
   const proc = Bun.spawn(argv, {
     cwd: cli.cwd,
