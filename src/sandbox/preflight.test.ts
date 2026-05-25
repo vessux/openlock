@@ -14,7 +14,7 @@ function makeDeps(overrides: Partial<PreflightDeps> = {}): PreflightDeps {
     runtime: "podman",
     podmanMachineRunning: async () => true,
     confirmStartMachine: async () => true,
-    startPodmanMachine: async () => true,
+    ensureHostRuntimeReady: async () => true,
     podmanSocketActive: async () => true,
     dockerDaemonReachable: async () => true,
     login: async () => {
@@ -67,7 +67,7 @@ describe("preflight", () => {
         return calls > 1;
       },
       confirmStartMachine: async () => true,
-      startPodmanMachine: async () => {
+      ensureHostRuntimeReady: async () => {
         started = true;
         return true;
       },

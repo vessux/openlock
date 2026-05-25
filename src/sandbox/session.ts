@@ -381,11 +381,6 @@ async function autoReapStaleSessions(): Promise<void> {
 // reachable. Runtime-aware so the docker case doesn't try to `podman machine
 // start`. Linux skips entirely (no machine layer for either runtime — the
 // daemon is a system service the user manages).
-//
-// Note: rename debt — the matching `PreflightDeps.startPodmanMachine` field
-// is still named `startPodmanMachine` even though the docker branch checks
-// `docker info` instead of starting anything. Renaming requires touching the
-// preflight orchestrator and its tests; deferred to a future cleanup pass.
 async function ensureHostRuntimeReady(): Promise<void> {
   if (process.platform !== "darwin") return;
   const runtime = await resolveRuntime();
@@ -428,7 +423,7 @@ function realPreflightDeps(runtime: Runtime): PreflightDeps {
         .toLowerCase();
       return answer === "" || answer === "y" || answer === "yes";
     },
-    startPodmanMachine: async () => {
+    ensureHostRuntimeReady: async () => {
       try {
         await ensureHostRuntimeReady();
         return true;

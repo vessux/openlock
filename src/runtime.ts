@@ -29,10 +29,7 @@ export function pickRuntime(s: RuntimeSources): Runtime | null {
   return null;
 }
 
-export interface BinaryProbes {
-  podman: boolean;
-  docker: boolean;
-}
+export type BinaryProbes = Record<Runtime, boolean>;
 
 export function autodetectRuntimeFromProbes(p: BinaryProbes): Runtime | null {
   if (p.podman) return "podman";

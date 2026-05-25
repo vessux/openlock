@@ -20,6 +20,9 @@ const PID_FILE = join(STATE_DIR, "gateway.pid");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
 const CONFIG_FILE = join(STATE_DIR, "gateway-config.toml");
 const GATEWAY_PORT = 18081;
+// Historical name from the podman-only era; now drives podman OR docker per
+// `--drivers` resolution. Kept stable so existing on-disk state under
+// `~/.config/openshell/gateways/podman-dev/` stays valid. Revisit at v1.0.
 export const GATEWAY_NAME = "podman-dev";
 
 const DEFAULT_SANDBOX_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";

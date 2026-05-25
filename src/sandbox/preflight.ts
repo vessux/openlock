@@ -8,7 +8,7 @@ export interface PreflightDeps {
   runtime: Runtime;
   podmanMachineRunning: () => Promise<boolean>;
   confirmStartMachine: () => Promise<boolean>;
-  startPodmanMachine: () => Promise<boolean>;
+  ensureHostRuntimeReady: () => Promise<boolean>;
   podmanSocketActive: () => Promise<boolean>;
   dockerDaemonReachable: () => Promise<boolean>;
   login: () => Promise<void>;
@@ -51,7 +51,7 @@ async function ensurePodmanMachine(
   if (await deps.podmanMachineRunning()) return null;
   if (!tty) return fail(MACHINE_NOT_RUNNING_REASON);
   if (!(await deps.confirmStartMachine())) return fail(MACHINE_NOT_RUNNING_REASON);
-  if (!(await deps.startPodmanMachine())) {
+  if (!(await deps.ensureHostRuntimeReady())) {
     return fail("podman machine start failed. See output above.");
   }
   if (!(await deps.podmanMachineRunning())) {
