@@ -128,7 +128,8 @@ jobs:
         run: |
           docker --version
           sudo systemctl start docker || true
-          docker info | head -5
+          # Verify daemon reachable (SIGPIPE under pipefail if we pipe to head).
+          docker info > /dev/null
           id "$USER"
           groups "$USER"
 
