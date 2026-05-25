@@ -18,6 +18,7 @@ import { SANDBOX_PREFIX } from "./constants";
 import {
   buildOpenshellExecArgv,
   buildSandboxEnv,
+  deleteSandbox,
   downloadFromSandbox,
   execHarness,
   getSandboxState,
@@ -195,24 +196,47 @@ async function createSession(
     setupLines.push("exec sleep infinity");
     const setupCmd = setupLines.join(" ; ");
 
-    const handle = await openshellSandboxCreateAsync({
-      sessionName: name,
-      imageTag,
-      uploadDir: staging,
-      policy,
-      providerId,
-      command: ["/bin/bash", "-c", setupCmd],
-      volumeArgs: bindMountArgs(mounts),
-    });
+    // openshell's supervisor can transiently report Error during first-handshake
+    // (Provisioning→Error→Provisioning within ~20ms on cold gateway) and exit
+    // the create command before recovering. Retry once on early-fail before
+    // surfacing to the user. See bd openlock-bxm.
+    const MAX_CREATE_ATTEMPTS = 2;
+    let lastExitCode: number | null = null;
+    let createdOk = false;
+    for (let attempt = 1; attempt <= MAX_CREATE_ATTEMPTS; attempt++) {
+      const handle = await openshellSandboxCreateAsync({
+        sessionName: name,
+        imageTag,
+        uploadDir: staging,
+        policy,
+        providerId,
+        command: ["/bin/bash", "-c", setupCmd],
+        volumeArgs: bindMountArgs(mounts),
+      });
 
-    // Don't await handle.exited — it blocks until the container stops.
-    // Do detect early failure so we don't write meta for a phantom session.
-    const earlyFail = await Promise.race([
-      handle.exited.then((code) => ({ early: true as const, code })),
-      Bun.sleep(2000).then(() => ({ early: false as const })),
-    ]);
-    if (earlyFail.early) {
-      throw new Error(`openshell sandbox create exited early with code ${earlyFail.code}`);
+      // Don't await handle.exited — it blocks until the container stops.
+      // Do detect early failure so we don't write meta for a phantom session.
+      const earlyFail = await Promise.race([
+        handle.exited.then((code) => ({ early: true as const, code })),
+        Bun.sleep(2000).then(() => ({ early: false as const })),
+      ]);
+      if (!earlyFail.early) {
+        createdOk = true;
+        break;
+      }
+      lastExitCode = earlyFail.code;
+      if (attempt < MAX_CREATE_ATTEMPTS) {
+        console.warn(
+          `openshell sandbox create exited early (code ${earlyFail.code}); retrying once (supervisor first-handshake race)...`,
+        );
+        await deleteSandbox(containerName);
+        await Bun.sleep(1000);
+      }
+    }
+    if (!createdOk) {
+      throw new Error(
+        `openshell sandbox create exited early with code ${lastExitCode} after ${MAX_CREATE_ATTEMPTS} attempts`,
+      );
     }
 
     await waitForStagingUploaded(containerName, staging);
