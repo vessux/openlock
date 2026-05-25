@@ -1,7 +1,13 @@
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { SANDBOX_PREFIX } from "./constants";
-import { deleteSandbox, downloadFromSandbox, getSandboxState } from "./container";
+import {
+  buildOpenshellExecArgv,
+  deleteSandbox,
+  downloadFromSandbox,
+  getSandboxState,
+} from "./container";
+import { getCliInvocation } from "./fork-binaries";
 import { pruneSandboxRefs } from "./git-sync";
 import { pidAlive } from "./proc";
 import { type Classification, classifySession, type SessionWithState } from "./reap";
@@ -77,17 +83,18 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
   if (opts.copyDir) {
     const dest = resolve(opts.copyDir);
     rmSync(dest, { recursive: true, force: true });
-    const regen = Bun.spawn(
-      [
-        "podman",
-        "exec",
-        containerName,
-        "bash",
-        "-c",
-        "cd /sandbox/repo && git bundle create /sandbox/out.bundle --all",
-      ],
-      { stdout: "ignore", stderr: "ignore" },
+    const cli = await getCliInvocation();
+    const regenArgv = buildOpenshellExecArgv(
+      cli.argv,
+      containerName,
+      ["git", "bundle", "create", "/sandbox/out.bundle", "--all"],
+      { workdir: "/sandbox/repo", tty: "off" },
     );
+    const regen = Bun.spawn(regenArgv, {
+      cwd: cli.cwd,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
     await regen.exited;
     const ok = await downloadFromSandbox(containerName, "/sandbox/repo", dest);
     if (!ok) {

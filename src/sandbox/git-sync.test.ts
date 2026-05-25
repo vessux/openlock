@@ -6,10 +6,10 @@ import {
   createBundle,
   fetchBundle,
   formatSyncBackLog,
-  type PodmanExec,
   promoteActiveBranch,
   pruneSandboxRefs,
   readSandboxActiveBranch,
+  type SandboxExec,
 } from "./git-sync";
 
 const testDir = join(import.meta.dir, "../../.test-git-sync");
@@ -105,7 +105,7 @@ describe("git-sync", () => {
 
   describe("readSandboxActiveBranch", () => {
     it("returns branch name when HEAD is on a branch", async () => {
-      const exec: PodmanExec = async (_container, _args) => ({
+      const exec: SandboxExec = async (_container, _args) => ({
         exitCode: 0,
         stdout: "refs/heads/feature/x\n",
         stderr: "",
@@ -115,21 +115,21 @@ describe("git-sync", () => {
     });
 
     it("returns null when HEAD is detached (exit 1)", async () => {
-      const exec: PodmanExec = async () => ({ exitCode: 1, stdout: "", stderr: "" });
+      const exec: SandboxExec = async () => ({ exitCode: 1, stdout: "", stderr: "" });
       const result = await readSandboxActiveBranch("any-container", "/sandbox/repo", exec);
       expect(result).toBeNull();
     });
 
     it("returns null when output has no refs/heads/ prefix (defensive)", async () => {
-      const exec: PodmanExec = async () => ({ exitCode: 0, stdout: "garbage\n", stderr: "" });
+      const exec: SandboxExec = async () => ({ exitCode: 0, stdout: "garbage\n", stderr: "" });
       const result = await readSandboxActiveBranch("any-container", "/sandbox/repo", exec);
       expect(result).toBeNull();
     });
 
-    it("invokes exec with correct podman args", async () => {
+    it("invokes exec with correct args", async () => {
       let capturedContainer = "";
       let capturedArgs: string[] = [];
-      const exec: PodmanExec = async (container, args) => {
+      const exec: SandboxExec = async (container, args) => {
         capturedContainer = container;
         capturedArgs = args;
         return { exitCode: 0, stdout: "refs/heads/main\n", stderr: "" };

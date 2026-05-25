@@ -6,10 +6,12 @@ import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
 import { resolveProvider } from "../providers/resolve";
 import type { ProviderId } from "../providers/types";
+import { resolveRuntime } from "../runtime";
 import { readToken } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import { SANDBOX_PREFIX } from "./constants";
 import {
+  buildOpenshellExecArgv,
   buildSandboxEnv,
   downloadFromSandbox,
   execHarness,
@@ -23,6 +25,7 @@ import { type Cap, detectCaps } from "./detect-caps";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
+import { getCliInvocation } from "./fork-binaries";
 import { prepareGitIdentity } from "./git-identity";
 import {
   createBundle,
@@ -243,11 +246,15 @@ async function waitForStagingUploaded(
   if (entries.length === 0) return;
   const sentinel = entries[0]!;
   const deadline = Date.now() + timeoutMs;
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellExecArgv(
+    cli.argv,
+    containerName,
+    ["test", "-e", `/sandbox/.openlock/${sentinel}`],
+    { tty: "off" },
+  );
   while (Date.now() < deadline) {
-    const proc = Bun.spawn(
-      ["podman", "exec", containerName, "test", "-e", `/sandbox/.openlock/${sentinel}`],
-      { stdout: "ignore", stderr: "ignore" },
-    );
+    const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
     if ((await proc.exited) === 0) return;
     await Bun.sleep(200);
   }
@@ -294,26 +301,21 @@ async function syncBackToHost(
     // Always regenerate the bundle inside the container before copying it
     // out. Prior implementations preferred a stale /sandbox/out.bundle if
     // one existed, which broke re-attach: a second sync would resurface
-    // refs from the first sync only. Run as `sandbox` with cwd wd.target
-    // so git can open the repo (root trips safe.directory) and write
-    // /sandbox/out.bundle (owned by sandbox).
-    const regen = Bun.spawn(
-      [
-        "podman",
-        "exec",
-        "-u",
-        "sandbox",
-        "-w",
-        wd.target,
-        containerName,
-        "git",
-        "bundle",
-        "create",
-        "/sandbox/out.bundle",
-        "--all",
-      ],
-      { stdout: "ignore", stderr: "ignore" },
+    // refs from the first sync only. Run as `sandbox` (openshell default)
+    // with cwd wd.target so git can open the repo (root trips
+    // safe.directory) and write /sandbox/out.bundle (owned by sandbox).
+    const cli = await getCliInvocation();
+    const regenArgv = buildOpenshellExecArgv(
+      cli.argv,
+      containerName,
+      ["git", "bundle", "create", "/sandbox/out.bundle", "--all"],
+      { workdir: wd.target, tty: "off" },
     );
+    const regen = Bun.spawn(regenArgv, {
+      cwd: cli.cwd,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
     const regenCode = await regen.exited;
     if (regenCode !== 0) {
       console.warn("No commits to sync.");
@@ -370,6 +372,39 @@ async function autoReapStaleSessions(): Promise<void> {
   console.log(`\nauto-reaped ${reaped.length} idle session(s) (${durationMs}ms)`);
 }
 
+// Host-bootstrap helper: ensures the underlying container runtime daemon is
+// reachable. Runtime-aware so the docker case doesn't try to `podman machine
+// start`. Linux skips entirely (no machine layer for either runtime — the
+// daemon is a system service the user manages).
+//
+// Note: rename debt — the matching `PreflightDeps.startPodmanMachine` field
+// is still named `startPodmanMachine` even though the docker branch checks
+// `docker info` instead of starting anything. Renaming requires touching the
+// preflight orchestrator and its tests; deferred to a future cleanup pass.
+async function ensureHostRuntimeReady(): Promise<void> {
+  if (process.platform !== "darwin") return;
+  const runtime = await resolveRuntime();
+  if (runtime === "podman") {
+    const proc = Bun.spawn(["podman", "machine", "start"], {
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    const code = await proc.exited;
+    if (code !== 0) {
+      throw new Error("podman machine start failed. See output above.");
+    }
+    return;
+  }
+  // Docker Desktop on Mac: assume the user has it running. We deliberately do
+  // NOT try to launch Docker Desktop (GUI startup is async and unreliable to
+  // wait on). `docker info` is the canonical liveness probe.
+  const proc = Bun.spawn(["docker", "info"], { stdout: "ignore", stderr: "ignore" });
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error("Docker Desktop does not appear to be running. Open Docker Desktop and retry.");
+  }
+}
+
 function realPreflightDeps(): PreflightDeps {
   return {
     runDoctorChecks,
@@ -388,11 +423,13 @@ function realPreflightDeps(): PreflightDeps {
       return answer === "" || answer === "y" || answer === "yes";
     },
     startPodmanMachine: async () => {
-      const proc = Bun.spawn(["podman", "machine", "start"], {
-        stdout: "inherit",
-        stderr: "inherit",
-      });
-      return (await proc.exited) === 0;
+      try {
+        await ensureHostRuntimeReady();
+        return true;
+      } catch (err) {
+        process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+        return false;
+      }
     },
     podmanSocketActive,
     login,
