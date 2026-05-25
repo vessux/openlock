@@ -13,7 +13,7 @@ describe("runDoctorChecks", () => {
   it(
     "returns one result per check with name + ok flag",
     async () => {
-      const results = await runDoctorChecks();
+      const results = await runDoctorChecks("podman");
       expect(Array.isArray(results)).toBe(true);
       expect(results.length).toBeGreaterThan(0);
       for (const r of results) {
@@ -27,17 +27,29 @@ describe("runDoctorChecks", () => {
   it(
     "includes a git check",
     async () => {
-      const results = await runDoctorChecks();
+      const results = await runDoctorChecks("podman");
       expect(results.some((r) => r.name === "git")).toBe(true);
     },
     TIMEOUT_MS,
   );
 
   it(
-    "includes a podman check",
+    "includes a podman check when runtime is podman",
     async () => {
-      const results = await runDoctorChecks();
+      const results = await runDoctorChecks("podman");
       expect(results.some((r) => r.name === "podman")).toBe(true);
+      expect(results.some((r) => r.name === "docker")).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "includes a docker check when runtime is docker",
+    async () => {
+      const results = await runDoctorChecks("docker");
+      expect(results.some((r) => r.name === "docker")).toBe(true);
+      expect(results.some((r) => r.name === "docker daemon reachable")).toBe(true);
+      expect(results.some((r) => r.name === "podman")).toBe(false);
     },
     TIMEOUT_MS,
   );
@@ -45,7 +57,7 @@ describe("runDoctorChecks", () => {
   it(
     "includes a credentials check",
     async () => {
-      const results = await runDoctorChecks();
+      const results = await runDoctorChecks("podman");
       expect(results.some((r) => r.name.includes("credentials"))).toBe(true);
     },
     TIMEOUT_MS,
@@ -70,7 +82,7 @@ describe("doctor global config check", () => {
   it(
     "passes when ~/.config/openlock/config.yaml is absent",
     async () => {
-      const results = await runDoctorChecks();
+      const results = await runDoctorChecks("podman");
       const r = results.find((x) => x.name.includes("global config"));
       expect(r).toBeDefined();
       expect(r?.ok).toBe(true);
@@ -85,7 +97,7 @@ describe("doctor global config check", () => {
       const dir = join(tmp, "openlock");
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "config.yaml"), "default_harness: opencode\n");
-      const results = await runDoctorChecks();
+      const results = await runDoctorChecks("podman");
       const r = results.find((x) => x.name.includes("global config"));
       expect(r).toBeDefined();
       expect(r?.ok).toBe(true);
@@ -99,7 +111,7 @@ describe("doctor global config check", () => {
       const dir = join(tmp, "openlock");
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "config.yaml"), "default_harness: bogus\n");
-      const results = await runDoctorChecks();
+      const results = await runDoctorChecks("podman");
       const r = results.find((x) => x.name.includes("global config"));
       expect(r).toBeDefined();
       expect(r?.ok).toBe(false);

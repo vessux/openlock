@@ -1,12 +1,17 @@
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { podmanMachineRunning, podmanSocketActive, runDoctorChecks } from "../doctor";
+import {
+  dockerDaemonReachable,
+  podmanMachineRunning,
+  podmanSocketActive,
+  runDoctorChecks,
+} from "../doctor";
 import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
 import { resolveProvider } from "../providers/resolve";
 import type { ProviderId } from "../providers/types";
-import { resolveRuntime } from "../runtime";
+import { type Runtime, resolveRuntime } from "../runtime";
 import { readToken } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import { SANDBOX_PREFIX } from "./constants";
@@ -405,11 +410,12 @@ async function ensureHostRuntimeReady(): Promise<void> {
   }
 }
 
-function realPreflightDeps(): PreflightDeps {
+function realPreflightDeps(runtime: Runtime): PreflightDeps {
   return {
-    runDoctorChecks,
+    runDoctorChecks: () => runDoctorChecks(runtime),
     readToken,
     isMac: process.platform === "darwin",
+    runtime,
     podmanMachineRunning,
     confirmStartMachine: async () => {
       process.stdout.write("podman machine is not running. Start it now? [Y/n] ");
@@ -432,6 +438,7 @@ function realPreflightDeps(): PreflightDeps {
       }
     },
     podmanSocketActive,
+    dockerDaemonReachable,
     login,
   };
 }
@@ -586,7 +593,8 @@ function handleGatewayShutdown(otherCount: number): void {
 export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const projectPath = resolve(opts.path);
   const tty = Boolean(process.stdin.isTTY);
-  exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps() }));
+  const runtime = await resolveRuntime();
+  exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps(runtime) }));
   const repoResult = await ensureRepoIsGit(projectPath);
   announceRepoAction(repoResult.action, projectPath);
   const resolved = resolveRepoPolicyAndCaps(projectPath, opts.policy);
