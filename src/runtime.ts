@@ -1,5 +1,8 @@
 // src/runtime.ts
+
+import { readGlobalConfig } from "./global-config";
 import type { GlobalConfig } from "./global-config/schema";
+import { runWizard } from "./runtime-wizard";
 
 export const RUNTIMES = ["podman", "docker"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
@@ -46,9 +49,13 @@ async function commandExists(cmd: string): Promise<boolean> {
   }
 }
 
-export async function autodetectRuntime(): Promise<Runtime | null> {
+export async function probeBinaries(): Promise<BinaryProbes> {
   const [podman, docker] = await Promise.all([commandExists("podman"), commandExists("docker")]);
-  return autodetectRuntimeFromProbes({ podman, docker });
+  return { podman, docker };
+}
+
+export async function autodetectRuntime(): Promise<Runtime | null> {
+  return autodetectRuntimeFromProbes(await probeBinaries());
 }
 
 export interface GetRuntimeOpts {
@@ -75,4 +82,27 @@ export async function getRuntime(opts: GetRuntimeOpts): Promise<Runtime> {
   }
   // ambiguous (both present) or missing (neither) — defer to caller.
   return opts.onMissing(probes);
+}
+
+let cached: Runtime | null = null;
+
+export async function resolveRuntime(): Promise<Runtime> {
+  if (cached !== null) return cached;
+  const rt = await getRuntime({
+    readConfig: () => {
+      try {
+        return readGlobalConfig() ?? {};
+      } catch {
+        return {};
+      }
+    },
+    probe: probeBinaries,
+    onMissing: async (probes) => runWizard(probes),
+  });
+  cached = rt;
+  return rt;
+}
+
+export function _clearCachedRuntimeForTests(): void {
+  cached = null;
 }

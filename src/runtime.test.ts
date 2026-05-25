@@ -1,12 +1,14 @@
 // src/runtime.test.ts
 import { afterEach, describe, expect, it } from "bun:test";
 import {
+  _clearCachedRuntimeForTests,
   autodetectRuntimeFromProbes,
   getRuntime,
   parseRuntime,
   pickRuntime,
   RUNTIMES,
   type Runtime,
+  resolveRuntime,
 } from "./runtime";
 
 describe("RUNTIMES constant", () => {
@@ -139,5 +141,19 @@ describe("getRuntime (integration)", () => {
         },
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("resolveRuntime", () => {
+  const origEnv = process.env.OPENLOCK_RUNTIME;
+  afterEach(() => {
+    if (origEnv === undefined) delete process.env.OPENLOCK_RUNTIME;
+    else process.env.OPENLOCK_RUNTIME = origEnv;
+    _clearCachedRuntimeForTests();
+  });
+
+  it("env override takes precedence", async () => {
+    process.env.OPENLOCK_RUNTIME = "docker";
+    expect(await resolveRuntime()).toBe("docker");
   });
 });
