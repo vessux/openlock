@@ -44,6 +44,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [podman, docker]
+    env:
+      OPENLOCK_RUNTIME: ${{ matrix.runtime }}
     steps:
       - uses: actions/checkout@v6
 
@@ -54,6 +60,7 @@ jobs:
       - run: bun install
 
       - name: Install podman 5.x (heredoc-aware)
+        if: matrix.runtime == 'podman'
         # ubuntu-24.04 ships podman 4.9.3 which mis-parses the shell-heredoc
         # `RUN cat > /sandbox/.claude.json <<'JSON'` block in containers/
         # core.Containerfile. Mac (5.8.2) and Lima (5.4.2) build fine. Pull
@@ -84,6 +91,7 @@ jobs:
           podman --version
 
       - name: Extend rootless subuid/subgid range
+        if: matrix.runtime == 'podman'
         # openlock-core images pin sandbox uid 999999 (see containers/
         # core.Containerfile for rationale). GH Actions ubuntu-24.04 ships
         # `runner` with /etc/subuid `runner:165536:65536` — too small for
@@ -101,6 +109,7 @@ jobs:
           grep "^$USER:" /etc/subuid /etc/subgid
 
       - name: Start rootless podman socket
+        if: matrix.runtime == 'podman'
         # The gateway resolves /run/user/$UID/podman/podman.sock at startup
         # (see resolvePodmanSocket in ensure-gateway.ts), so the runner needs
         # a live podman.socket before the gateway starts.
@@ -108,6 +117,22 @@ jobs:
           systemctl --user enable --now podman.socket
           # Verify the socket landed where the gateway expects it.
           podman info --format '{{.Host.RemoteSocket.Path}}'
+
+      - name: Install docker
+        if: matrix.runtime == 'docker'
+        # ubuntu-24.04 GH runners ship docker preinstalled, but be explicit
+        # so this works on bare ubuntu-24.04 too. The runner user is added to
+        # the `docker` group so subsequent processes (each step is a fresh
+        # shell, and Bun.spawn forks a new process per call) see the socket.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y docker.io
+          sudo systemctl start docker
+          sudo usermod -aG docker "$USER"
+          sudo docker --version
+          sudo docker info | head -5 || true
+          id "$USER"
+          groups "$USER"
 
       - name: Integration tests (OPENLOCK_LIVE_INTEGRATION=1)
         env:

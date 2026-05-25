@@ -85,7 +85,12 @@ describe("npm scoped packages via default-js policy", () => {
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
       const removeContainer = async (): Promise<void> => {
-        await spawnAndCapture(["podman", "rm", "-f", containerName]);
+        await spawnAndCapture([
+          process.env.OPENLOCK_RUNTIME ?? "podman",
+          "rm",
+          "-f",
+          containerName,
+        ]);
       };
 
       try {

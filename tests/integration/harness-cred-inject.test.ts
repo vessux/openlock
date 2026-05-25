@@ -95,7 +95,12 @@ describe("harness cred_inject mechanism (live integration)", () => {
         await spawnAndCapture([...argvHead, "provider", "delete", PROVIDER_NAME], cli.cwd);
       };
       const removeContainer = async (): Promise<void> => {
-        await spawnAndCapture(["podman", "rm", "-f", containerName]);
+        await spawnAndCapture([
+          process.env.OPENLOCK_RUNTIME ?? "podman",
+          "rm",
+          "-f",
+          containerName,
+        ]);
       };
 
       try {

@@ -128,7 +128,12 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
         await spawnAndCapture([...argvHead, "provider", "delete", PROVIDER_NAME], cli.cwd);
       };
       const removeContainer = async (): Promise<void> => {
-        await spawnAndCapture(["podman", "rm", "-f", containerName]);
+        await spawnAndCapture([
+          process.env.OPENLOCK_RUNTIME ?? "podman",
+          "rm",
+          "-f",
+          containerName,
+        ]);
       };
 
       try {
