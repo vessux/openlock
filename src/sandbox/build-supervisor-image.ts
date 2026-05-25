@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveRuntime } from "../runtime";
 import { getSupervisorBinary } from "./fork-binaries";
 
 const SUPERVISOR_IMAGE_TAG = "openlock/supervisor:latest";
@@ -26,15 +27,16 @@ export async function ensureSupervisorImage(): Promise<string> {
   });
   await cpProc.exited;
 
-  console.log("Building supervisor image...");
-  const buildProc = Bun.spawn(["podman", "build", "-t", SUPERVISOR_IMAGE_TAG, "."], {
+  const runtime = await resolveRuntime();
+  console.log(`Building supervisor image with ${runtime}...`);
+  const buildProc = Bun.spawn([runtime, "build", "-t", SUPERVISOR_IMAGE_TAG, "."], {
     cwd: contextDir,
     stdout: "inherit",
     stderr: "inherit",
   });
   const buildCode = await buildProc.exited;
   if (buildCode !== 0) {
-    throw new Error(`Supervisor image build failed (exit ${buildCode})`);
+    throw new Error(`Supervisor image build failed (${runtime}, exit ${buildCode})`);
   }
 
   return SUPERVISOR_IMAGE_TAG;

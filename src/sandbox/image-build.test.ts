@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { computeImageTag, contextDirForHash } from "./image-build";
+import type { Runtime } from "../runtime";
+import {
+  buildImageBuildArgv,
+  buildImageExistsArgv,
+  computeImageTag,
+  contextDirForHash,
+} from "./image-build";
 
 describe("computeImageTag", () => {
   it("returns prefix:hash with 12-char hex hash", () => {
@@ -35,5 +41,55 @@ describe("contextDirForHash", () => {
   it("returns a path under ~/.cache/openlock/build-context", () => {
     const p = contextDirForHash("a1b2c3d4e5f6");
     expect(p).toBe(join(homedir(), ".cache", "openlock", "build-context", "a1b2c3d4e5f6"));
+  });
+});
+
+describe("buildImageExistsArgv", () => {
+  it.each<[Runtime, string[]]>([
+    ["podman", ["podman", "image", "exists", "foo:bar"]],
+    ["docker", ["docker", "image", "inspect", "foo:bar"]],
+  ])("uses correct argv for %s", (runtime, expected) => {
+    expect(buildImageExistsArgv(runtime, "foo:bar")).toEqual(expected);
+  });
+});
+
+describe("buildImageBuildArgv", () => {
+  it("podman without no-cache", () => {
+    expect(buildImageBuildArgv("podman", "t:1", "/ctx")).toEqual([
+      "podman",
+      "build",
+      "-t",
+      "t:1",
+      "/ctx",
+    ]);
+  });
+  it("docker without no-cache", () => {
+    expect(buildImageBuildArgv("docker", "t:1", "/ctx")).toEqual([
+      "docker",
+      "build",
+      "-t",
+      "t:1",
+      "/ctx",
+    ]);
+  });
+  it("podman with no-cache", () => {
+    expect(buildImageBuildArgv("podman", "t:1", "/ctx", true)).toEqual([
+      "podman",
+      "build",
+      "-t",
+      "t:1",
+      "--no-cache",
+      "/ctx",
+    ]);
+  });
+  it("docker with no-cache", () => {
+    expect(buildImageBuildArgv("docker", "t:1", "/ctx", true)).toEqual([
+      "docker",
+      "build",
+      "-t",
+      "t:1",
+      "--no-cache",
+      "/ctx",
+    ]);
   });
 });
