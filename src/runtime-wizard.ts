@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, ftruncateSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import { globalConfigPath } from "./global-config/paths";
 import type { BinaryProbes, Runtime } from "./runtime";
@@ -51,24 +51,24 @@ async function readLine(): Promise<string | null> {
   }
 }
 
-/** Append `default_runtime: <runtime>` to the global config file, creating it
- * if missing. Preserves existing keys via simple line append (YAML allows
- * duplicate-key warning later, but our format is flat). */
+// Single-fd read+truncate+write avoids the path-based TOCTOU race that a
+// separate readFileSync/writeFileSync pair would create.
 function persistRuntimeChoice(runtime: Runtime): void {
   const path = globalConfigPath();
   mkdirSync(dirname(path), { recursive: true });
-  let existing = "";
+  const fd = openSync(path, "a+", 0o600);
   try {
-    existing = readFileSync(path, "utf-8");
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    const existing = readFileSync(fd, "utf-8");
+    const lines = existing.split("\n").filter((l) => !/^\s*default_runtime\s*:/.test(l));
+    while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    lines.push(`default_runtime: ${runtime}`);
+    lines.push("");
+    const out = lines.join("\n");
+    ftruncateSync(fd, 0);
+    writeSync(fd, out, 0);
+  } finally {
+    closeSync(fd);
   }
-  // Strip any prior default_runtime line; append the new one.
-  const lines = existing.split("\n").filter((l) => !/^\s*default_runtime\s*:/.test(l));
-  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  lines.push(`default_runtime: ${runtime}`);
-  lines.push("");
-  writeFileSync(path, lines.join("\n"));
 }
 
 export async function runWizard(p: BinaryProbes): Promise<Runtime> {
