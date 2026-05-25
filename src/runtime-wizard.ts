@@ -54,7 +54,7 @@ async function readLine(): Promise<string | null> {
 /** Append `default_runtime: <runtime>` to the global config file, creating it
  * if missing. Preserves existing keys via simple line append (YAML allows
  * duplicate-key warning later, but our format is flat). */
-export function persistRuntimeChoice(runtime: Runtime): void {
+function persistRuntimeChoice(runtime: Runtime): void {
   const path = globalConfigPath();
   mkdirSync(dirname(path), { recursive: true });
   const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";

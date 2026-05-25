@@ -49,13 +49,9 @@ async function commandExists(cmd: string): Promise<boolean> {
   }
 }
 
-export async function probeBinaries(): Promise<BinaryProbes> {
+async function probeBinaries(): Promise<BinaryProbes> {
   const [podman, docker] = await Promise.all([commandExists("podman"), commandExists("docker")]);
   return { podman, docker };
-}
-
-export async function autodetectRuntime(): Promise<Runtime | null> {
-  return autodetectRuntimeFromProbes(await probeBinaries());
 }
 
 export interface GetRuntimeOpts {
