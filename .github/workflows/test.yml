@@ -118,19 +118,17 @@ jobs:
           # Verify the socket landed where the gateway expects it.
           podman info --format '{{.Host.RemoteSocket.Path}}'
 
-      - name: Install docker
+      - name: Ensure docker available
         if: matrix.runtime == 'docker'
-        # ubuntu-24.04 GH runners ship docker preinstalled, but be explicit
-        # so this works on bare ubuntu-24.04 too. The runner user is added to
-        # the `docker` group so subsequent processes (each step is a fresh
-        # shell, and Bun.spawn forks a new process per call) see the socket.
+        # ubuntu-24.04 GH runners ship docker preinstalled (moby-engine) with
+        # the runner user already in the `docker` group. Installing docker.io
+        # from apt collides with the preinstalled `containerd` package
+        # (containerd.io conflicts with containerd). Just verify the
+        # preinstalled daemon is reachable.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y docker.io
-          sudo systemctl start docker
-          sudo usermod -aG docker "$USER"
-          sudo docker --version
-          sudo docker info | head -5 || true
+          docker --version
+          sudo systemctl start docker || true
+          docker info | head -5
           id "$USER"
           groups "$USER"
 

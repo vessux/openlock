@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { globalConfigPath } from "./global-config/paths";
 import type { BinaryProbes, Runtime } from "./runtime";
@@ -57,7 +57,12 @@ async function readLine(): Promise<string | null> {
 function persistRuntimeChoice(runtime: Runtime): void {
   const path = globalConfigPath();
   mkdirSync(dirname(path), { recursive: true });
-  const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
+  let existing = "";
+  try {
+    existing = readFileSync(path, "utf-8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
   // Strip any prior default_runtime line; append the new one.
   const lines = existing.split("\n").filter((l) => !/^\s*default_runtime\s*:/.test(l));
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
