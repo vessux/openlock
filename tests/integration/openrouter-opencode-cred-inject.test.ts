@@ -132,9 +132,17 @@ describe("openrouter cred_inject mechanism (live integration)", () => {
           tagPrefix: `openlock-${imageKey}`,
         });
 
+        // --retry 5 + --retry-all-errors covers transient TLS/network
+        // failures (exit 35/56) seen when curl races the supervisor's
+        // CA-bundle + echo-proxy bring-up. ~5s worst-case extra.
         const curlCmd = [
           "curl",
           "-sf",
+          "--retry",
+          "5",
+          "--retry-all-errors",
+          "--retry-delay",
+          "1",
           "-X",
           "POST",
           "-H",
