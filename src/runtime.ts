@@ -1,4 +1,6 @@
 // src/runtime.ts
+import type { GlobalConfig } from "./global-config/schema";
+
 export const RUNTIMES = ["podman", "docker"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
 
@@ -47,4 +49,30 @@ async function commandExists(cmd: string): Promise<boolean> {
 export async function autodetectRuntime(): Promise<Runtime | null> {
   const [podman, docker] = await Promise.all([commandExists("podman"), commandExists("docker")]);
   return autodetectRuntimeFromProbes({ podman, docker });
+}
+
+export interface GetRuntimeOpts {
+  readConfig: () => Pick<GlobalConfig, "defaultRuntime">;
+  probe: () => Promise<BinaryProbes>;
+  /** Invoked when env+config unset AND autodetect can't pick unambiguously
+   * (zero or two binaries present). Returning a Runtime persists nothing —
+   * callers wanting persistence wire that up themselves. */
+  onMissing: (probes: BinaryProbes) => Promise<Runtime>;
+}
+
+export async function getRuntime(opts: GetRuntimeOpts): Promise<Runtime> {
+  const envRaw = process.env.OPENLOCK_RUNTIME ?? null;
+  const env = envRaw !== null ? parseRuntime(envRaw) : null;
+  const config = opts.readConfig().defaultRuntime ?? null;
+
+  if (env !== null) return env;
+  if (config !== null) return config;
+
+  const probes = await opts.probe();
+  const single = (probes.podman ? 1 : 0) + (probes.docker ? 1 : 0);
+  if (single === 1) {
+    return probes.podman ? "podman" : "docker";
+  }
+  // ambiguous (both present) or missing (neither) — defer to caller.
+  return opts.onMissing(probes);
 }

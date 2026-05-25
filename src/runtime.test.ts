@@ -1,7 +1,8 @@
 // src/runtime.test.ts
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   autodetectRuntimeFromProbes,
+  getRuntime,
   parseRuntime,
   pickRuntime,
   RUNTIMES,
@@ -71,5 +72,72 @@ describe("autodetectRuntimeFromProbes", () => {
   });
   it("returns null when neither exists", () => {
     expect(autodetectRuntimeFromProbes({ podman: false, docker: false })).toBe(null);
+  });
+});
+
+describe("getRuntime (integration)", () => {
+  const origEnv = process.env.OPENLOCK_RUNTIME;
+  afterEach(() => {
+    if (origEnv === undefined) delete process.env.OPENLOCK_RUNTIME;
+    else process.env.OPENLOCK_RUNTIME = origEnv;
+  });
+
+  it("returns env override when set", async () => {
+    process.env.OPENLOCK_RUNTIME = "docker";
+    const result = await getRuntime({
+      readConfig: () => ({}),
+      probe: async () => ({ podman: true, docker: false }),
+      onMissing: () => {
+        throw new Error("should not prompt");
+      },
+    });
+    expect(result).toBe("docker");
+  });
+
+  it("returns config value when env unset", async () => {
+    delete process.env.OPENLOCK_RUNTIME;
+    const result = await getRuntime({
+      readConfig: () => ({ defaultRuntime: "podman" }),
+      probe: async () => ({ podman: false, docker: true }),
+      onMissing: () => {
+        throw new Error("should not prompt");
+      },
+    });
+    expect(result).toBe("podman");
+  });
+
+  it("calls onMissing when nothing set and autodetect ambiguous", async () => {
+    delete process.env.OPENLOCK_RUNTIME;
+    const result = await getRuntime({
+      readConfig: () => ({}),
+      probe: async () => ({ podman: true, docker: true }),
+      onMissing: async () => "docker",
+    });
+    expect(result).toBe("docker");
+  });
+
+  it("uses autodetect without prompt when only one binary present", async () => {
+    delete process.env.OPENLOCK_RUNTIME;
+    const result = await getRuntime({
+      readConfig: () => ({}),
+      probe: async () => ({ podman: false, docker: true }),
+      onMissing: () => {
+        throw new Error("should not prompt");
+      },
+    });
+    expect(result).toBe("docker");
+  });
+
+  it("throws when nothing set and no binaries", async () => {
+    delete process.env.OPENLOCK_RUNTIME;
+    await expect(
+      getRuntime({
+        readConfig: () => ({}),
+        probe: async () => ({ podman: false, docker: false }),
+        onMissing: () => {
+          throw new Error("no runtime");
+        },
+      }),
+    ).rejects.toThrow();
   });
 });
