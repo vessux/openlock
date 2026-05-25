@@ -36,8 +36,12 @@ export function autodetectRuntimeFromProbes(p: BinaryProbes): Runtime | null {
 }
 
 async function commandExists(cmd: string): Promise<boolean> {
-  const proc = Bun.spawn(["which", cmd], { stdout: "ignore", stderr: "ignore" });
-  return (await proc.exited) === 0;
+  try {
+    const proc = Bun.spawn(["which", cmd], { stdout: "ignore", stderr: "ignore" });
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function autodetectRuntime(): Promise<Runtime | null> {

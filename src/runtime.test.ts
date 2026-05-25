@@ -1,6 +1,12 @@
 // src/runtime.test.ts
 import { describe, expect, it } from "bun:test";
-import { parseRuntime, pickRuntime, RUNTIMES, type Runtime } from "./runtime";
+import {
+  autodetectRuntimeFromProbes,
+  parseRuntime,
+  pickRuntime,
+  RUNTIMES,
+  type Runtime,
+} from "./runtime";
 
 describe("RUNTIMES constant", () => {
   it("contains podman and docker", () => {
@@ -56,17 +62,14 @@ describe("pickRuntime cascade", () => {
   });
 });
 
-describe("autodetectRuntime", () => {
-  it("returns podman when podman binary exists first", async () => {
-    const { autodetectRuntimeFromProbes } = await import("./runtime");
+describe("autodetectRuntimeFromProbes", () => {
+  it("returns podman when podman binary exists first", () => {
     expect(autodetectRuntimeFromProbes({ podman: true, docker: true })).toBe("podman");
   });
-  it("returns docker when only docker exists", async () => {
-    const { autodetectRuntimeFromProbes } = await import("./runtime");
+  it("returns docker when only docker exists", () => {
     expect(autodetectRuntimeFromProbes({ podman: false, docker: true })).toBe("docker");
   });
-  it("returns null when neither exists", async () => {
-    const { autodetectRuntimeFromProbes } = await import("./runtime");
+  it("returns null when neither exists", () => {
     expect(autodetectRuntimeFromProbes({ podman: false, docker: false })).toBe(null);
   });
 });
