@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "bun run src/cli.ts",
-    "test": "bun test",
+    "test": "bun test ./src/ ./tests/",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

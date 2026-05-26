@@ -9,7 +9,10 @@ import {
   buildSandboxExecRootArgv,
   buildSandboxGetArgv,
   buildSandboxListNamesArgv,
+  buildSandboxStartArgv,
+  buildSandboxStopArgv,
   buildSandboxUploadArgv,
+  parseSandboxGetPhase,
   wrapCmdWithEnv,
 } from "./container";
 
@@ -188,15 +191,8 @@ describe("buildHarnessExecArgv (harness binary selection)", () => {
 });
 
 describe("buildSandboxGetArgv", () => {
-  it("emits `openshell sandbox get <name> -o json`", () => {
-    expect(buildSandboxGetArgv(["cli"], "sess")).toEqual([
-      "cli",
-      "sandbox",
-      "get",
-      "sess",
-      "-o",
-      "json",
-    ]);
+  it("emits `openshell sandbox get <name>`", () => {
+    expect(buildSandboxGetArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "get", "sess"]);
   });
 
   it("supports a multi-element cli prefix", () => {
@@ -208,15 +204,51 @@ describe("buildSandboxGetArgv", () => {
       "sandbox",
       "get",
       "sess",
-      "-o",
-      "json",
     ]);
+  });
+});
+
+describe("parseSandboxGetPhase", () => {
+  // openshell sandbox get prints colorized human output, e.g.
+  //   \x1b[1m\x1b[36mSandbox:\x1b[39m\x1b[0m
+  //     \x1b[2mPhase:\x1b[0m Ready
+  // The parser must strip ANSI escapes and locate the `Phase: <state>` line.
+  it("returns 'running' for Ready/Running phase", () => {
+    expect(parseSandboxGetPhase("  Phase: Ready\n  Revision: 1")).toBe("running");
+    expect(parseSandboxGetPhase("  Phase: Running")).toBe("running");
+  });
+  it("returns 'exited' for Failed/Exited/Stopped/Error phase", () => {
+    expect(parseSandboxGetPhase("  Phase: Failed")).toBe("exited");
+    expect(parseSandboxGetPhase("  Phase: Exited")).toBe("exited");
+    expect(parseSandboxGetPhase("  Phase: Stopped")).toBe("exited");
+    // Fork v0.5.0 has no Stopped variant — explicit stop transitions Ready → Error.
+    expect(parseSandboxGetPhase("  Phase: Error")).toBe("exited");
+  });
+  it("returns 'other' when phase is unknown or missing", () => {
+    expect(parseSandboxGetPhase("  Phase: Provisioning")).toBe("other");
+    expect(parseSandboxGetPhase("no phase here")).toBe("other");
+  });
+  it("strips ANSI color codes around the Phase label and value", () => {
+    const ansi = "\x1b[1m\x1b[36mSandbox:\x1b[39m\x1b[0m\n\n  \x1b[2mPhase:\x1b[0m Ready\n";
+    expect(parseSandboxGetPhase(ansi)).toBe("running");
   });
 });
 
 describe("buildSandboxDeleteArgv", () => {
   it("emits `openshell sandbox delete <name>`", () => {
     expect(buildSandboxDeleteArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "delete", "sess"]);
+  });
+});
+
+describe("buildSandboxStopArgv", () => {
+  it("emits `openshell sandbox stop <name>`", () => {
+    expect(buildSandboxStopArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "stop", "sess"]);
+  });
+});
+
+describe("buildSandboxStartArgv", () => {
+  it("emits `openshell sandbox start <name>`", () => {
+    expect(buildSandboxStartArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "start", "sess"]);
   });
 });
 
