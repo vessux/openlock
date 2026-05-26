@@ -24,6 +24,7 @@ import {
   getSandboxState,
   listSandboxes,
   openshellSandboxCreateAsync,
+  startSandbox,
   waitForSandboxReady,
 } from "./container";
 import { containerfileKeyForCaps, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
@@ -515,6 +516,9 @@ async function reattachSession(
   }
   await startGateway();
   await ensureProvider(providerId);
+  if (state === "exited") {
+    await startSandbox(containerName);
+  }
   await waitForSandboxReady(m.name);
   for (const mount of mounts) {
     if (mount.type !== "copy-refresh") continue;

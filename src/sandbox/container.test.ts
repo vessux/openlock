@@ -9,6 +9,8 @@ import {
   buildSandboxExecRootArgv,
   buildSandboxGetArgv,
   buildSandboxListNamesArgv,
+  buildSandboxStartArgv,
+  buildSandboxStopArgv,
   buildSandboxUploadArgv,
   wrapCmdWithEnv,
 } from "./container";
@@ -217,6 +219,18 @@ describe("buildSandboxGetArgv", () => {
 describe("buildSandboxDeleteArgv", () => {
   it("emits `openshell sandbox delete <name>`", () => {
     expect(buildSandboxDeleteArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "delete", "sess"]);
+  });
+});
+
+describe("buildSandboxStopArgv", () => {
+  it("emits `openshell sandbox stop <name>`", () => {
+    expect(buildSandboxStopArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "stop", "sess"]);
+  });
+});
+
+describe("buildSandboxStartArgv", () => {
+  it("emits `openshell sandbox start <name>`", () => {
+    expect(buildSandboxStartArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "start", "sess"]);
   });
 });
 

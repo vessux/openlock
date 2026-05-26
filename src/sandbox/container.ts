@@ -238,6 +238,14 @@ export function buildSandboxDeleteArgv(cliPrefix: readonly string[], name: strin
   return [...cliPrefix, "sandbox", "delete", name];
 }
 
+export function buildSandboxStopArgv(cliPrefix: readonly string[], name: string): string[] {
+  return [...cliPrefix, "sandbox", "stop", name];
+}
+
+export function buildSandboxStartArgv(cliPrefix: readonly string[], name: string): string[] {
+  return [...cliPrefix, "sandbox", "start", name];
+}
+
 export function buildSandboxUploadArgv(
   cliPrefix: readonly string[],
   name: string,
@@ -292,6 +300,35 @@ export async function deleteSandbox(name: string): Promise<void> {
   const argv = buildSandboxDeleteArgv(cli.argv, name);
   const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
   await proc.exited;
+}
+
+// Halt the container without removing it. Workspace volume + cred secret
+// survive; reconnect via startSandbox. Used by `openlock stop` and
+// reapIdleStaleSessions to avoid destroying user state.
+export async function stopSandbox(name: string): Promise<void> {
+  const cli = await getCliInvocation();
+  const argv = buildSandboxStopArgv(cli.argv, name);
+  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "pipe" });
+  const stderr = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(`openshell sandbox stop failed (exit ${code}): ${stderr.trim()}`);
+  }
+}
+
+// Start a previously-stopped container. Idempotent on already-running
+// containers. Throws when the backend resource has been pruned (the
+// underlying CLI emits the "backend resource missing" warning and exits
+// non-zero only on hard errors).
+export async function startSandbox(name: string): Promise<void> {
+  const cli = await getCliInvocation();
+  const argv = buildSandboxStartArgv(cli.argv, name);
+  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "pipe" });
+  const stderr = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(`openshell sandbox start failed (exit ${code}): ${stderr.trim()}`);
+  }
 }
 
 export async function uploadToSandbox(

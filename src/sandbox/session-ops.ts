@@ -6,6 +6,7 @@ import {
   deleteSandbox,
   downloadFromSandbox,
   getSandboxState,
+  stopSandbox,
 } from "./container";
 import { getCliInvocation } from "./fork-binaries";
 import { pruneSandboxRefs } from "./git-sync";
@@ -55,7 +56,7 @@ export async function reapIdleStaleSessions(): Promise<{
   const start = Date.now();
   await Promise.all(
     targets.map((r) =>
-      deleteSandbox(`${SANDBOX_PREFIX}${r.meta.name}`).catch((e: unknown) =>
+      stopSandbox(`${SANDBOX_PREFIX}${r.meta.name}`).catch((e: unknown) =>
         console.error(`stop ${r.meta.name}: ${(e as Error).message}`),
       ),
     ),
@@ -66,7 +67,7 @@ export async function reapIdleStaleSessions(): Promise<{
 export async function stopSession(name: string): Promise<void> {
   const m = await loadSessionByName(name);
   if (!m) throw new Error(`no such session: ${name}`);
-  await deleteSandbox(`${SANDBOX_PREFIX}${m.name}`);
+  await stopSandbox(`${SANDBOX_PREFIX}${m.name}`);
   console.log(`stopped ${name}`);
 }
 
