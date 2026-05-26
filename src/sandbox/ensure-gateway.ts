@@ -19,6 +19,14 @@ const STATE_DIR = join(process.env.HOME || homedir(), ".local", "state", "openlo
 const PID_FILE = join(STATE_DIR, "gateway.pid");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
 const CONFIG_FILE = join(STATE_DIR, "gateway-config.toml");
+// Sandbox-JWT signing material. Since upstream #1404 the sandbox supervisor
+// requires a gateway-minted JWT to fetch its policy — without one it exits
+// during provisioning. The gateway mints per-sandbox tokens only when this
+// bundle is present, so we generate it once and point the gateway at it.
+const PKI_DIR = join(STATE_DIR, "pki");
+const JWT_SIGNING_KEY = join(PKI_DIR, "jwt", "signing.pem");
+const JWT_PUBLIC_KEY = join(PKI_DIR, "jwt", "public.pem");
+const JWT_KID = join(PKI_DIR, "jwt", "kid");
 const GATEWAY_PORT = 18081;
 // Historical name from the podman-only era; now drives podman OR docker per
 // `--drivers` resolution. Kept stable so existing on-disk state under
@@ -102,9 +110,30 @@ function tomlEscape(s: string): string {
 
 export function renderGatewayConfigToml(
   runtime: Runtime,
-  opts: { supervisorImage: string; podmanSocket?: string },
+  opts: {
+    supervisorImage: string;
+    podmanSocket?: string;
+    gatewayJwt?: { signingKeyPath: string; publicKeyPath: string; kidPath: string };
+  },
 ): string {
   const lines = ["[openshell]", "version = 1", ""];
+  if (opts.gatewayJwt) {
+    // Configuring the sandbox-JWT issuer activates the gateway's auth chain,
+    // which would otherwise reject openlock's own (credential-less) CLI calls.
+    // openlock is a single-user local gateway, so accept unauthenticated CLI
+    // callers as a local developer principal; sandbox supervisors continue to
+    // present their gateway-minted JWTs.
+    lines.push(
+      "[openshell.gateway.auth]",
+      "allow_unauthenticated_users = true",
+      "",
+      "[openshell.gateway.gateway_jwt]",
+      `signing_key_path = "${tomlEscape(opts.gatewayJwt.signingKeyPath)}"`,
+      `public_key_path = "${tomlEscape(opts.gatewayJwt.publicKeyPath)}"`,
+      `kid_path = "${tomlEscape(opts.gatewayJwt.kidPath)}"`,
+      "",
+    );
+  }
   if (runtime === "podman") {
     if (!opts.podmanSocket) {
       throw new Error("podmanSocket required for podman runtime");
@@ -131,8 +160,27 @@ function writeGatewayConfigFile(opts: {
   runtime: Runtime;
   supervisorImage: string;
   podmanSocket?: string;
+  gatewayJwt?: { signingKeyPath: string; publicKeyPath: string; kidPath: string };
 }): void {
   writeFileSync(CONFIG_FILE, renderGatewayConfigToml(opts.runtime, opts));
+}
+
+// Generate the sandbox-JWT signing bundle if absent. Idempotent: the gateway's
+// `generate-certs` skips when the files already exist. Also emits an (unused)
+// TLS bundle alongside the JWT material, which is harmless under --disable-tls.
+async function ensureSandboxJwtMaterial(gatewayBin: string): Promise<void> {
+  if (existsSync(JWT_SIGNING_KEY) && existsSync(JWT_PUBLIC_KEY) && existsSync(JWT_KID)) {
+    return;
+  }
+  const proc = Bun.spawn([gatewayBin, "generate-certs", "--output-dir", PKI_DIR], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const code = await proc.exited;
+  if (code !== 0) {
+    const err = await new Response(proc.stderr).text();
+    throw new Error(`Failed to generate sandbox JWT material: ${err.trim()}`);
+  }
 }
 
 async function resolvePodmanSocket(): Promise<string> {
@@ -198,11 +246,22 @@ export async function startGateway(): Promise<void> {
   ]);
   registerGatewayMetadata();
 
+  await ensureSandboxJwtMaterial(gatewayBin);
+
   let podmanSocket: string | undefined;
   if (runtime === "podman") {
     podmanSocket = await resolvePodmanSocket();
   }
-  writeGatewayConfigFile({ runtime, supervisorImage, podmanSocket });
+  writeGatewayConfigFile({
+    runtime,
+    supervisorImage,
+    podmanSocket,
+    gatewayJwt: {
+      signingKeyPath: JWT_SIGNING_KEY,
+      publicKeyPath: JWT_PUBLIC_KEY,
+      kidPath: JWT_KID,
+    },
+  });
 
   const dbPath = join(STATE_DIR, "gateway.db");
   const args = [

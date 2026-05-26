@@ -31,6 +31,33 @@ describe("renderGatewayConfigToml", () => {
       /podmanSocket/,
     );
   });
+
+  it("emits sandbox-JWT issuer and unauthenticated-user escape hatch when gatewayJwt set", () => {
+    const out = renderGatewayConfigToml("podman", {
+      supervisorImage: "img:latest",
+      podmanSocket: "/run/podman/podman.sock",
+      gatewayJwt: {
+        signingKeyPath: "/s/jwt/signing.pem",
+        publicKeyPath: "/s/jwt/public.pem",
+        kidPath: "/s/jwt/kid",
+      },
+    });
+    expect(out).toContain("[openshell.gateway.gateway_jwt]");
+    expect(out).toContain('signing_key_path = "/s/jwt/signing.pem"');
+    expect(out).toContain('public_key_path = "/s/jwt/public.pem"');
+    expect(out).toContain('kid_path = "/s/jwt/kid"');
+    expect(out).toContain("[openshell.gateway.auth]");
+    expect(out).toContain("allow_unauthenticated_users = true");
+  });
+
+  it("omits gateway_jwt and auth blocks when gatewayJwt absent", () => {
+    const out = renderGatewayConfigToml("podman", {
+      supervisorImage: "img:latest",
+      podmanSocket: "/run/podman/podman.sock",
+    });
+    expect(out).not.toContain("gateway_jwt");
+    expect(out).not.toContain("allow_unauthenticated_users");
+  });
 });
 
 describe("readGatewayRssKb", () => {
