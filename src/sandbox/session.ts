@@ -21,7 +21,6 @@ import {
   downloadFromSandbox,
   execHarness,
   getSandboxState,
-  listSandboxes,
   openshellSandboxCreateAsync,
   startSandbox,
   waitForSandboxReady,
@@ -607,12 +606,16 @@ export function pickSessionHarness(args: PickSessionHarnessArgs): PickSessionHar
   return { harness: args.resolvedHarness, mismatch: false };
 }
 
-function handleGatewayShutdown(otherCount: number): void {
-  if (otherCount === 0) {
+function handleGatewayShutdown(remainingSessions: number): void {
+  // Keep the gateway alive while any openlock session metadata exists
+  // (running OR stopped). Stopped sessions still need `openlock
+  // exec|stop|clean` to reach the gateway; the gateway DB rebinds them on
+  // next start. Tearing gateway down between commands was openlock-ne9.
+  if (remainingSessions === 0) {
     stopGateway();
     return;
   }
-  console.log(`Gateway kept running (${otherCount} other sandbox(es) active).`);
+  console.log(`Gateway kept running (${remainingSessions} session(s) remain).`);
 }
 
 export async function runSandbox(opts: SandboxOpts): Promise<void> {
@@ -676,12 +679,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     harness,
   };
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
-  // listSandboxes returns all gateway-tracked sandboxes; gateway should only
-  // stay up for OTHER currently-running sandboxes, so filter via getSandboxState.
-  const others = (await listSandboxes()).filter((n) => n !== containerName);
-  const otherStates = await Promise.all(others.map((n) => getSandboxState(n)));
-  const stillRunning = others.filter((_, i) => otherStates[i] === "running");
-  handleGatewayShutdown(stillRunning.length);
+  handleGatewayShutdown(listAllSessions(sessionsDir()).length);
   await autoReapStaleSessions();
   if (exitCode !== 0) process.exit(exitCode);
 }
