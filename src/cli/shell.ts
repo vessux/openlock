@@ -1,6 +1,5 @@
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
-import { SANDBOX_PREFIX } from "../sandbox/constants";
 import { execBash, getSandboxState } from "../sandbox/container";
 import { printCmdHelp } from "./_help";
 import { resolveSessionName } from "./_resolve";
@@ -21,8 +20,7 @@ export async function shellCmd(args: string[]): Promise<number> {
   }
   const name = await resolveSessionName(positionals[0], "shell into");
   if (!name) return 1;
-  const containerName = `${SANDBOX_PREFIX}${name}`;
-  const state = await getSandboxState(containerName);
+  const state = await getSandboxState(name);
   if (state === "missing") {
     console.error(`session ${name} has no container`);
     return 1;

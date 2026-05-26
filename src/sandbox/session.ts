@@ -14,7 +14,6 @@ import type { ProviderId } from "../providers/types";
 import { type Runtime, resolveRuntime } from "../runtime";
 import { readToken } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
-import { SANDBOX_PREFIX } from "./constants";
 import {
   buildOpenshellExecArgv,
   buildSandboxEnv,
@@ -149,7 +148,10 @@ async function createSession(
 
   const id = newSessionId();
   const name = friendlyNameFromId(basename(projectPath), id);
-  const containerName = `${SANDBOX_PREFIX}${name}`;
+  // openshell registers the sandbox under its CLI --name; the podman container
+  // happens to be named `openshell-sandbox-<name>` but openshell verbs
+  // (get/exec/stop/start/delete) take the gateway name (unprefixed).
+  const containerName = name;
 
   const tmp = mkdtempSync(join(tmpdir(), "openlock-"));
   try {
@@ -497,7 +499,7 @@ async function reattachSession(
   mounts: readonly Mount[],
   providerId: ProviderId,
 ): Promise<ResolvedSession> {
-  const containerName = `${SANDBOX_PREFIX}${m.name}`;
+  const containerName = m.name;
   const state = await getSandboxState(containerName);
   if (state === "missing") {
     console.error(
@@ -674,9 +676,9 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     harness,
   };
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
-  // listSandboxes returns all states; gateway should only stay up for OTHER
-  // currently-running sandboxes, so filter via getSandboxState.
-  const others = (await listSandboxes(SANDBOX_PREFIX)).filter((n) => n !== containerName);
+  // listSandboxes returns all gateway-tracked sandboxes; gateway should only
+  // stay up for OTHER currently-running sandboxes, so filter via getSandboxState.
+  const others = (await listSandboxes()).filter((n) => n !== containerName);
   const otherStates = await Promise.all(others.map((n) => getSandboxState(n)));
   const stillRunning = others.filter((_, i) => otherStates[i] === "running");
   handleGatewayShutdown(stillRunning.length);

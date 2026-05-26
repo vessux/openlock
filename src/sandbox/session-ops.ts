@@ -1,6 +1,5 @@
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { SANDBOX_PREFIX } from "./constants";
 import {
   buildOpenshellExecArgv,
   deleteSandbox,
@@ -22,7 +21,7 @@ export async function loadSessionByName(name: string): Promise<SessionMeta | nul
 }
 
 async function enrichSession(m: SessionMeta): Promise<SessionWithState> {
-  const containerState = await getSandboxState(`${SANDBOX_PREFIX}${m.name}`);
+  const containerState = await getSandboxState(m.name);
   return {
     ...m,
     containerState,
@@ -56,7 +55,7 @@ export async function reapIdleStaleSessions(): Promise<{
   const start = Date.now();
   await Promise.all(
     targets.map((r) =>
-      stopSandbox(`${SANDBOX_PREFIX}${r.meta.name}`).catch((e: unknown) =>
+      stopSandbox(r.meta.name).catch((e: unknown) =>
         console.error(`stop ${r.meta.name}: ${(e as Error).message}`),
       ),
     ),
@@ -67,7 +66,7 @@ export async function reapIdleStaleSessions(): Promise<{
 export async function stopSession(name: string): Promise<void> {
   const m = await loadSessionByName(name);
   if (!m) throw new Error(`no such session: ${name}`);
-  await stopSandbox(`${SANDBOX_PREFIX}${m.name}`);
+  await stopSandbox(m.name);
   console.log(`stopped ${name}`);
 }
 
@@ -79,7 +78,7 @@ export interface CleanOpts {
 export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<void> {
   const m = await loadSessionByName(name);
   if (!m) throw new Error(`no such session: ${name}`);
-  const containerName = `${SANDBOX_PREFIX}${m.name}`;
+  const containerName = m.name;
 
   if (opts.copyDir) {
     const dest = resolve(opts.copyDir);

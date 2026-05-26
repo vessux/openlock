@@ -230,8 +230,11 @@ export async function waitForSandboxReady(name: string, timeoutMs = 60_000): Pro
 // up on `sandbox delete`.
 // ============================================================================
 
+// `openshell sandbox get` accepts only [name] + --policy-only — there is no
+// -o/--output flag. We parse the human-formatted output for the `Phase:` line
+// (the only field getSandboxState consumes).
 export function buildSandboxGetArgv(cliPrefix: readonly string[], name: string): string[] {
-  return [...cliPrefix, "sandbox", "get", name, "-o", "json"];
+  return [...cliPrefix, "sandbox", "get", name];
 }
 
 export function buildSandboxDeleteArgv(cliPrefix: readonly string[], name: string): string[] {
@@ -283,23 +286,32 @@ export async function getSandboxState(name: string): Promise<ContainerState> {
   const out = await new Response(proc.stdout).text();
   const code = await proc.exited;
   if (code !== 0) return "missing";
-  try {
-    const json = JSON.parse(out);
-    // `openshell sandbox get` returns { status: { phase: "Ready"|"Failed"|... }, ... }
-    const phase = json?.status?.phase ?? json?.phase;
-    if (phase === "Ready" || phase === "Running") return "running";
-    if (phase === "Failed" || phase === "Exited") return "exited";
-    return "other";
-  } catch {
-    return "other";
-  }
+  return parseSandboxGetPhase(out);
+}
+
+// Extracts the Phase field from `openshell sandbox get` human output, which
+// is colorized + indented like `  Phase: Ready`. Strips ANSI before matching.
+export function parseSandboxGetPhase(stdout: string): ContainerState {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ESC (0x1b) is the point — stripping ANSI CSI sequences.
+  const stripped = stdout.replace(/\u001b\[[0-9;]*m/g, "");
+  const m = stripped.match(/^\s*Phase:\s*(\S+)/m);
+  const phase = m?.[1];
+  if (phase === "Ready" || phase === "Running") return "running";
+  if (phase === "Failed" || phase === "Exited" || phase === "Stopped") return "exited";
+  return "other";
 }
 
 export async function deleteSandbox(name: string): Promise<void> {
   const cli = await getCliInvocation();
   const argv = buildSandboxDeleteArgv(cli.argv, name);
-  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
-  await proc.exited;
+  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "pipe" });
+  const stderr = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  // NotFound is fine — clean is idempotent; surface other failures so we
+  // don't leave orphaned podman containers while pretending success.
+  if (code !== 0 && !/sandbox not found|NotFound/.test(stderr)) {
+    throw new Error(`openshell sandbox delete failed (exit ${code}): ${stderr.trim()}`);
+  }
 }
 
 // Halt the container without removing it. Workspace volume + cred secret
