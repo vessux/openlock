@@ -293,13 +293,7 @@ export function parseSandboxGetPhase(stdout: string): ContainerState {
   const m = stripped.match(/^\s*Phase:\s*(\S+)/m);
   const phase = m?.[1];
   if (phase === "Ready" || phase === "Running") return "running";
-  // Fork v0.5.0 has no Stopped variant: explicit `openshell sandbox stop`
-  // transitions phase Ready → Error (watch loop treats container exit as
-  // terminal failure). Mapping Error → "exited" lets reattach trigger
-  // startSandbox; genuine provisioning failures surface when startSandbox
-  // or waitForSandboxReady fail.
-  if (phase === "Failed" || phase === "Exited" || phase === "Stopped" || phase === "Error")
-    return "exited";
+  if (phase === "Failed" || phase === "Exited" || phase === "Stopped") return "exited";
   return "other";
 }
 
