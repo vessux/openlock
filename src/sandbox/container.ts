@@ -267,10 +267,6 @@ export function buildSandboxDownloadArgv(
   return [...cliPrefix, "sandbox", "download", name, sandboxPath, dest];
 }
 
-export function buildSandboxListNamesArgv(cliPrefix: readonly string[]): string[] {
-  return [...cliPrefix, "sandbox", "list", "--names"];
-}
-
 export function buildSandboxExecRootArgv(
   cliPrefix: readonly string[],
   name: string,
@@ -373,19 +369,6 @@ export async function downloadFromSandbox(
   const argv = buildSandboxDownloadArgv(cli.argv, name, sandboxPath, destPath);
   const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
   return (await proc.exited) === 0;
-}
-
-export async function listSandboxes(prefix?: string): Promise<string[]> {
-  const cli = await getCliInvocation();
-  const argv = buildSandboxListNamesArgv(cli.argv);
-  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "pipe", stderr: "ignore" });
-  const out = await new Response(proc.stdout).text();
-  await proc.exited;
-  const names = out
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  return prefix ? names.filter((n) => n.startsWith(prefix)) : names;
 }
 
 export async function execAsRoot(name: string, cmd: string[]): Promise<void> {

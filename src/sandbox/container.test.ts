@@ -8,7 +8,6 @@ import {
   buildSandboxEnv,
   buildSandboxExecRootArgv,
   buildSandboxGetArgv,
-  buildSandboxListNamesArgv,
   buildSandboxStartArgv,
   buildSandboxStopArgv,
   buildSandboxUploadArgv,
@@ -275,12 +274,6 @@ describe("buildSandboxDownloadArgv", () => {
       "/sbx/file",
       "/host/dir",
     ]);
-  });
-});
-
-describe("buildSandboxListNamesArgv", () => {
-  it("emits `openshell sandbox list --names`", () => {
-    expect(buildSandboxListNamesArgv(["cli"])).toEqual(["cli", "sandbox", "list", "--names"]);
   });
 });
 
