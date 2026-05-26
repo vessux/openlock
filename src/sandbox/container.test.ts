@@ -217,10 +217,12 @@ describe("parseSandboxGetPhase", () => {
     expect(parseSandboxGetPhase("  Phase: Ready\n  Revision: 1")).toBe("running");
     expect(parseSandboxGetPhase("  Phase: Running")).toBe("running");
   });
-  it("returns 'exited' for Failed/Exited/Stopped phase", () => {
+  it("returns 'exited' for Failed/Exited/Stopped/Error phase", () => {
     expect(parseSandboxGetPhase("  Phase: Failed")).toBe("exited");
     expect(parseSandboxGetPhase("  Phase: Exited")).toBe("exited");
     expect(parseSandboxGetPhase("  Phase: Stopped")).toBe("exited");
+    // Fork v0.5.0 has no Stopped variant — explicit stop transitions Ready → Error.
+    expect(parseSandboxGetPhase("  Phase: Error")).toBe("exited");
   });
   it("returns 'other' when phase is unknown or missing", () => {
     expect(parseSandboxGetPhase("  Phase: Provisioning")).toBe("other");
