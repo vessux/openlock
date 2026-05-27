@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.8.0
+
+### Added
+
+- **Docker runtime support.** `OPENLOCK_RUNTIME=docker|podman` (or `default_runtime:` in `~/.config/openlock/config.yaml`) selects the container runtime; the first-run wizard prompts when autodetect is ambiguous. In-container controls (Landlock, seccomp, namespace/netns enforcement) are identical across runtimes — the differences are at the host trust boundary (rootful docker vs rootless podman), documented in the README threat model.
+
+### Changed
+
+- Bumped the openshell fork to **v0.6.0** (absorbs 36 upstream commits incl. per-sandbox auth, `SANDBOX_METHODS`, docker macOS host-gateway, L7 wildcards, Providers v2). openlock now provisions a per-sandbox gateway-minted JWT (signing bundle + `allow_unauthenticated_users`) in `ensure-gateway.ts`, required since the fork supervisor refuses to start without one.
+
+### Removed
+
+- **Anthropic auto-default removed (breaking).** openlock no longer silently selects the `anthropic` provider for the `claude_code` harness when credentials happen to exist. The provider must be explicit — `--provider`, `OPENLOCK_PROVIDER`, or `default_provider:` in `~/.config/openlock/config.yaml`. With no explicit selection, `sandbox` errors instead of guessing.
+- Legacy `readToken()` / `writeToken()` shims removed from `src/tokens.ts`, superseded by the multi-provider `readProvider` / `writeProvider` / `hasAnyProvider` API.
+
+### Fixed
+
+- **Gateway lifecycle:** keep the gateway alive while any session metadata exists; non-destructive `stop` + reap with auto-start on reattach; retry `openshell sandbox create` once on early failure.
+
 ## v0.7.0
 
 ### Security

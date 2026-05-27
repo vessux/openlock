@@ -5,7 +5,7 @@ import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
 import { type Runtime, resolveRuntime } from "./runtime";
 import { isDevMode } from "./sandbox/fork-binaries";
-import { readToken } from "./tokens";
+import { hasAnyProvider } from "./tokens";
 
 interface CheckOutcome {
   ok: boolean;
@@ -116,7 +116,7 @@ export async function runDoctorChecks(runtime?: Runtime): Promise<DoctorResult[]
       : []),
     {
       name: "credentials (openlock login)",
-      test: async () => readToken() !== null,
+      test: async () => hasAnyProvider(),
     },
     {
       name: `global config (${globalConfigPath()})`,

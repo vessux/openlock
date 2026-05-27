@@ -93,23 +93,6 @@ export function deleteProvider(id: ProviderId, path?: string): void {
   writeAtomic(p, file);
 }
 
-// Legacy shims — kept for exactly one release. Delete in v0.8.0 along with the
-// auto-default-to-anthropic behavior in resolveProvider.
-export function readToken(path?: string): string | null {
-  return readProvider("anthropic", path)?.credentials.ANTHROPIC_AUTH_TOKEN ?? null;
-}
-
-export function writeToken(path: string, token: string): void {
-  writeProvider(
-    "anthropic",
-    {
-      type: "claude",
-      credentials: {
-        ANTHROPIC_BEARER_TOKEN: `Bearer ${token}`,
-        ANTHROPIC_AUTH_TOKEN: token,
-      },
-      created_at: new Date().toISOString(),
-    },
-    path,
-  );
+export function hasAnyProvider(path?: string): boolean {
+  return Object.keys(readCredentials(path).providers).length > 0;
 }

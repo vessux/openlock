@@ -12,7 +12,7 @@ import { login } from "../login";
 import { resolveProvider } from "../providers/resolve";
 import type { ProviderId } from "../providers/types";
 import { type Runtime, resolveRuntime } from "../runtime";
-import { readToken } from "../tokens";
+import { hasAnyProvider } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import {
   buildOpenshellExecArgv,
@@ -434,7 +434,7 @@ async function ensureHostRuntimeReady(): Promise<void> {
 function realPreflightDeps(runtime: Runtime): PreflightDeps {
   return {
     runDoctorChecks: () => runDoctorChecks(runtime),
-    readToken,
+    hasCredentials: hasAnyProvider,
     isMac: process.platform === "darwin",
     runtime,
     podmanMachineRunning,

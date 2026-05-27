@@ -5,11 +5,10 @@ import { join } from "node:path";
 import {
   credentialsPath,
   deleteProvider,
+  hasAnyProvider,
   readCredentials,
   readProvider,
-  readToken,
   writeProvider,
-  writeToken,
 } from "./tokens";
 
 let dir: string;
@@ -152,33 +151,21 @@ describe("v1 -> v2 migration", () => {
   });
 });
 
-describe("readToken shim (legacy callers)", () => {
-  it("returns ANTHROPIC_AUTH_TOKEN value when anthropic is stored", () => {
+describe("hasAnyProvider", () => {
+  it("is false when no providers are stored", () => {
+    expect(hasAnyProvider(path)).toBe(false);
+  });
+  it("is true once any provider is stored", () => {
     writeProvider(
       "anthropic",
       {
         type: "claude",
-        credentials: {
-          ANTHROPIC_BEARER_TOKEN: "Bearer x",
-          ANTHROPIC_AUTH_TOKEN: "x",
-        },
+        credentials: { ANTHROPIC_AUTH_TOKEN: "x", ANTHROPIC_BEARER_TOKEN: "Bearer x" },
         created_at: "t",
       },
       path,
     );
-    expect(readToken(path)).toBe("x");
-  });
-  it("returns null when no anthropic record", () => {
-    expect(readToken(path)).toBeNull();
-  });
-});
-
-describe("writeToken shim (legacy callers)", () => {
-  it("delegates to writeProvider('anthropic', ...)", () => {
-    writeToken(path, "tok123");
-    const r = readProvider("anthropic", path);
-    expect(r?.credentials.ANTHROPIC_AUTH_TOKEN).toBe("tok123");
-    expect(r?.credentials.ANTHROPIC_BEARER_TOKEN).toBe("Bearer tok123");
+    expect(hasAnyProvider(path)).toBe(true);
   });
 });
 

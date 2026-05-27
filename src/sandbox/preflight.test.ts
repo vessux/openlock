@@ -9,7 +9,7 @@ function makeDeps(overrides: Partial<PreflightDeps> = {}): PreflightDeps {
       { name: "podman machine (running)", ok: true },
       { name: "credentials (openlock login)", ok: true },
     ],
-    readToken: () => "tok",
+    hasCredentials: () => true,
     isMac: true,
     runtime: "podman",
     podmanMachineRunning: async () => true,
@@ -96,14 +96,14 @@ describe("preflight", () => {
     expect(result.reason).toContain("systemctl");
   });
 
-  it("runs login() inline when token missing + tty", async () => {
+  it("runs login() inline when credentials missing + tty", async () => {
     let logged = false;
-    let token: string | null = null;
+    let creds = false;
     const deps = makeDeps({
-      readToken: () => token,
+      hasCredentials: () => creds,
       login: async () => {
         logged = true;
-        token = "tok";
+        creds = true;
       },
     });
     const result = await preflight({ tty: true, deps });
@@ -111,9 +111,9 @@ describe("preflight", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("fails when token missing + non-tty", async () => {
+  it("fails when credentials missing + non-tty", async () => {
     const deps = makeDeps({
-      readToken: () => null,
+      hasCredentials: () => false,
     });
     const result = await preflight({ tty: false, deps });
     expect(result.ok).toBe(false);

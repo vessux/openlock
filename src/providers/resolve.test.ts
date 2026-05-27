@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeProvider } from "../tokens";
-import { _resetDeprecationHintForTests, resolveProvider } from "./resolve";
+import { resolveProvider } from "./resolve";
 
 let dir: string;
 let originalHome: string | undefined;
@@ -12,7 +12,6 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "openlock-resolve-"));
   originalHome = process.env.HOME;
   process.env.HOME = dir;
-  _resetDeprecationHintForTests();
 });
 afterEach(() => {
   if (originalHome === undefined) delete process.env.HOME;
@@ -71,20 +70,20 @@ describe("resolveProvider compatibility", () => {
 });
 
 describe("resolveProvider missing-signal cases", () => {
-  it("auto-defaults to anthropic for claude_code when an anthropic record exists (backward compat)", () => {
+  it("does NOT auto-select a provider even when one is configured (explicit-only)", () => {
     writeProvider("anthropic", {
       type: "claude",
       credentials: { ANTHROPIC_AUTH_TOKEN: "x", ANTHROPIC_BEARER_TOKEN: "Bearer x" },
       created_at: "t",
     });
-    expect(
+    expect(() =>
       resolveProvider({
         harness: "claude_code",
         cliFlag: undefined,
         env: {},
         readGlobalConfig: noGlobal,
       }),
-    ).toBe("anthropic");
+    ).toThrow(/No provider selected/);
   });
 
   it("errors clearly for opencode when no provider is set", () => {
