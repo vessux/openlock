@@ -3,7 +3,7 @@ import type { Runtime } from "../runtime";
 
 export interface PreflightDeps {
   runDoctorChecks: () => Promise<DoctorResult[]>;
-  readToken: () => string | null;
+  hasCredentials: () => boolean;
   isMac: boolean;
   runtime: Runtime;
   podmanMachineRunning: () => Promise<boolean>;
@@ -86,10 +86,10 @@ async function checkCredentials(
   deps: PreflightDeps,
   tty: boolean,
 ): Promise<PreflightResult | null> {
-  if (deps.readToken() !== null) return null;
+  if (deps.hasCredentials()) return null;
   if (!tty) return fail("no credentials found. Run: openlock login");
   await deps.login();
-  if (deps.readToken() === null) return fail("login did not produce a token.");
+  if (!deps.hasCredentials()) return fail("login did not produce credentials.");
   return null;
 }
 
