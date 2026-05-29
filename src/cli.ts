@@ -28,6 +28,7 @@ Other:
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
   update-base        Rewrite .openlock/Containerfile FROM to current base hash
+  prune-images       Remove stale openlock images (use --legacy for pre-M5)
   refs               Inspect and promote sandbox commits to real branches
   report             Collect diagnostic bundle for bug reports
   complete <shell>   Print shell completion script (bash|zsh|fish)
@@ -137,6 +138,11 @@ function main(): void {
     case "update-base":
       import("./cli/update-base").then(({ updateBaseCmd }) =>
         updateBaseCmd(args.slice(1)).then(processExit),
+      );
+      return;
+    case "prune-images":
+      import("./cli/prune-images").then(({ pruneImagesCmd }) =>
+        pruneImagesCmd(args.slice(1)).then(processExit),
       );
       return;
     case "refs":
