@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+// Embedded at build time via Bun's `with { type: "text" }` import attribute.
+import BASE_CONTAINERFILE from "../../containers/base.Containerfile" with { type: "text" };
 import { type Runtime, resolveRuntime } from "../runtime";
+import { ensureBase as defaultEnsureBase, isOpenlockBaseRef, parseFromImage } from "./ensure-base";
+
+export { BASE_CONTAINERFILE };
 
 export interface ImageRef {
   tag: string;
@@ -71,4 +76,57 @@ export async function ensureImage(args: EnsureImageArgs): Promise<ImageRef> {
     throw new Error(`${runtime} build failed (exit ${code}): ${buildArgs.join(" ")}`);
   }
   return { tag, built: true };
+}
+
+export interface EnsureSandboxDeps {
+  ensureBase: (baseContent: string) => Promise<string>;
+  imageExists: (runtime: Runtime, tag: string) => Promise<boolean>;
+  build: (runtime: Runtime, tag: string, contextDir: string) => Promise<void>;
+}
+
+export async function ensureSandbox(
+  userContainerfileContent: string,
+  deps?: Partial<EnsureSandboxDeps>,
+): Promise<string> {
+  const runtime = await resolveRuntime();
+  const d = {
+    ensureBase: deps?.ensureBase ?? ((c: string) => defaultEnsureBase(c)),
+    imageExists: deps?.imageExists ?? defaultImageExistsInternal,
+    build: deps?.build ?? defaultBuildInternal,
+  };
+
+  const fromImage = parseFromImage(userContainerfileContent);
+  if (isOpenlockBaseRef(fromImage)) {
+    await d.ensureBase(BASE_CONTAINERFILE);
+  }
+  // else: third-party FROM — let podman/docker handle the pull during build.
+
+  const userTag = computeImageTag(userContainerfileContent, "openlock-sandbox");
+  if (await d.imageExists(runtime, userTag)) return userTag;
+
+  const hash = userTag.split(":")[1];
+  const ctx = contextDirForHash(hash);
+  mkdirSync(ctx, { recursive: true });
+  writeFileSync(join(ctx, "Dockerfile"), userContainerfileContent);
+  await d.build(runtime, userTag, ctx);
+  return userTag;
+}
+
+async function defaultImageExistsInternal(runtime: Runtime, tag: string): Promise<boolean> {
+  const proc = Bun.spawn(buildImageExistsArgv(runtime, tag), {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  return (await proc.exited) === 0;
+}
+
+async function defaultBuildInternal(
+  runtime: Runtime,
+  tag: string,
+  contextDir: string,
+): Promise<void> {
+  const argv = buildImageBuildArgv(runtime, tag, contextDir, false);
+  const proc = Bun.spawn(argv, { stdout: "inherit", stderr: "inherit" });
+  const code = await proc.exited;
+  if (code !== 0) throw new Error(`${runtime} build failed (exit ${code})`);
 }

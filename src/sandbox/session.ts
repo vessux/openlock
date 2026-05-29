@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
@@ -25,8 +25,6 @@ import {
   startSandbox,
   waitForSandboxReady,
 } from "./container";
-import { containerfileKeyForCaps, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
-import { type Cap, detectCaps } from "./detect-caps";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
@@ -42,7 +40,7 @@ import {
 } from "./git-sync";
 import { type Harness, resolveHarness } from "./harness";
 import { friendlyNameFromId, newSessionId } from "./identity";
-import { ensureImage } from "./image-build";
+import { ensureSandbox } from "./image-build";
 import {
   bindMountArgs,
   gitBundleMounts,
@@ -72,19 +70,15 @@ export interface SandboxOpts {
   branch?: string;
 }
 
-async function buildSandboxImage(caps: Cap[]): Promise<string> {
-  const key = containerfileKeyForCaps(caps);
-  const content = DEFAULT_CONTAINERFILES[key];
-  const ref = await ensureImage({
-    containerfileContent: content,
-    tagPrefix: `openlock-${key}`,
-  });
-  console.log(ref.built ? `Built image ${ref.tag}` : `Using cached image ${ref.tag}`);
-  return ref.tag;
+async function buildSandboxImage(openlockFolderPath: string): Promise<string> {
+  const cfPath = join(openlockFolderPath, "Containerfile");
+  const userContent = readFileSync(cfPath, "utf-8");
+  const tag = await ensureSandbox(userContent);
+  console.log(`Sandbox image ${tag}`);
+  return tag;
 }
 
 interface ResolvedRepo {
-  caps: Cap[];
   policy: string;
   mounts: Mount[];
   args: string[];
@@ -94,7 +88,6 @@ interface ResolvedRepo {
 function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string): ResolvedRepo {
   if (policyOverride) {
     return {
-      caps: detectCaps(projectPath),
       policy: resolve(policyOverride),
       mounts: [],
       args: [],
@@ -107,11 +100,17 @@ function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string):
   } else if (folder.origin === "restored-config") {
     console.log("Restored .openlock/config.yaml.");
   } else if (folder.origin === "restored-policy") {
-    const suffix = folder.caps.length > 0 ? `-${folder.caps.join("-")}` : "";
-    console.log(`Restored .openlock/policy.yaml from default${suffix}.yaml.`);
+    console.log("Restored .openlock/policy.yaml from default.yaml.");
+  } else if (folder.origin === "restored-containerfile") {
+    console.log("Restored .openlock/Containerfile from seed.");
+  }
+  if (folder.deprecations.includes("caps")) {
+    console.warn(
+      "warning: config.yaml has deprecated 'caps' field; ignored. " +
+        "Run `openlock validate --fix` (coming in v0.9.x) to remove it.",
+    );
   }
   return {
-    caps: folder.caps,
     policy: folder.policyPath,
     mounts: folder.mounts,
     args: folder.args,
@@ -124,7 +123,6 @@ interface NewSession {
   name: string;
   containerName: string;
   policy: string;
-  caps: Cap[];
   image: string;
 }
 
@@ -135,13 +133,12 @@ async function createSession(
   providerId: ProviderId,
   branch: string | undefined,
 ): Promise<NewSession> {
-  const { caps, policy, mounts } = resolved;
-  console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
+  const { policy, mounts } = resolved;
 
   await startGateway();
   await ensureProvider(providerId);
 
-  const imageTag = await buildSandboxImage(caps);
+  const imageTag = await buildSandboxImage(join(projectPath, ".openlock"));
   console.log(`Policy: ${policy}`);
   console.log(`Image: ${imageTag}`);
 
@@ -248,7 +245,6 @@ async function createSession(
       id,
       name,
       repoPath: projectPath,
-      caps,
       image: imageTag,
       policy,
       createdAt: new Date().toISOString(),
@@ -258,7 +254,7 @@ async function createSession(
     };
     saveSession(sessionsDir(), meta);
 
-    return { id, name, containerName, policy, caps, image: imageTag };
+    return { id, name, containerName, policy, image: imageTag };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

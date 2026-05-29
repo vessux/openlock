@@ -31,14 +31,12 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import {
-  containerfileKeyForCaps,
-  DEFAULT_CONTAINERFILES,
-} from "../../src/sandbox/default-containerfiles";
+import { computeBaseTag, GHCR_BASE_PREFIX } from "../../src/sandbox/ensure-base";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
-import { ensureImage } from "../../src/sandbox/image-build";
+import { BASE_CONTAINERFILE, ensureSandbox } from "../../src/sandbox/image-build";
+import { seedContainerfile } from "../../src/sandbox/seed-containerfile";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const SECRET_VALUE = "smoke-value-harness-binary";
@@ -133,11 +131,13 @@ describe("harness binary triggers cred_inject (live integration)", () => {
           throw new Error(`provider create failed: ${created.stderr}`);
         }
 
-        const imageKey = containerfileKeyForCaps([]);
-        const image = await ensureImage({
-          containerfileContent: DEFAULT_CONTAINERFILES[imageKey],
-          tagPrefix: `openlock-${imageKey}`,
+        const baseHash = computeBaseTag(BASE_CONTAINERFILE).slice(GHCR_BASE_PREFIX.length);
+        const userContainerfile = seedContainerfile({
+          harnesses: ["claude_code"],
+          baseHash,
+          baseContent: BASE_CONTAINERFILE,
         });
+        const imageTag = await ensureSandbox(userContainerfile);
 
         // Run claude with a fake API key and a one-shot prompt — it
         // will issue HTTP requests against api.anthropic.com which the
@@ -158,7 +158,7 @@ describe("harness binary triggers cred_inject (live integration)", () => {
           "--name",
           sessionName,
           "--from",
-          image.tag,
+          imageTag,
           "--upload",
           `${join(tmp, "staging")}:/sandbox/`,
           "--no-git-ignore",

@@ -37,7 +37,6 @@ function fakeMeta(name: string, repoPath: string): SessionMeta {
     id: name,
     name,
     repoPath,
-    caps: [],
     image: "x",
     policy: "x",
     createdAt: "2026-01-01T00:00:00.000Z",

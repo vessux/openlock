@@ -15,7 +15,6 @@ function makeSession(name: string) {
       id: name,
       name,
       repoPath: `/tmp/${name}`,
-      caps: [],
       image: "img",
       policy: "default",
       createdAt: "2026-05-09T00:00:00Z",

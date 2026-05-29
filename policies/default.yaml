@@ -28,7 +28,7 @@ network_policies:
   claude_code:
     binaries:
       - path: /usr/local/bin/claude
-      - path: /usr/bin/node
+      - path: /usr/local/bin/node
     endpoints:
       - host: api.anthropic.com
         port: 443
@@ -52,7 +52,7 @@ network_policies:
   opencode:
     binaries:
       - path: /usr/local/bin/opencode
-      - path: /usr/bin/node
+      - path: /usr/local/bin/node
     endpoints:
       - host: api.anthropic.com
         port: 443
@@ -91,10 +91,25 @@ network_policies:
     allowed_secrets:
       - ANTHROPIC_API_KEY
       - OPENROUTER_BEARER_TOKEN
-  pip_packages:
+  npm_packages:
     binaries:
-      - path: /usr/bin/pip
-      - path: /usr/bin/pip3
+      - path: /usr/local/bin/npm
+      - path: /usr/local/bin/node
+      - path: /usr/local/bin/npx
+    endpoints:
+      - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+        allow_encoded_slash: true
+        trust_check:
+          registry: npm
+    allowed_secrets: []
+  python_packages:
+    binaries:
+      - path: /usr/local/bin/uv
+      - path: /usr/local/bin/uvx
       - path: /usr/bin/python3
     endpoints:
       - host: pypi.org
@@ -111,19 +126,4 @@ network_policies:
         access: read-only
         trust_check:
           registry: pypi
-    allowed_secrets: []
-  npm_packages:
-    binaries:
-      - path: /usr/bin/npm
-      - path: /usr/bin/node
-      - path: /usr/bin/npx
-    endpoints:
-      - host: registry.npmjs.org
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-        allow_encoded_slash: true
-        trust_check:
-          registry: npm
     allowed_secrets: []

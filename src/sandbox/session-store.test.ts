@@ -20,9 +20,8 @@ describe("session-store", () => {
       id: "existing-test-1",
       name: "test-session",
       repoPath: "/tmp/project",
-      caps: ["js"],
-      image: "openlock-core-js:abc123def456",
-      policy: "policies/default-js.yaml",
+      image: "openlock-sandbox:abc123def456",
+      policy: "policies/default.yaml",
       createdAt: "2026-05-03T12:00:00Z",
       lastAttachedAt: null,
       attachedPid: null,
@@ -31,6 +30,30 @@ describe("session-store", () => {
     saveSession(testDir, meta);
     const loaded = loadSession(testDir, "existing-test-1");
     expect(loaded).toEqual(meta);
+  });
+
+  it("loads legacy session meta with caps field (silently drops it)", () => {
+    const id = "legacy-with-caps";
+    mkdirSync(join(testDir, id), { recursive: true });
+    writeFileSync(
+      join(testDir, id, "meta.json"),
+      JSON.stringify({
+        id,
+        name: "legacy-caps",
+        repoPath: "/tmp/old",
+        caps: ["js", "py"],
+        image: "openlock-core-js-py:abc",
+        policy: "policies/default-js-py.yaml",
+        createdAt: "2026-05-03T12:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "claude_code",
+      }),
+    );
+    const loaded = loadSession(testDir, id);
+    expect(loaded).not.toBeNull();
+    expect((loaded as unknown as { caps?: unknown }).caps).toBeUndefined();
+    expect(loaded?.repoPath).toBe("/tmp/old");
   });
 
   it("returns null for non-existent session", () => {
@@ -57,8 +80,7 @@ describe("session-store v2", () => {
       id: "0190a2d5-7c6a-7b3e-8f4d-abcdef123456",
       name: "openlock-123456",
       repoPath: "/tmp/repo",
-      caps: [],
-      image: "openlock-core:abc123",
+      image: "openlock-sandbox:abc123",
       policy: "/abs/policy.yaml",
       createdAt: "2026-05-07T10:00:00Z",
       lastAttachedAt: null,
@@ -99,7 +121,6 @@ describe("session-store v2", () => {
       id,
       name: "n-legacy",
       path: "/repo/legacy",
-      caps: [],
       image: "img",
       policy: "/p",
       createdAt: "2026-05-07T10:00:00Z",
@@ -169,7 +190,6 @@ describe("session-store harness field (backward compat)", () => {
           id,
           name: "sb-legacy",
           repoPath: "/some/repo",
-          caps: [],
           image: "openlock-core",
           policy: "default",
           createdAt: "2026-05-01T00:00:00Z",
@@ -192,7 +212,6 @@ describe("session-store harness field (backward compat)", () => {
         id: "test-id-new",
         name: "sb-new",
         repoPath: "/some/repo",
-        caps: [],
         image: "openlock-core",
         policy: "default",
         createdAt: "2026-05-19T00:00:00Z",

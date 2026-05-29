@@ -7,6 +7,7 @@ import {
   buildImageExistsArgv,
   computeImageTag,
   contextDirForHash,
+  ensureSandbox,
 } from "./image-build";
 
 describe("computeImageTag", () => {
@@ -91,5 +92,59 @@ describe("buildImageBuildArgv", () => {
       "--no-cache",
       "/ctx",
     ]);
+  });
+});
+
+describe("ensureSandbox", () => {
+  it("calls ensureBase when FROM starts with openlock-base prefix", async () => {
+    let baseEnsured = false;
+    const userContent = "FROM ghcr.io/vessux/openlock-base:abc\nRUN echo hi\n";
+    await ensureSandbox(userContent, {
+      ensureBase: async () => {
+        baseEnsured = true;
+        return "ghcr.io/vessux/openlock-base:abc";
+      },
+      imageExists: async () => true,
+      build: async () => {
+        throw new Error("should not build user tag");
+      },
+    });
+    expect(baseEnsured).toBe(true);
+  });
+
+  it("skips ensureBase for third-party FROM", async () => {
+    let baseEnsured = false;
+    const userContent = "FROM custom-registry.example/img:1\nRUN x\n";
+    await ensureSandbox(userContent, {
+      ensureBase: async () => {
+        baseEnsured = true;
+        return "...";
+      },
+      imageExists: async () => true,
+      build: async () => {},
+    });
+    expect(baseEnsured).toBe(false);
+  });
+
+  it("builds when user-tag image not present", async () => {
+    let built = false;
+    const userContent = "FROM ghcr.io/vessux/openlock-base:abc\n";
+    await ensureSandbox(userContent, {
+      ensureBase: async () => "ghcr.io/vessux/openlock-base:abc",
+      imageExists: async () => false,
+      build: async () => {
+        built = true;
+      },
+    });
+    expect(built).toBe(true);
+  });
+
+  it("returns openlock-sandbox-prefixed tag", async () => {
+    const tag = await ensureSandbox("FROM ghcr.io/vessux/openlock-base:abc\n", {
+      ensureBase: async () => "ghcr.io/vessux/openlock-base:abc",
+      imageExists: async () => true,
+      build: async () => {},
+    });
+    expect(tag).toMatch(/^openlock-sandbox:[0-9a-f]{12}$/);
   });
 });

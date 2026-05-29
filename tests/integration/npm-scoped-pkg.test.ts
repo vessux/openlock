@@ -12,15 +12,11 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  containerfileKeyForCaps,
-  DEFAULT_CONTAINERFILES,
-} from "../../src/sandbox/default-containerfiles";
 import { defaultPolicyContent } from "../../src/sandbox/default-policies";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
-import { ensureImage } from "../../src/sandbox/image-build";
+import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 
@@ -80,7 +76,7 @@ describe("npm scoped packages via default-js policy", () => {
       await createBundle(repoDir, join(staging, "repo.bundle"));
 
       const policyPath = join(tmp, "policy.yaml");
-      writeFileSync(policyPath, defaultPolicyContent(["js"]));
+      writeFileSync(policyPath, defaultPolicyContent());
 
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
@@ -96,10 +92,9 @@ describe("npm scoped packages via default-js policy", () => {
       try {
         await startGateway();
 
-        const imageKey = containerfileKeyForCaps(["js"]);
         const image = await ensureImage({
-          containerfileContent: DEFAULT_CONTAINERFILES[imageKey],
-          tagPrefix: `openlock-${imageKey}`,
+          containerfileContent: BASE_CONTAINERFILE,
+          tagPrefix: "openlock-base-it",
         });
 
         // Fetch scoped-package metadata via npm. npm encodes the slash:

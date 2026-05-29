@@ -1,54 +1,19 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { updateImages } from "./build-images";
 
 describe("updateImages", () => {
-  it("calls ensureImage once per cap permutation (4 total)", async () => {
-    const calls: { tagPrefix: string; noCache: boolean }[] = [];
-    const fakeEnsure = mock(
-      async (args: { containerfileContent: string; tagPrefix: string; noCache?: boolean }) => {
-        calls.push({ tagPrefix: args.tagPrefix, noCache: !!args.noCache });
-        return { tag: `${args.tagPrefix}:fake`, built: true };
+  it("calls ensureBase once with embedded base content", async () => {
+    const ensureBaseCalls: string[] = [];
+    await updateImages(
+      { noCache: false },
+      {
+        ensureBase: async (content: string) => {
+          ensureBaseCalls.push(content);
+          return "ghcr.io/vessux/openlock-base:fake";
+        },
       },
     );
-    await updateImages({ noCache: false }, { ensureImage: fakeEnsure });
-    expect(calls.length).toBe(4);
-    const prefixes = calls.map((c) => c.tagPrefix).sort();
-    expect(prefixes).toEqual([
-      "openlock-core",
-      "openlock-core-js",
-      "openlock-core-js-py",
-      "openlock-core-py",
-    ]);
-  });
-
-  it("propagates noCache flag to ensureImage", async () => {
-    const calls: { noCache: boolean }[] = [];
-    const fakeEnsure = mock(
-      async (args: { containerfileContent: string; tagPrefix: string; noCache?: boolean }) => {
-        calls.push({ noCache: !!args.noCache });
-        return { tag: `${args.tagPrefix}:fake`, built: true };
-      },
-    );
-    await updateImages({ noCache: true }, { ensureImage: fakeEnsure });
-    expect(calls.every((c) => c.noCache === true)).toBe(true);
-  });
-
-  it("passes containerfile content that installs both harness binaries", async () => {
-    const calls: { tagPrefix: string; containerfileContent: string }[] = [];
-    const fakeEnsure = mock(
-      async (args: { containerfileContent: string; tagPrefix: string; noCache?: boolean }) => {
-        calls.push({
-          tagPrefix: args.tagPrefix,
-          containerfileContent: args.containerfileContent,
-        });
-        return { tag: `${args.tagPrefix}:fake`, built: true };
-      },
-    );
-    await updateImages({ noCache: false }, { ensureImage: fakeEnsure });
-    expect(calls.length).toBe(4);
-    for (const c of calls) {
-      expect(c.containerfileContent, c.tagPrefix).toContain("@anthropic-ai/claude-code@");
-      expect(c.containerfileContent, c.tagPrefix).toContain("opencode-ai@");
-    }
+    expect(ensureBaseCalls.length).toBe(1);
+    expect(ensureBaseCalls[0]).toContain("FROM ubuntu:24.04");
   });
 });

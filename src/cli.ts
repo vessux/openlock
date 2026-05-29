@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import pkg from "../package.json" with { type: "json" };
+import { computeBaseTag } from "./sandbox/ensure-base";
+import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 
 const USAGE = `
 openlock - sandbox orchestration toolkit
@@ -25,6 +27,8 @@ Other:
   gateway            Manage the gateway
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
+  update-base        Rewrite .openlock/Containerfile FROM to current base hash
+  prune-images       Remove stale openlock images (use --legacy for pre-M5)
   refs               Inspect and promote sandbox commits to real branches
   report             Collect diagnostic bundle for bug reports
   complete <shell>   Print shell completion script (bash|zsh|fish)
@@ -36,6 +40,7 @@ Common flags:
   --json             Machine-readable output (list, status)
   --help, -h         Show this help
   --version, -v      Show version
+  --print-base-tag   Print the expected ghcr tag for the embedded base image
 `.trim();
 
 function main(): void {
@@ -43,6 +48,11 @@ function main(): void {
 
   if (args.includes("--version") || args.includes("-v") || args[0] === "version") {
     console.log(pkg.version);
+    process.exit(0);
+  }
+
+  if (args.includes("--print-base-tag")) {
+    console.log(computeBaseTag(BASE_CONTAINERFILE));
     process.exit(0);
   }
 
@@ -124,6 +134,16 @@ function main(): void {
       return;
     case "update-images":
       import("./cli/update-images").then(({ updateImagesCmd }) => updateImagesCmd(args.slice(1)));
+      return;
+    case "update-base":
+      import("./cli/update-base").then(({ updateBaseCmd }) =>
+        updateBaseCmd(args.slice(1)).then(processExit),
+      );
+      return;
+    case "prune-images":
+      import("./cli/prune-images").then(({ pruneImagesCmd }) =>
+        pruneImagesCmd(args.slice(1)).then(processExit),
+      );
       return;
     case "refs":
       import("./cli/refs").then(({ refsCmd }) => refsCmd(args.slice(1)).then(processExit));
