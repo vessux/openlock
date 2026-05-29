@@ -1,37 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Added
-
-- **Single base sandbox image (`ghcr.io/vessux/openlock-base`).** Replaces the 4-cap image matrix (`openlock-core{,-js,-py,-js-py}`) with one content-hashed base. Each project commits a `.openlock/Containerfile` that declares the base via `FROM` and lists which harnesses to install. The host pulls the prebuilt base from ghcr when available, falls back to building locally on pull-fail (same flow for dev/offline/CI-pre-push). See `containers/base.Containerfile` for the source-of-truth; `openlock init` (lvc.1, future) will seed the per-project `.openlock/Containerfile` from the embedded base + harness selection.
-- **`openlock update-base`** — rewrites `.openlock/Containerfile` `FROM` line to the current embedded base hash, preserving the harness block via sentinel matching. Use after a `bun upgrade openlock` if you want to pick up the latest base.
-- **`openlock prune-images [--legacy] [--dry-run]`** — image GC. Default mode removes stale `openlock-sandbox:*` tags (not in use by any container) and non-current `ghcr.io/vessux/openlock-base:*` tags. With `--legacy`, also removes pre-v0.9 `openlock-core*` images.
-- **`openlock --print-base-tag`** — prints the expected ghcr tag for the embedded `containers/base.Containerfile`. Used by CI to push the base image to the correct content-hash tag.
-- **Live integration smoke for the slim-images pipeline.** Gated behind `OPENLOCK_LIVE_INTEGRATION=1`; verifies `ensureBase()` builds the base and `seedContainerfile()` + `ensureSandbox()` produces a working sandbox image with the harness binary resolved.
-
-### Changed
-
-- **Halved sandbox image size.** Final claude_code sandbox is ~640MB (vs ~1.4-1.57GB measured pre-v0.9). Driven by:
-  - Slim node install via official tarball + `--exclude` doc trimming (~85MB vs ~244MB NodeSource deb).
-  - Drop unused `bun`, `iptables`, `openssh-sftp-server`, `unzip` from the base.
-  - Single base instead of 4 cap-variants (no longer duplicating layers across cap-permutation images).
-- **Both `node` and `python3` + `uv` ship in every sandbox.** Caps detection is gone; any sandbox can run npm and uv without an `openlock init`-time question. Per-language tooling (e.g., bun) is added by the user editing `.openlock/Containerfile` if desired.
-- **Per-arch `sha256` pinning for upstream node + uv tarballs** in `containers/base.Containerfile` (defense-in-depth beyond TLS trust).
-
-### Removed
-
-- **Breaking: `caps` field in `.openlock/config.yaml` is no longer used.** Accepted-and-ignored on read with a deprecation warning at `sandbox create`; will be removable via `openlock validate --fix` (lvc.2, future). Existing configs continue to work.
-- **Breaking: pre-v0.9 sandbox images are orphaned.** Run `openlock prune-images --legacy` after upgrading to reclaim disk.
-- `src/sandbox/detect-caps.ts`, `src/sandbox/default-containerfiles.ts`, `containers/core*.Containerfile`, `policies/default-{js,py,js-py}.yaml` — all gone.
-- `caps: Cap[]` field stripped from in-flight `SessionMeta`. Pre-v0.9 session metadata files have `caps` silently ignored on load.
-
-### Fixed
-
-- `seedContainerfile()` no longer emits `ln -sf /usr/bin/<harness> /usr/local/bin/<harness>` — those lines were inherited from the NodeSource-deb base (npm prefix `/usr`). On the new tarball-slim base (prefix `/usr/local`), npm's own symlink at `/usr/local/bin/<harness>` is correct, and the `ln -sf` was clobbering it with a dangling target. Caught by the new live integration smoke.
-
-Refs bd `openlock-8op`.
-
 ## v0.8.0
 
 ### Added
