@@ -27,6 +27,7 @@ Other:
   gateway            Manage the gateway
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
+  update-base        Rewrite .openlock/Containerfile FROM to current base hash
   refs               Inspect and promote sandbox commits to real branches
   report             Collect diagnostic bundle for bug reports
   complete <shell>   Print shell completion script (bash|zsh|fish)
@@ -132,6 +133,11 @@ function main(): void {
       return;
     case "update-images":
       import("./cli/update-images").then(({ updateImagesCmd }) => updateImagesCmd(args.slice(1)));
+      return;
+    case "update-base":
+      import("./cli/update-base").then(({ updateBaseCmd }) =>
+        updateBaseCmd(args.slice(1)).then(processExit),
+      );
       return;
     case "refs":
       import("./cli/refs").then(({ refsCmd }) => refsCmd(args.slice(1)).then(processExit));
