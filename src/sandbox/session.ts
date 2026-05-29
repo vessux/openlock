@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
@@ -25,7 +25,6 @@ import {
   startSandbox,
   waitForSandboxReady,
 } from "./container";
-import { containerfileKeyForCaps, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
 import { type Cap, detectCaps } from "./detect-caps";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
@@ -42,7 +41,7 @@ import {
 } from "./git-sync";
 import { type Harness, resolveHarness } from "./harness";
 import { friendlyNameFromId, newSessionId } from "./identity";
-import { ensureImage } from "./image-build";
+import { ensureSandbox } from "./image-build";
 import {
   bindMountArgs,
   gitBundleMounts,
@@ -72,15 +71,12 @@ export interface SandboxOpts {
   branch?: string;
 }
 
-async function buildSandboxImage(caps: Cap[]): Promise<string> {
-  const key = containerfileKeyForCaps(caps);
-  const content = DEFAULT_CONTAINERFILES[key];
-  const ref = await ensureImage({
-    containerfileContent: content,
-    tagPrefix: `openlock-${key}`,
-  });
-  console.log(ref.built ? `Built image ${ref.tag}` : `Using cached image ${ref.tag}`);
-  return ref.tag;
+async function buildSandboxImage(openlockFolderPath: string): Promise<string> {
+  const cfPath = join(openlockFolderPath, "Containerfile");
+  const userContent = readFileSync(cfPath, "utf-8");
+  const tag = await ensureSandbox(userContent);
+  console.log(`Sandbox image ${tag}`);
+  return tag;
 }
 
 interface ResolvedRepo {
@@ -148,7 +144,7 @@ async function createSession(
   await startGateway();
   await ensureProvider(providerId);
 
-  const imageTag = await buildSandboxImage(caps);
+  const imageTag = await buildSandboxImage(join(projectPath, ".openlock"));
   console.log(`Policy: ${policy}`);
   console.log(`Image: ${imageTag}`);
 

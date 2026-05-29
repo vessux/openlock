@@ -1,32 +1,19 @@
-import { type ContainerfileKey, DEFAULT_CONTAINERFILES } from "./default-containerfiles";
-import {
-  ensureImage as defaultEnsureImage,
-  type EnsureImageArgs,
-  type ImageRef,
-} from "./image-build";
+import { ensureBase as defaultEnsureBase } from "./ensure-base";
+import { BASE_CONTAINERFILE } from "./image-build";
 
 export interface UpdateImagesOpts {
   noCache: boolean;
 }
 
 export interface UpdateImagesDeps {
-  ensureImage: (args: EnsureImageArgs) => Promise<ImageRef>;
+  ensureBase: (content: string) => Promise<string>;
 }
 
-const KEYS: ContainerfileKey[] = ["core", "core-js", "core-py", "core-js-py"];
-
 export async function updateImages(
-  opts: UpdateImagesOpts,
-  deps: UpdateImagesDeps = { ensureImage: defaultEnsureImage },
+  _opts: UpdateImagesOpts,
+  deps: UpdateImagesDeps = { ensureBase: defaultEnsureBase },
 ): Promise<void> {
-  for (const key of KEYS) {
-    const content = DEFAULT_CONTAINERFILES[key];
-    console.log(`> openlock-${key}`);
-    const ref = await deps.ensureImage({
-      containerfileContent: content,
-      tagPrefix: `openlock-${key}`,
-      noCache: opts.noCache,
-    });
-    console.log(ref.built ? `  built ${ref.tag}` : `  cached ${ref.tag}`);
-  }
+  console.log("> openlock-base");
+  const tag = await deps.ensureBase(BASE_CONTAINERFILE);
+  console.log(`  ready ${tag}`);
 }
