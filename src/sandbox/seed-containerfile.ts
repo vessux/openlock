@@ -1,4 +1,5 @@
 import type { Harness } from "./harness";
+import { HARNESS_SENTINEL } from "./update-containerfile";
 
 function multiHarnessBlock(harnesses: Harness[]): string {
   const installs: string[] = [];
@@ -100,7 +101,7 @@ ARG SANDBOX_GID=999999
 #
 ${inlineComment(args.baseContent)}
 
-# ---- Harness ---------------------------------------------------------------
+${HARNESS_SENTINEL}
 # Add/remove harness installs below. Keep the final USER directive.
 ${harnessBlock}
 `;
