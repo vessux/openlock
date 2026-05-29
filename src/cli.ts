@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import pkg from "../package.json" with { type: "json" };
+import { computeBaseTag } from "./sandbox/ensure-base";
+import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 
 const USAGE = `
 openlock - sandbox orchestration toolkit
@@ -36,6 +38,7 @@ Common flags:
   --json             Machine-readable output (list, status)
   --help, -h         Show this help
   --version, -v      Show version
+  --print-base-tag   Print the expected ghcr tag for the embedded base image
 `.trim();
 
 function main(): void {
@@ -43,6 +46,11 @@ function main(): void {
 
   if (args.includes("--version") || args.includes("-v") || args[0] === "version") {
     console.log(pkg.version);
+    process.exit(0);
+  }
+
+  if (args.includes("--print-base-tag")) {
+    console.log(computeBaseTag(BASE_CONTAINERFILE));
     process.exit(0);
   }
 
