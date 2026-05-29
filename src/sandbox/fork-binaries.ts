@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { forkDir } from "../paths";
@@ -18,6 +18,8 @@ const CACHE_DIR = join(
   "bin",
   OPENSHELL_FORK_TAG,
 );
+
+const DEV_CACHE_DIR = join(process.env.HOME || homedir(), ".cache", "openlock", "dev-bin");
 
 export function isDevMode(): boolean {
   return existsSync(join(forkDir(), ".git"));
@@ -99,9 +101,66 @@ async function buildFromSource(
   return releasePath;
 }
 
+async function captureStdout(argv: string[], cwd: string): Promise<string> {
+  const proc = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "pipe" });
+  const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  if (code !== 0) {
+    throw new Error(`${argv.join(" ")} failed in ${cwd} (exit ${code})`);
+  }
+  return text;
+}
+
+// Fingerprint the fork's working tree so dev builds can be cached. Combines
+// HEAD commit + tracked-file diff + untracked-file names — covers committed
+// state, dirty edits, and newly-staged sources. Untracked file *contents*
+// are intentionally excluded (rare for the fork; users iterating on a new
+// file can `git add -N` to pull it into the diff).
+async function forkFingerprint(fork: string): Promise<string> {
+  const head = await captureStdout(["git", "rev-parse", "HEAD"], fork);
+  const diff = await captureStdout(["git", "diff", "HEAD"], fork);
+  const untracked = await captureStdout(
+    ["git", "ls-files", "--others", "--exclude-standard"],
+    fork,
+  );
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(head);
+  hasher.update("\0");
+  hasher.update(diff);
+  hasher.update("\0");
+  hasher.update(untracked);
+  return hasher.digest("hex").slice(0, 16);
+}
+
+// Wrap buildFromSource with a fingerprint-keyed cache. On cache hit returns
+// the prior binary path immediately; on miss invokes cargo and copies the
+// release artifact into the cache. Set OPENLOCK_REBUILD=1 to force a build.
+async function buildFromSourceCached(
+  crate: string,
+  target?: string,
+  useZigbuild = false,
+): Promise<string> {
+  const fork = forkDir();
+  const fingerprint = await forkFingerprint(fork);
+  const binName = crate === "openshell-server" ? "openshell-gateway" : crate;
+  const cacheName = target ? `${binName}-${target}` : binName;
+  const cacheDir = join(DEV_CACHE_DIR, fingerprint);
+  const cached = join(cacheDir, cacheName);
+
+  if (existsSync(cached) && !process.env.OPENLOCK_REBUILD) {
+    console.log(`Using cached ${binName} (${fingerprint})`);
+    return cached;
+  }
+
+  const built = await buildFromSource(crate, target, useZigbuild);
+  mkdirSync(cacheDir, { recursive: true });
+  copyFileSync(built, cached);
+  chmodSync(cached, 0o755);
+  return cached;
+}
+
 export async function getGatewayBinary(): Promise<string> {
   if (isDevMode()) {
-    return await buildFromSource("openshell-server");
+    return await buildFromSourceCached("openshell-server");
   }
   return await ensureFromRelease("openshell-gateway");
 }
@@ -109,11 +168,11 @@ export async function getGatewayBinary(): Promise<string> {
 export async function getSupervisorBinary(): Promise<string> {
   if (isDevMode()) {
     if (process.platform === "linux") {
-      return await buildFromSource("openshell-sandbox");
+      return await buildFromSourceCached("openshell-sandbox");
     }
     const target =
       process.arch === "arm64" ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";
-    return await buildFromSource("openshell-sandbox", target, true);
+    return await buildFromSourceCached("openshell-sandbox", target, true);
   }
   return await ensureFromRelease("openshell-sandbox");
 }
