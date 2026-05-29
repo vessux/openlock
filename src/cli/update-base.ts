@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { computeBaseTag, GHCR_BASE_PREFIX } from "../sandbox/ensure-base";
@@ -22,11 +22,17 @@ export async function updateBaseCmd(argv: string[]): Promise<number> {
 
   const project = values.project as string;
   const cfPath = join(project, ".openlock", "Containerfile");
-  if (!existsSync(cfPath)) {
-    console.error(`error: .openlock/Containerfile not found at ${cfPath}`);
-    return 1;
+  let current: string;
+  try {
+    current = readFileSync(cfPath, "utf-8");
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") {
+      console.error(`error: .openlock/Containerfile not found at ${cfPath}`);
+      return 1;
+    }
+    throw e;
   }
-  const current = readFileSync(cfPath, "utf-8");
 
   const expectedTag = computeBaseTag(BASE_CONTAINERFILE);
   const newHash = expectedTag.slice(GHCR_BASE_PREFIX.length);

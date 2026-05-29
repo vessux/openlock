@@ -9,6 +9,7 @@
 // runs.
 
 import { describe, expect, it } from "bun:test";
+import { resolveRuntime } from "../../src/runtime";
 import { computeBaseTag, ensureBase } from "../../src/sandbox/ensure-base";
 import { BASE_CONTAINERFILE, ensureSandbox } from "../../src/sandbox/image-build";
 import { seedContainerfile } from "../../src/sandbox/seed-containerfile";
@@ -35,7 +36,8 @@ describe.skipIf(!LIVE)("slim-images live build", () => {
     expect(tag).toMatch(/^openlock-sandbox:[0-9a-f]{12}$/);
 
     // Sanity: claude binary present at expected path.
-    const proc = Bun.spawn(["podman", "run", "--rm", tag, "which", "claude"], {
+    const runtime = await resolveRuntime();
+    const proc = Bun.spawn([runtime, "run", "--rm", tag, "which", "claude"], {
       stdout: "pipe",
       stderr: "pipe",
     });

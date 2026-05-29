@@ -47,5 +47,6 @@ RUN groupadd -r supervisor \
 USER sandbox
 WORKDIR /sandbox
 ENV HOME=/sandbox
-RUN git config --global user.name "Sandbox" \
+RUN mkdir -p /sandbox/repo \
+ && git config --global user.name "Sandbox" \
  && git config --global user.email "sandbox@openlock.local"
