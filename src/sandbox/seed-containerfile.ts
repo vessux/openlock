@@ -7,7 +7,7 @@ function multiHarnessBlock(harnesses: Harness[]): string {
   for (const h of harnesses) {
     if (h === "claude_code") {
       installs.push(
-        `RUN npm install -g @anthropic-ai/claude-code@2.1.128 \\\n && ln -sf /usr/bin/claude /usr/local/bin/claude`,
+        `RUN npm install -g @anthropic-ai/claude-code@2.1.128`,
       );
       postInstalls.push(`RUN cat > /sandbox/.claude.json <<'JSON'
 {
@@ -25,7 +25,7 @@ function multiHarnessBlock(harnesses: Harness[]): string {
 JSON`);
     } else if (h === "opencode") {
       installs.push(
-        `RUN npm install -g opencode-ai@1.15.5 \\\n && ln -sf /usr/bin/opencode /usr/local/bin/opencode`,
+        `RUN npm install -g opencode-ai@1.15.5`,
       );
     }
   }
@@ -36,8 +36,7 @@ USER \${SANDBOX_UID}:\${SANDBOX_GID}${postInstalls.length > 0 ? `\n${postInstall
 
 const HARNESS_FRAGMENTS: Record<Harness, string> = {
   claude_code: `USER root
-RUN npm install -g @anthropic-ai/claude-code@2.1.128 \\
- && ln -sf /usr/bin/claude /usr/local/bin/claude
+RUN npm install -g @anthropic-ai/claude-code@2.1.128
 USER \${SANDBOX_UID}:\${SANDBOX_GID}
 RUN cat > /sandbox/.claude.json <<'JSON'
 {
@@ -54,8 +53,7 @@ RUN cat > /sandbox/.claude.json <<'JSON'
 }
 JSON`,
   opencode: `USER root
-RUN npm install -g opencode-ai@1.15.5 \\
- && ln -sf /usr/bin/opencode /usr/local/bin/opencode
+RUN npm install -g opencode-ai@1.15.5
 USER \${SANDBOX_UID}:\${SANDBOX_GID}`,
 };
 

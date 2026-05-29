@@ -23,6 +23,5 @@ ARG SANDBOX_GID=999999
 # ---- Harness ---------------------------------------------------------------
 # Add/remove harness installs below. Keep the final USER directive.
 USER root
-RUN npm install -g opencode-ai@1.15.5 \
- && ln -sf /usr/bin/opencode /usr/local/bin/opencode
+RUN npm install -g opencode-ai@1.15.5
 USER ${SANDBOX_UID}:${SANDBOX_GID}
