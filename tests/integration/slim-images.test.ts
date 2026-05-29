@@ -16,40 +16,32 @@ import { seedContainerfile } from "../../src/sandbox/seed-containerfile";
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 
 describe.skipIf(!LIVE)("slim-images live build", () => {
-  it(
-    "builds base image from embedded Containerfile",
-    async () => {
-      const tag = await ensureBase(BASE_CONTAINERFILE);
-      expect(tag).toMatch(/^ghcr\.io\/vessux\/openlock-base:[0-9a-f]{12}$/);
-    },
-    180_000,
-  );
+  it("builds base image from embedded Containerfile", async () => {
+    const tag = await ensureBase(BASE_CONTAINERFILE);
+    expect(tag).toMatch(/^ghcr\.io\/vessux\/openlock-base:[0-9a-f]{12}$/);
+  }, 180_000);
 
-  it(
-    "builds a sandbox image with claude_code and resolves /usr/local/bin/claude",
-    async () => {
-      const baseHash = computeBaseTag(BASE_CONTAINERFILE).split(":").pop();
-      if (!baseHash) throw new Error("baseHash null");
+  it("builds a sandbox image with claude_code and resolves /usr/local/bin/claude", async () => {
+    const baseHash = computeBaseTag(BASE_CONTAINERFILE).split(":").pop();
+    if (!baseHash) throw new Error("baseHash null");
 
-      const userContent = seedContainerfile({
-        harnesses: ["claude_code"],
-        baseHash,
-        baseContent: BASE_CONTAINERFILE,
-      });
+    const userContent = seedContainerfile({
+      harnesses: ["claude_code"],
+      baseHash,
+      baseContent: BASE_CONTAINERFILE,
+    });
 
-      const tag = await ensureSandbox(userContent);
-      expect(tag).toMatch(/^openlock-sandbox:[0-9a-f]{12}$/);
+    const tag = await ensureSandbox(userContent);
+    expect(tag).toMatch(/^openlock-sandbox:[0-9a-f]{12}$/);
 
-      // Sanity: claude binary present at expected path.
-      const proc = Bun.spawn(["podman", "run", "--rm", tag, "which", "claude"], {
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const stdout = await new Response(proc.stdout).text();
-      const code = await proc.exited;
-      expect(code).toBe(0);
-      expect(stdout.trim()).toBe("/usr/local/bin/claude");
-    },
-    240_000,
-  );
+    // Sanity: claude binary present at expected path.
+    const proc = Bun.spawn(["podman", "run", "--rm", tag, "which", "claude"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    expect(code).toBe(0);
+    expect(stdout.trim()).toBe("/usr/local/bin/claude");
+  }, 240_000);
 });

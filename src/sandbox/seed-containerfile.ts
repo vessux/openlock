@@ -6,9 +6,7 @@ function multiHarnessBlock(harnesses: Harness[]): string {
   const postInstalls: string[] = [];
   for (const h of harnesses) {
     if (h === "claude_code") {
-      installs.push(
-        `RUN npm install -g @anthropic-ai/claude-code@2.1.128`,
-      );
+      installs.push(`RUN npm install -g @anthropic-ai/claude-code@2.1.128`);
       postInstalls.push(`RUN cat > /sandbox/.claude.json <<'JSON'
 {
   "hasCompletedOnboarding": true,
@@ -24,9 +22,7 @@ function multiHarnessBlock(harnesses: Harness[]): string {
 }
 JSON`);
     } else if (h === "opencode") {
-      installs.push(
-        `RUN npm install -g opencode-ai@1.15.5`,
-      );
+      installs.push(`RUN npm install -g opencode-ai@1.15.5`);
     }
   }
   return `USER root
