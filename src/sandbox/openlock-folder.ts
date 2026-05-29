@@ -2,32 +2,39 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import yaml from "js-yaml";
 import { defaultPolicyContent } from "./default-policies";
-import { ALL_CAPS, type Cap, detectCaps } from "./detect-caps";
+import { computeBaseTag, GHCR_BASE_PREFIX } from "./ensure-base";
+import { resolveHarness } from "./harness";
+import { BASE_CONTAINERFILE } from "./image-build";
 import { type Mount, parseMounts } from "./mounts";
+import { seedContainerfile } from "./seed-containerfile";
 
 const FOLDER_NAME = ".openlock";
 const CONFIG_FILENAME = "config.yaml";
 const POLICY_FILENAME = "policy.yaml";
+const CONTAINERFILE_FILENAME = "Containerfile";
 
-export interface OpenlockFolderConfig {
-  caps: Cap[];
+interface OpenlockFolderConfig {
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
+  deprecations: string[];
 }
 
-export function configPath(folderPath: string): string {
+function configPath(folderPath: string): string {
   return join(folderPath, CONFIG_FILENAME);
 }
-
-export function policyPath(folderPath: string): string {
+function policyPath(folderPath: string): string {
   return join(folderPath, POLICY_FILENAME);
+}
+function containerfilePath(folderPath: string): string {
+  return join(folderPath, CONTAINERFILE_FILENAME);
 }
 
 function parseArgs(raw: unknown, where: string): string[] {
   if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw))
+  if (!Array.isArray(raw)) {
     throw new Error(`Invalid config.yaml: 'args' must be a list at ${where}`);
+  }
   for (const v of raw) {
     if (typeof v !== "string") {
       throw new Error(`Invalid config.yaml: 'args' must contain only strings at ${where}`);
@@ -51,7 +58,7 @@ function parseEnv(raw: unknown, where: string): Record<string, string> {
   return out;
 }
 
-export function readConfig(folderPath: string): OpenlockFolderConfig {
+function readConfig(folderPath: string): OpenlockFolderConfig {
   const path = configPath(folderPath);
   let raw: string;
   try {
@@ -65,16 +72,9 @@ export function readConfig(folderPath: string): OpenlockFolderConfig {
     throw new Error(`Invalid config.yaml: expected mapping at ${path}`);
   }
 
-  if (doc.caps !== undefined && !Array.isArray(doc.caps)) {
-    throw new Error(`Invalid config.yaml: 'caps' must be a list at ${path}`);
-  }
-  const rawCaps = Array.isArray(doc.caps) ? doc.caps : [];
-  const caps: Cap[] = [];
-  for (const c of rawCaps) {
-    if (typeof c !== "string" || !ALL_CAPS.includes(c as Cap)) {
-      throw new Error(`unknown cap '${String(c)}' in ${path}; allowed: ${ALL_CAPS.join(", ")}`);
-    }
-    caps.push(c as Cap);
+  const deprecations: string[] = [];
+  if (doc.caps !== undefined) {
+    deprecations.push("caps");
   }
 
   const projectRoot = dirname(folderPath);
@@ -82,89 +82,137 @@ export function readConfig(folderPath: string): OpenlockFolderConfig {
   const args = parseArgs(doc.args, path);
   const env = parseEnv(doc.env, path);
 
-  return { caps, mounts, args, env };
+  return { mounts, args, env, deprecations };
 }
 
-export function writeConfig(folderPath: string, config: { caps: Cap[] }): void {
+function writeConfig(folderPath: string): void {
   mkdirSync(folderPath, { recursive: true });
-  const doc = { caps: config.caps };
-  writeFileSync(configPath(folderPath), yaml.dump(doc), "utf-8");
+  writeFileSync(configPath(folderPath), yaml.dump({}), "utf-8");
 }
 
-export function copyDefaultPolicy(folderPath: string, caps: Cap[]): void {
+function copyDefaultPolicy(folderPath: string): void {
   mkdirSync(folderPath, { recursive: true });
-  writeFileSync(policyPath(folderPath), defaultPolicyContent(caps), "utf-8");
+  writeFileSync(policyPath(folderPath), defaultPolicyContent(), "utf-8");
 }
 
-type ResolveOrigin = "first-run" | "restored-config" | "restored-policy" | "existing";
+function harnessForSeed(): "claude_code" | "opencode" {
+  return resolveHarness({
+    cliFlag: undefined,
+    env: process.env,
+    readGlobal: () => null,
+  });
+}
+
+function writeSeedContainerfile(folderPath: string): void {
+  mkdirSync(folderPath, { recursive: true });
+  const baseHash = computeBaseTag(BASE_CONTAINERFILE).slice(GHCR_BASE_PREFIX.length);
+  const content = seedContainerfile({
+    harnesses: [harnessForSeed()],
+    baseHash,
+    baseContent: BASE_CONTAINERFILE,
+  });
+  writeFileSync(containerfilePath(folderPath), content, "utf-8");
+}
+
+type ResolveOrigin =
+  | "first-run"
+  | "restored-config"
+  | "restored-policy"
+  | "restored-containerfile"
+  | "existing";
 
 export interface ResolveResult {
-  caps: Cap[];
   policyPath: string;
   origin: ResolveOrigin;
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
+  deprecations: string[];
 }
 
 function folderPathFor(projectPath: string): string {
   return join(projectPath, FOLDER_NAME);
 }
 
-export function resolveOpenlockFolder(projectPath: string): ResolveResult {
-  const folder = folderPathFor(projectPath);
-  const folderExists = existsSync(folder);
-  const configExists = folderExists && existsSync(configPath(folder));
-  const policyExists = folderExists && existsSync(policyPath(folder));
+const EMPTY_CFG: OpenlockFolderConfig = { mounts: [], args: [], env: {}, deprecations: [] };
 
-  if (!folderExists || (!configExists && !policyExists)) {
-    const caps = detectCaps(projectPath);
-    writeConfig(folder, { caps });
-    copyDefaultPolicy(folder, caps);
-    return {
-      caps,
-      policyPath: policyPath(folder),
-      origin: "first-run",
-      mounts: [],
-      args: [],
-      env: {},
-    };
-  }
-
-  if (configExists && policyExists) {
-    const cfg = readConfig(folder);
-    return {
-      caps: cfg.caps,
-      policyPath: policyPath(folder),
-      origin: "existing",
-      mounts: cfg.mounts,
-      args: cfg.args,
-      env: cfg.env,
-    };
-  }
-
-  if (!configExists && policyExists) {
-    const caps = detectCaps(projectPath);
-    writeConfig(folder, { caps });
-    return {
-      caps,
-      policyPath: policyPath(folder),
-      origin: "restored-config",
-      mounts: [],
-      args: [],
-      env: {},
-    };
-  }
-
-  // Remaining case: configExists && !policyExists.
-  const cfg = readConfig(folder);
-  copyDefaultPolicy(folder, cfg.caps);
+function buildResult(
+  folder: string,
+  origin: ResolveOrigin,
+  cfg: OpenlockFolderConfig,
+): ResolveResult {
   return {
-    caps: cfg.caps,
     policyPath: policyPath(folder),
-    origin: "restored-policy",
+    origin,
     mounts: cfg.mounts,
     args: cfg.args,
     env: cfg.env,
+    deprecations: cfg.deprecations,
   };
+}
+
+interface FolderState {
+  folderExists: boolean;
+  configExists: boolean;
+  policyExists: boolean;
+  containerfileExists: boolean;
+}
+
+function inspectFolder(folder: string): FolderState {
+  const folderExists = existsSync(folder);
+  return {
+    folderExists,
+    configExists: folderExists && existsSync(configPath(folder)),
+    policyExists: folderExists && existsSync(policyPath(folder)),
+    containerfileExists: folderExists && existsSync(containerfilePath(folder)),
+  };
+}
+
+function isFirstRun(state: FolderState): boolean {
+  return (
+    !state.folderExists ||
+    (!state.configExists && !state.policyExists && !state.containerfileExists)
+  );
+}
+
+function resolveFirstRun(folder: string): ResolveResult {
+  writeConfig(folder);
+  copyDefaultPolicy(folder);
+  writeSeedContainerfile(folder);
+  return buildResult(folder, "first-run", EMPTY_CFG);
+}
+
+function resolveRestoredContainerfile(folder: string, state: FolderState): ResolveResult {
+  writeSeedContainerfile(folder);
+  if (!state.configExists) writeConfig(folder);
+  if (!state.policyExists) copyDefaultPolicy(folder);
+  const cfg = state.configExists ? readConfig(folder) : EMPTY_CFG;
+  return buildResult(folder, "restored-containerfile", cfg);
+}
+
+function resolveRestoredConfig(folder: string, state: FolderState): ResolveResult {
+  writeConfig(folder);
+  if (!state.policyExists) copyDefaultPolicy(folder);
+  return buildResult(folder, "restored-config", EMPTY_CFG);
+}
+
+function resolveRestoredPolicy(folder: string): ResolveResult {
+  copyDefaultPolicy(folder);
+  return buildResult(folder, "restored-policy", readConfig(folder));
+}
+
+export function resolveOpenlockFolder(projectPath: string): ResolveResult {
+  const folder = folderPathFor(projectPath);
+  const state = inspectFolder(folder);
+
+  if (isFirstRun(state)) return resolveFirstRun(folder);
+
+  if (state.configExists && state.policyExists && state.containerfileExists) {
+    return buildResult(folder, "existing", readConfig(folder));
+  }
+
+  // Partial states — restore missing files. Priority: Containerfile first.
+  if (!state.containerfileExists) return resolveRestoredContainerfile(folder, state);
+  if (!state.configExists) return resolveRestoredConfig(folder, state);
+  return resolveRestoredPolicy(folder);
 }

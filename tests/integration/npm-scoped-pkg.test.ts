@@ -80,7 +80,7 @@ describe("npm scoped packages via default-js policy", () => {
       await createBundle(repoDir, join(staging, "repo.bundle"));
 
       const policyPath = join(tmp, "policy.yaml");
-      writeFileSync(policyPath, defaultPolicyContent(["js"]));
+      writeFileSync(policyPath, defaultPolicyContent());
 
       const cli = await getCliInvocation();
       const argvHead = cli.argv;

@@ -107,11 +107,18 @@ function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string):
   } else if (folder.origin === "restored-config") {
     console.log("Restored .openlock/config.yaml.");
   } else if (folder.origin === "restored-policy") {
-    const suffix = folder.caps.length > 0 ? `-${folder.caps.join("-")}` : "";
-    console.log(`Restored .openlock/policy.yaml from default${suffix}.yaml.`);
+    console.log("Restored .openlock/policy.yaml from default.yaml.");
+  } else if (folder.origin === "restored-containerfile") {
+    console.log("Restored .openlock/Containerfile from seed.");
+  }
+  if (folder.deprecations.includes("caps")) {
+    console.warn(
+      "warning: config.yaml has deprecated 'caps' field; ignored. " +
+        "Run `openlock validate --fix` (coming in v0.9.x) to remove it.",
+    );
   }
   return {
-    caps: folder.caps,
+    caps: detectCaps(projectPath),
     policy: folder.policyPath,
     mounts: folder.mounts,
     args: folder.args,
