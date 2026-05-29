@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { GHCR_BASE_PREFIX, computeBaseTag } from "../sandbox/ensure-base";
+import { computeBaseTag, GHCR_BASE_PREFIX } from "../sandbox/ensure-base";
 import { BASE_CONTAINERFILE } from "../sandbox/image-build";
 import { updateContainerfile } from "../sandbox/update-containerfile";
 
