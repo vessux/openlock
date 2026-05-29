@@ -20,14 +20,10 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import {
-  containerfileKeyForCaps,
-  DEFAULT_CONTAINERFILES,
-} from "../../src/sandbox/default-containerfiles";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
-import { ensureImage } from "../../src/sandbox/image-build";
+import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const PROVIDER_NAME = "openlock-test-echo";
@@ -126,10 +122,9 @@ describe("harness cred_inject mechanism (live integration)", () => {
           throw new Error(`provider create failed: ${created.stderr}`);
         }
 
-        const imageKey = containerfileKeyForCaps([]);
         const image = await ensureImage({
-          containerfileContent: DEFAULT_CONTAINERFILES[imageKey],
-          tagPrefix: `openlock-${imageKey}`,
+          containerfileContent: BASE_CONTAINERFILE,
+          tagPrefix: "openlock-base-it",
         });
 
         // --retry 5 + --retry-all-errors covers transient TLS/network

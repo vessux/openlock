@@ -25,7 +25,6 @@ import {
   startSandbox,
   waitForSandboxReady,
 } from "./container";
-import { type Cap, detectCaps } from "./detect-caps";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
@@ -80,7 +79,6 @@ async function buildSandboxImage(openlockFolderPath: string): Promise<string> {
 }
 
 interface ResolvedRepo {
-  caps: Cap[];
   policy: string;
   mounts: Mount[];
   args: string[];
@@ -90,7 +88,6 @@ interface ResolvedRepo {
 function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string): ResolvedRepo {
   if (policyOverride) {
     return {
-      caps: detectCaps(projectPath),
       policy: resolve(policyOverride),
       mounts: [],
       args: [],
@@ -114,7 +111,6 @@ function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string):
     );
   }
   return {
-    caps: detectCaps(projectPath),
     policy: folder.policyPath,
     mounts: folder.mounts,
     args: folder.args,
@@ -127,7 +123,6 @@ interface NewSession {
   name: string;
   containerName: string;
   policy: string;
-  caps: Cap[];
   image: string;
 }
 
@@ -138,8 +133,7 @@ async function createSession(
   providerId: ProviderId,
   branch: string | undefined,
 ): Promise<NewSession> {
-  const { caps, policy, mounts } = resolved;
-  console.log(`Capabilities: ${caps.length > 0 ? caps.join(", ") : "none"}`);
+  const { policy, mounts } = resolved;
 
   await startGateway();
   await ensureProvider(providerId);
@@ -251,7 +245,6 @@ async function createSession(
       id,
       name,
       repoPath: projectPath,
-      caps,
       image: imageTag,
       policy,
       createdAt: new Date().toISOString(),
@@ -261,7 +254,7 @@ async function createSession(
     };
     saveSession(sessionsDir(), meta);
 
-    return { id, name, containerName, policy, caps, image: imageTag };
+    return { id, name, containerName, policy, image: imageTag };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

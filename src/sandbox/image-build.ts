@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type Runtime, resolveRuntime } from "../runtime";
-import { ensureBase as defaultEnsureBase, isOpenlockBaseRef, parseFromImage } from "./ensure-base";
 // Embedded at build time via Bun's `with { type: "text" }` import attribute.
 import BASE_CONTAINERFILE from "../../containers/base.Containerfile" with { type: "text" };
+import { type Runtime, resolveRuntime } from "../runtime";
+import { ensureBase as defaultEnsureBase, isOpenlockBaseRef, parseFromImage } from "./ensure-base";
 
 export { BASE_CONTAINERFILE };
 

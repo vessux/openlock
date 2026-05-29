@@ -7,7 +7,6 @@ function meta(name: string, repoPath = `/tmp/${name}`): SessionMeta {
     id: name,
     name,
     repoPath,
-    caps: [],
     image: "openlock-sandbox",
     policy: "default",
     createdAt: "2026-05-09T00:00:00Z",

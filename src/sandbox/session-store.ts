@@ -1,14 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Cap } from "./detect-caps";
 import type { Harness } from "./harness";
 
 export interface SessionMeta {
   id: string;
   name: string;
   repoPath: string;
-  caps: Cap[];
   image: string;
   policy: string;
   createdAt: string;
@@ -17,22 +15,27 @@ export interface SessionMeta {
   harness: Harness;
 }
 
+// Legacy meta files (pre-slim-images) may carry extra fields like `caps` or
+// `path`. Accept them on read and drop them silently. Pre-1.0; we don't
+// promise on-disk back-compat beyond best-effort migration.
 interface LegacyMeta extends Omit<SessionMeta, "repoPath" | "harness"> {
   repoPath?: string;
   path?: string;
   harness?: Harness;
+  caps?: unknown;
 }
 
 function migrateMeta(raw: LegacyMeta): SessionMeta {
+  const { caps: _caps, ...sansCaps } = raw;
   let withRepoPath: Omit<SessionMeta, "harness">;
-  if (raw.repoPath === undefined && typeof raw.path === "string") {
-    const { path, ...rest } = raw;
+  if (sansCaps.repoPath === undefined && typeof sansCaps.path === "string") {
+    const { path, ...rest } = sansCaps;
     withRepoPath = { ...rest, repoPath: path };
   } else {
-    const { path: _legacy, ...rest } = raw;
+    const { path: _legacy, ...rest } = sansCaps;
     withRepoPath = rest as Omit<SessionMeta, "harness">;
   }
-  return { ...withRepoPath, harness: raw.harness ?? "claude_code" };
+  return { ...withRepoPath, harness: sansCaps.harness ?? "claude_code" };
 }
 
 export function sessionsDir(): string {

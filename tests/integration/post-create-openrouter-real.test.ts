@@ -17,14 +17,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildOpenshellExecArgv } from "../../src/sandbox/container";
-import {
-  containerfileKeyForCaps,
-  DEFAULT_CONTAINERFILES,
-} from "../../src/sandbox/default-containerfiles";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
-import { ensureImage } from "../../src/sandbox/image-build";
+import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const CRED_PATH = join(homedir(), ".config", "openlock", "credentials.json");
@@ -160,10 +156,9 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
           throw new Error(`provider create failed: ${created.stderr}`);
         }
 
-        const imageKey = containerfileKeyForCaps([]);
         const image = await ensureImage({
-          containerfileContent: DEFAULT_CONTAINERFILES[imageKey],
-          tagPrefix: `openlock-${imageKey}`,
+          containerfileContent: BASE_CONTAINERFILE,
+          tagPrefix: "openlock-base-it",
         });
 
         const createArgv = [

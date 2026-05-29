@@ -5,23 +5,18 @@ import { PROVIDER_IDS, PROVIDERS } from "../src/providers/registry";
 import type { PolicyEndpointSpec } from "../src/providers/types";
 import { HARNESSES, type Harness } from "../src/sandbox/harness";
 
-type CapVariant = "default" | "default-js" | "default-py" | "default-js-py";
-
-const CAP_VARIANTS: readonly CapVariant[] = ["default", "default-js", "default-py", "default-js-py"];
-
 const HARNESS_BIN: Record<Harness, string> = {
   claude_code: "/usr/local/bin/claude",
   opencode: "/usr/local/bin/opencode",
 };
 
-function harnessBinaries(harness: Harness, variant: CapVariant): Array<{ path: string }> {
-  const out: Array<{ path: string }> = [{ path: HARNESS_BIN[harness] }];
-  if (variant !== "default-py") out.push({ path: "/usr/bin/node" });
-  if (variant === "default-py" || variant === "default-js-py") out.push({ path: "/usr/bin/python3" });
-  return out;
+function harnessBinaries(harness: Harness): Array<{ path: string }> {
+  // Base image always ships node (under /usr/local/bin) + python3 (under
+  // /usr/bin via apt). Single policy covers both; cap detection is gone.
+  return [{ path: HARNESS_BIN[harness] }, { path: "/usr/local/bin/node" }];
 }
 
-function harnessBlock(harness: Harness, variant: CapVariant): Record<string, unknown> {
+function harnessBlock(harness: Harness): Record<string, unknown> {
   const endpoints: PolicyEndpointSpec[] = [];
   const allowedSecrets = new Set<string>();
   for (const id of PROVIDER_IDS) {
@@ -35,7 +30,7 @@ function harnessBlock(harness: Harness, variant: CapVariant): Record<string, unk
     }
   }
   return {
-    binaries: harnessBinaries(harness, variant),
+    binaries: harnessBinaries(harness),
     endpoints: endpoints.map((ep) => ({
       host: ep.host,
       port: ep.port,
@@ -65,22 +60,18 @@ function leadingComment(path: string): string {
   return out.length === 0 ? "" : `${out.join("\n")}\n`;
 }
 
-function policiesPath(variant: CapVariant): string {
-  return resolve(__dirname, "..", "policies", `${variant}.yaml`);
+function policiesPath(): string {
+  return resolve(__dirname, "..", "policies", "default.yaml");
 }
 
-export function renderDefaultPolicy(variant: string): string {
-  if (!CAP_VARIANTS.includes(variant as CapVariant)) {
-    throw new Error(`Unknown variant ${variant}`);
-  }
-  const v = variant as CapVariant;
-  const path = policiesPath(v);
+export function renderDefaultPolicy(): string {
+  const path = policiesPath();
   const existing = yaml.load(readFileSync(path, "utf-8")) as Record<string, unknown>;
   const existingNetwork = (existing.network_policies ?? {}) as Record<string, unknown>;
 
   const harnessNames: Harness[] = [...HARNESSES];
   const newNetwork: Record<string, unknown> = {};
-  for (const h of harnessNames) newNetwork[h] = harnessBlock(h, v);
+  for (const h of harnessNames) newNetwork[h] = harnessBlock(h);
   for (const [k, val] of Object.entries(existingNetwork)) {
     if (harnessNames.includes(k as Harness)) continue;
     newNetwork[k] = val;
@@ -92,9 +83,7 @@ export function renderDefaultPolicy(variant: string): string {
 }
 
 if (import.meta.main) {
-  for (const v of CAP_VARIANTS) {
-    const path = policiesPath(v);
-    writeFileSync(path, renderDefaultPolicy(v));
-    console.log(`rendered ${path}`);
-  }
+  const path = policiesPath();
+  writeFileSync(path, renderDefaultPolicy());
+  console.log(`rendered ${path}`);
 }
