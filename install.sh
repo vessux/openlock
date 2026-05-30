@@ -66,3 +66,7 @@ case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
   *) echo "Note: ${INSTALL_DIR} is not in your PATH." ;;
 esac
+
+echo
+echo "Checking prerequisites..."
+"${INSTALL_DIR}/openlock" doctor || true
