@@ -15,8 +15,9 @@ export interface CredentialsFileV2 {
 }
 
 export function credentialsPath(): string {
-  const home = process.env.HOME || homedir();
-  return join(home, ".config", "openlock", "credentials.json");
+  const xdg = process.env.XDG_CONFIG_HOME;
+  const base = xdg && xdg.length > 0 ? xdg : join(process.env.HOME || homedir(), ".config");
+  return join(base, "openlock", "credentials.json");
 }
 
 function emptyFile(): CredentialsFileV2 {

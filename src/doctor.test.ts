@@ -131,3 +131,45 @@ describe("installHint", () => {
     expect(installHint("podman", "linux")).toBe("apt install podman");
   });
 });
+
+describe("doctor fix hints", () => {
+  const oldEnv = { ...process.env };
+  let tmp = "";
+
+  beforeEach(() => {
+    process.env = { ...oldEnv };
+    tmp = mkdtempSync(join(tmpdir(), "openlock-doctor-fix-"));
+    process.env.XDG_CONFIG_HOME = tmp;
+  });
+
+  afterEach(() => {
+    process.env = oldEnv;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("attaches `openlock login` fix to a failing credentials check", async () => {
+    const results = await runDoctorChecks("podman");
+    const cred = results.find((r) => r.name.startsWith("credentials"));
+    expect(cred?.ok).toBe(false);
+    expect(cred?.fix).toBe("openlock login");
+  });
+
+  it("attaches the platform install hint to the git check", async () => {
+    const results = await runDoctorChecks("podman");
+    const git = results.find((r) => r.name === "git");
+    expect(git?.fix).toBe(installHint("git"));
+  });
+});
+
+describe("doctor non-interactive runtime", () => {
+  it("emits a failing container-runtime check (no prompt) when no runtime resolves", async () => {
+    const results = await runDoctorChecks(null);
+    const rt = results.find((r) => r.name.startsWith("container runtime"));
+    expect(rt?.ok).toBe(false);
+    expect(rt?.fix).toContain("podman");
+    const runtimeSpecific = results.some(
+      (r) => r.name.includes("machine") || r.name.includes("socket") || r.name.includes("daemon"),
+    );
+    expect(runtimeSpecific).toBe(false);
+  });
+});
