@@ -39,6 +39,14 @@ export function renderIssues(issues: Issue[]): string[] {
   return lines;
 }
 
+export function summaryLine(issues: Issue[]): string {
+  const parts = FILE_ORDER.map((file) => {
+    const n = issues.filter((i) => i.file === file).length;
+    return n === 0 ? `${file}: ok` : `${file}: ${n} issue${n === 1 ? "" : "s"}`;
+  });
+  return parts.join(" · ");
+}
+
 export function validateCmd(args: string[]): void {
   const { values, positionals } = parseArgs({ args, options: flagSchema, allowPositionals: true });
   if (values.help === true) {
@@ -48,6 +56,7 @@ export function validateCmd(args: string[]): void {
   const projectDir = positionals[0] ?? process.cwd();
   const issues = lintFolder(projectDir, { offline: values.offline === true });
   for (const line of renderIssues(issues)) console.log(line);
+  console.log(summaryLine(issues));
   const blocking = issues.some((i) => i.severity === "error" || i.severity === "filesystem");
   process.exit(blocking ? 1 : 0);
 }
