@@ -7,6 +7,9 @@ import { execAsRoot, uploadToSandbox } from "./container";
 
 export type { Mount } from "../config-core";
 
+// Defensive guards, intentionally self-contained: this runs only on Mount.target
+// values already validated by parseManifest, so it deliberately does not delegate
+// to config-core's semantic rules.
 export function stagingPathFor(target: string): string {
   if (!target.startsWith("/")) {
     throw new Error(`stagingPathFor: mount target must be absolute: ${target}`);

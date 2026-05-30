@@ -85,7 +85,7 @@ interface ResolvedRepo {
   env: Record<string, string>;
 }
 
-function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string): ResolvedRepo {
+function resolveRepoPolicy(projectPath: string, policyOverride?: string): ResolvedRepo {
   if (policyOverride) {
     return {
       policy: resolve(policyOverride),
@@ -615,7 +615,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps(runtime) }));
   const repoResult = await ensureRepoIsGit(projectPath);
   announceRepoAction(repoResult.action, projectPath);
-  const resolved = resolveRepoPolicyAndCaps(projectPath, opts.policy);
+  const resolved = resolveRepoPolicy(projectPath, opts.policy);
 
   const branchErr = validateBranchFlagAgainstWorkdir(opts.branch, workdirMount(resolved.mounts));
   if (branchErr !== null) {
