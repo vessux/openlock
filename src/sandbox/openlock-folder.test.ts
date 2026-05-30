@@ -1,82 +1,47 @@
 import { describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import yaml from "js-yaml";
 import { resolveOpenlockFolder } from "./openlock-folder";
 
-function makeProject(): string {
-  return mkdtempSync(join(tmpdir(), "openlock-folder-test-"));
+function tmpProject(): string {
+  return mkdtempSync(join(tmpdir(), "olf-"));
+}
+function writeComplete(folder: string): void {
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, "config.yaml"), "mounts: []\nargs: []\nenv: {}\n");
+  writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+  writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
 }
 
 describe("resolveOpenlockFolder", () => {
-  it("first-run creates Containerfile, config, policy", () => {
-    const dir = makeProject();
-    try {
-      const out = resolveOpenlockFolder(dir);
-      expect(out.origin).toBe("first-run");
-      expect(existsSync(join(dir, ".openlock/Containerfile"))).toBe(true);
-      expect(existsSync(join(dir, ".openlock/config.yaml"))).toBe(true);
-      expect(existsSync(join(dir, ".openlock/policy.yaml"))).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  it("errors when .openlock/ is absent", () => {
+    expect(() => resolveOpenlockFolder(tmpProject())).toThrow(/openlock init/);
   });
 
-  it("restored-containerfile when config + policy exist but Containerfile missing", () => {
-    const dir = makeProject();
-    try {
-      mkdirSync(join(dir, ".openlock"));
-      writeFileSync(join(dir, ".openlock/config.yaml"), "args: []\n");
-      writeFileSync(join(dir, ".openlock/policy.yaml"), "# test\n");
-      const out = resolveOpenlockFolder(dir);
-      expect(out.origin).toBe("restored-containerfile");
-      expect(existsSync(join(dir, ".openlock/Containerfile"))).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  it("errors when a file is missing (incomplete)", () => {
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), "mounts: []\n");
+    expect(() => resolveOpenlockFolder(proj)).toThrow(/policy\.yaml|Containerfile|incomplete/);
+  });
+
+  it("resolves a complete folder", () => {
+    const proj = tmpProject();
+    writeComplete(join(proj, ".openlock"));
+    const r = resolveOpenlockFolder(proj);
+    expect(r.mounts).toEqual([]);
+    expect(r.policyPath).toContain("policy.yaml");
   });
 
   it("rejects a config.yaml with a leftover caps key", () => {
-    const dir = makeProject();
-    try {
-      mkdirSync(join(dir, ".openlock"));
-      writeFileSync(join(dir, ".openlock/config.yaml"), "caps: [js]\n");
-      writeFileSync(join(dir, ".openlock/policy.yaml"), "version: 1\n");
-      expect(() => resolveOpenlockFolder(dir)).toThrow(/unknown key "caps"/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("preserves existing user-edited Containerfile", () => {
-    const dir = makeProject();
-    try {
-      mkdirSync(join(dir, ".openlock"));
-      const customContent = "FROM custom:1\nRUN echo custom\n";
-      writeFileSync(join(dir, ".openlock/Containerfile"), customContent);
-      writeFileSync(join(dir, ".openlock/config.yaml"), "args: []\n");
-      writeFileSync(join(dir, ".openlock/policy.yaml"), "# test\n");
-      const out = resolveOpenlockFolder(dir);
-      expect(out.origin).toBe("existing");
-      const after = readFileSync(join(dir, ".openlock/Containerfile"), "utf-8");
-      expect(after).toBe(customContent);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("config.yaml schema no longer requires caps", () => {
-    const dir = makeProject();
-    try {
-      resolveOpenlockFolder(dir);
-      const cfg = yaml.load(readFileSync(join(dir, ".openlock/config.yaml"), "utf-8")) as Record<
-        string,
-        unknown
-      >;
-      expect(cfg.caps).toBeUndefined();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), "caps: [js]\n");
+    writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+    writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
+    expect(() => resolveOpenlockFolder(proj)).toThrow(/unknown key "caps"/);
   });
 });

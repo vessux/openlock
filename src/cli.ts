@@ -9,7 +9,7 @@ openlock - sandbox orchestration toolkit
 Usage: openlock <command>
 
 Session lifecycle:
-  sandbox [path]     Create or resume a sandbox session (path defaults to cwd; runs preflight + auto-inits the repo)
+  sandbox [path]     Create or resume a sandbox session (path defaults to cwd; runs preflight; requires .openlock/ — run \`openlock init\` first)
   list               List all sessions
   status [name]      Show session metadata + container state
   stop [name]        Stop session containers (preserves state)

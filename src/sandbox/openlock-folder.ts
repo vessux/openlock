@@ -1,13 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import yaml from "js-yaml";
 import type { Mount } from "../config-core";
 import { type ManifestConfig, parseManifest } from "../config-core";
-import { defaultPolicyContent } from "./default-policies";
-import { computeBaseTag, GHCR_BASE_PREFIX } from "./ensure-base";
-import { resolveHarness } from "./harness";
-import { BASE_CONTAINERFILE } from "./image-build";
-import { seedContainerfile } from "./seed-containerfile";
 
 const FOLDER_NAME = ".openlock";
 const CONFIG_FILENAME = "config.yaml";
@@ -38,45 +33,8 @@ function readConfig(folderPath: string): OpenlockFolderConfig {
   return parseManifest(doc, dirname(folderPath));
 }
 
-function writeConfig(folderPath: string): void {
-  mkdirSync(folderPath, { recursive: true });
-  writeFileSync(configPath(folderPath), yaml.dump({}), "utf-8");
-}
-
-function copyDefaultPolicy(folderPath: string): void {
-  mkdirSync(folderPath, { recursive: true });
-  writeFileSync(policyPath(folderPath), defaultPolicyContent(), "utf-8");
-}
-
-function harnessForSeed(): "claude_code" | "opencode" {
-  return resolveHarness({
-    cliFlag: undefined,
-    env: process.env,
-    readGlobal: () => null,
-  });
-}
-
-function writeSeedContainerfile(folderPath: string): void {
-  mkdirSync(folderPath, { recursive: true });
-  const baseHash = computeBaseTag(BASE_CONTAINERFILE).slice(GHCR_BASE_PREFIX.length);
-  const content = seedContainerfile({
-    harnesses: [harnessForSeed()],
-    baseHash,
-    baseContent: BASE_CONTAINERFILE,
-  });
-  writeFileSync(containerfilePath(folderPath), content, "utf-8");
-}
-
-type ResolveOrigin =
-  | "first-run"
-  | "restored-config"
-  | "restored-policy"
-  | "restored-containerfile"
-  | "existing";
-
 export interface ResolveResult {
   policyPath: string;
-  origin: ResolveOrigin;
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
@@ -84,22 +42,6 @@ export interface ResolveResult {
 
 function folderPathFor(projectPath: string): string {
   return join(projectPath, FOLDER_NAME);
-}
-
-const EMPTY_CFG: OpenlockFolderConfig = { mounts: [], args: [], env: {} };
-
-function buildResult(
-  folder: string,
-  origin: ResolveOrigin,
-  cfg: OpenlockFolderConfig,
-): ResolveResult {
-  return {
-    policyPath: policyPath(folder),
-    origin,
-    mounts: cfg.mounts,
-    args: cfg.args,
-    env: cfg.env,
-  };
 }
 
 interface FolderState {
@@ -119,51 +61,20 @@ function inspectFolder(folder: string): FolderState {
   };
 }
 
-function isFirstRun(state: FolderState): boolean {
-  return (
-    !state.folderExists ||
-    (!state.configExists && !state.policyExists && !state.containerfileExists)
-  );
-}
-
-function resolveFirstRun(folder: string): ResolveResult {
-  writeConfig(folder);
-  copyDefaultPolicy(folder);
-  writeSeedContainerfile(folder);
-  return buildResult(folder, "first-run", EMPTY_CFG);
-}
-
-function resolveRestoredContainerfile(folder: string, state: FolderState): ResolveResult {
-  writeSeedContainerfile(folder);
-  if (!state.configExists) writeConfig(folder);
-  if (!state.policyExists) copyDefaultPolicy(folder);
-  const cfg = state.configExists ? readConfig(folder) : EMPTY_CFG;
-  return buildResult(folder, "restored-containerfile", cfg);
-}
-
-function resolveRestoredConfig(folder: string, state: FolderState): ResolveResult {
-  writeConfig(folder);
-  if (!state.policyExists) copyDefaultPolicy(folder);
-  return buildResult(folder, "restored-config", EMPTY_CFG);
-}
-
-function resolveRestoredPolicy(folder: string): ResolveResult {
-  copyDefaultPolicy(folder);
-  return buildResult(folder, "restored-policy", readConfig(folder));
-}
-
 export function resolveOpenlockFolder(projectPath: string): ResolveResult {
   const folder = folderPathFor(projectPath);
   const state = inspectFolder(folder);
-
-  if (isFirstRun(state)) return resolveFirstRun(folder);
-
   if (state.configExists && state.policyExists && state.containerfileExists) {
-    return buildResult(folder, "existing", readConfig(folder));
+    const cfg = readConfig(folder);
+    return { policyPath: policyPath(folder), mounts: cfg.mounts, args: cfg.args, env: cfg.env };
   }
-
-  // Partial states — restore missing files. Priority: Containerfile first.
-  if (!state.containerfileExists) return resolveRestoredContainerfile(folder, state);
-  if (!state.configExists) return resolveRestoredConfig(folder, state);
-  return resolveRestoredPolicy(folder);
+  const missing = [
+    state.configExists ? null : "config.yaml",
+    state.policyExists ? null : "policy.yaml",
+    state.containerfileExists ? null : "Containerfile",
+  ].filter((x): x is string => x !== null);
+  const what = state.folderExists ? `missing ${missing.join(", ")}` : "no .openlock/ directory";
+  throw new Error(
+    `.openlock/ is incomplete (${what}) in ${projectPath}. Run \`openlock init\` to scaffold it.`,
+  );
 }
