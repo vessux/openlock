@@ -1,3 +1,5 @@
+import { commandExists } from "../command-exists";
+
 export type OpenshellCmd = { bin: string; prefix: string[] };
 
 export async function resolveOpenshellBin(): Promise<OpenshellCmd> {
@@ -5,8 +7,7 @@ export async function resolveOpenshellBin(): Promise<OpenshellCmd> {
     return { bin: process.env.OPENSHELL_BIN, prefix: [] };
   }
 
-  const which = Bun.spawnSync(["which", "openshell"]);
-  if (which.exitCode === 0) {
+  if (commandExists("openshell")) {
     return { bin: "openshell", prefix: [] };
   }
 

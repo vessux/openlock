@@ -1,29 +1,32 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
-import { type Runtime, resolveRuntime } from "./runtime";
+import { type Runtime, resolveRuntimeNonInteractive } from "./runtime";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { hasAnyProvider } from "./tokens";
+
+const DOCKER_INSTALL_DOCS = "https://docs.docker.com/engine/install/";
+
+/** Platform-aware install command. Mac uses brew; Linux assumes apt and lets
+ * non-Debian users substitute their own package manager. */
+export function installHint(pkg: string, platform: NodeJS.Platform = process.platform): string {
+  const pm = platform === "darwin" ? "brew" : "apt";
+  return `${pm} install ${pkg}`;
+}
 
 interface CheckOutcome {
   ok: boolean;
   detail?: string;
+  fix?: string;
 }
 
 interface Check {
   name: string;
   test: () => Promise<boolean | CheckOutcome>;
-}
-
-async function commandExists(cmd: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["which", cmd], { stdout: "ignore", stderr: "ignore" });
-    return (await proc.exited) === 0;
-  } catch {
-    return false;
-  }
+  fix?: string;
 }
 
 export async function podmanMachineRunning(): Promise<boolean> {
@@ -75,6 +78,7 @@ export interface DoctorResult {
   name: string;
   ok: boolean;
   detail?: string;
+  fix?: string;
 }
 
 async function checkGlobalConfig(): Promise<CheckOutcome> {
@@ -87,66 +91,130 @@ async function checkGlobalConfig(): Promise<CheckOutcome> {
   }
 }
 
-export async function runDoctorChecks(runtime?: Runtime): Promise<DoctorResult[]> {
-  const resolved = runtime ?? (await resolveRuntime());
+function buildRuntimeChecks(resolved: Runtime | null, isMac: boolean): Check[] {
+  if (resolved === null) {
+    return [
+      {
+        name: "container runtime (podman/docker)",
+        test: async () => false,
+        fix: `${installHint("podman")}, or install docker: ${DOCKER_INSTALL_DOCS}`,
+      },
+    ];
+  }
+  const podmanMachineCheck: Check = isMac
+    ? { name: "podman machine (running)", test: podmanMachineRunning, fix: "podman machine start" }
+    : {
+        name: "podman API socket active",
+        test: podmanSocketActive,
+        fix: "systemctl --user enable --now podman.socket",
+      };
+  const runtimeSpecificCheck: Check =
+    resolved === "podman"
+      ? podmanMachineCheck
+      : {
+          name: "docker daemon reachable",
+          test: dockerDaemonReachable,
+          fix: "start Docker (systemctl --user start docker, or launch Docker Desktop)",
+        };
+  return [
+    {
+      name: resolved,
+      test: async () => commandExists(resolved),
+      fix: resolved === "podman" ? installHint("podman") : DOCKER_INSTALL_DOCS,
+    },
+    runtimeSpecificCheck,
+  ];
+}
+
+export async function runDoctorChecks(runtime?: Runtime | null): Promise<DoctorResult[]> {
+  const resolved = runtime === undefined ? await resolveRuntimeNonInteractive() : runtime;
   const isMac = process.platform === "darwin";
   const dev = isDevMode();
+
+  const runtimeChecks = buildRuntimeChecks(resolved, isMac);
+
   const checks: Check[] = [
-    { name: "git", test: () => commandExists("git") },
-    { name: resolved, test: () => commandExists(resolved) },
-    ...(resolved === "podman"
-      ? [
-          isMac
-            ? { name: "podman machine (running)", test: podmanMachineRunning }
-            : { name: "podman API socket active", test: podmanSocketActive },
-        ]
-      : [{ name: "docker daemon reachable", test: dockerDaemonReachable }]),
+    { name: "git", test: async () => commandExists("git"), fix: installHint("git") },
+    ...runtimeChecks,
     ...(dev
       ? [
-          { name: "bun", test: () => commandExists("bun") },
-          { name: "cargo", test: () => commandExists("cargo") },
+          {
+            name: "bun",
+            test: async () => commandExists("bun"),
+            fix: "curl -fsSL https://bun.sh/install | bash",
+          },
+          {
+            name: "cargo",
+            test: async () => commandExists("cargo"),
+            fix: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+          },
           ...(isMac
-            ? [{ name: "cargo-zigbuild", test: () => commandExists("cargo-zigbuild") }]
+            ? [
+                {
+                  name: "cargo-zigbuild",
+                  test: async () => commandExists("cargo-zigbuild"),
+                  fix: "cargo install cargo-zigbuild",
+                },
+              ]
             : []),
           {
             name: "openshell-fork directory",
             test: async () => existsSync(join(forkDir(), ".git")),
+            fix: `clone the openshell fork into ${forkDir()} (dev setup)`,
           },
         ]
       : []),
     {
       name: "credentials (openlock login)",
       test: async () => hasAnyProvider(),
+      fix: "openlock login",
     },
     {
       name: `global config (${globalConfigPath()})`,
       test: checkGlobalConfig,
+      fix: `edit or remove ${globalConfigPath()}`,
     },
   ];
 
   const results: DoctorResult[] = [];
   for (const c of checks) {
     const outcome = await c.test();
-    if (typeof outcome === "boolean") {
-      results.push({ name: c.name, ok: outcome });
-    } else {
-      const r: DoctorResult = { name: c.name, ok: outcome.ok };
-      if (outcome.detail !== undefined) r.detail = outcome.detail;
-      results.push(r);
-    }
+    const co = typeof outcome === "boolean" ? undefined : outcome;
+    const r: DoctorResult = {
+      name: c.name,
+      ok: typeof outcome === "boolean" ? outcome : outcome.ok,
+    };
+    if (co?.detail !== undefined) r.detail = co.detail;
+    const fix = co?.fix ?? c.fix;
+    if (fix !== undefined) r.fix = fix;
+    results.push(r);
   }
   return results;
 }
 
-export async function doctor(): Promise<void> {
-  const results = await runDoctorChecks();
+/** Render doctor results to display lines + a failure count. Pure (no I/O) so
+ * the formatting — notably that `fix:` prints only for failed checks — is unit
+ * testable without `doctor()`'s `process.exit`. */
+export function renderDoctorResults(results: DoctorResult[]): {
+  lines: string[];
+  failures: number;
+} {
+  const lines: string[] = [];
   let failures = 0;
   for (const r of results) {
     const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
-    console.log(`  ${icon} ${r.name}`);
-    if (r.detail !== undefined) console.log(`      ${r.detail}`);
+    lines.push(`  ${icon} ${r.name}`);
+    if (r.detail !== undefined) lines.push(`      ${r.detail}`);
+    if (!r.ok && r.fix !== undefined) lines.push(`      fix: ${r.fix}`);
     if (!r.ok) failures++;
   }
+  return { lines, failures };
+}
+
+export async function doctor(): Promise<void> {
+  const results = await runDoctorChecks();
+  const { lines, failures } = renderDoctorResults(results);
+  for (const line of lines) console.log(line);
 
   console.log();
   if (failures > 0) {

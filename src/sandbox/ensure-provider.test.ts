@@ -7,15 +7,20 @@ import { _ensureProviderForTests, providerExistsInGateway } from "./ensure-provi
 
 let dir: string;
 let originalHome: string | undefined;
+let originalXdg: string | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "openlock-ensure-"));
   originalHome = process.env.HOME;
+  originalXdg = process.env.XDG_CONFIG_HOME;
   process.env.HOME = dir;
+  delete process.env.XDG_CONFIG_HOME;
 });
 afterEach(() => {
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
+  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdg;
   rmSync(dir, { recursive: true, force: true });
 });
 

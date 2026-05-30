@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 
+import { commandExists } from "../command-exists";
 import type { SessionMeta } from "../sandbox/session-store";
 
 export interface PickerIO {
@@ -109,8 +110,7 @@ export function defaultPickerIO(): PickerIO {
       process.stderr.write(s);
     },
     detectFzf() {
-      const r = Bun.spawnSync({ cmd: ["which", "fzf"], stdout: "ignore", stderr: "ignore" });
-      return r.exitCode === 0;
+      return commandExists("fzf");
     },
     async runFzf(input, prompt) {
       const proc = Bun.spawn({

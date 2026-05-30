@@ -14,12 +14,15 @@ import {
 let dir: string;
 let path: string;
 let originalHome: string | undefined;
+let originalXdg: string | undefined;
 
 beforeEach(() => {
   originalHome = process.env.HOME;
+  originalXdg = process.env.XDG_CONFIG_HOME;
   dir = mkdtempSync(join(tmpdir(), "openlock-tokens-"));
   path = join(dir, "credentials.json");
   process.env.HOME = dir;
+  delete process.env.XDG_CONFIG_HOME;
 });
 
 afterEach(() => {
@@ -29,11 +32,27 @@ afterEach(() => {
   } else {
     process.env.HOME = originalHome;
   }
+  if (originalXdg === undefined) {
+    delete process.env.XDG_CONFIG_HOME;
+  } else {
+    process.env.XDG_CONFIG_HOME = originalXdg;
+  }
 });
 
 describe("credentialsPath", () => {
   it("uses HOME/.config/openlock/credentials.json", () => {
     expect(credentialsPath()).toBe(join(dir, ".config", "openlock", "credentials.json"));
+  });
+
+  it("honors XDG_CONFIG_HOME when set", () => {
+    const xdg = mkdtempSync(join(tmpdir(), "xdg-"));
+    process.env.XDG_CONFIG_HOME = xdg;
+    try {
+      expect(credentialsPath()).toBe(join(xdg, "openlock", "credentials.json"));
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(xdg, { recursive: true, force: true });
+    }
   });
 });
 

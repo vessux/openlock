@@ -47,15 +47,20 @@ describe("EnvSource", () => {
 describe("FileSource", () => {
   let _dir: string;
   let _originalHome: string | undefined;
+  let _originalXdg: string | undefined;
 
   beforeEach(() => {
     _dir = mkdtempSync(join(tmpdir(), "openlock-fs-"));
     _originalHome = process.env.HOME;
+    _originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = _dir;
+    delete process.env.XDG_CONFIG_HOME;
   });
   afterEach(() => {
     if (_originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = _originalHome;
+    if (_originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = _originalXdg;
     rmSync(_dir, { recursive: true, force: true });
   });
 

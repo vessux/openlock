@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runDoctorChecks } from "./doctor";
+import { installHint, renderDoctorResults, runDoctorChecks } from "./doctor";
+import { globalConfigPath } from "./global-config/paths";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
 // runner `podman info` alone can take a few seconds; the bun-test default
@@ -117,7 +118,81 @@ describe("doctor global config check", () => {
       expect(r?.ok).toBe(false);
       expect(r?.detail).toBeDefined();
       expect(r?.detail).toMatch(/default_harness/);
+      const cfg = results.find((x) => x.name.startsWith("global config"));
+      expect(cfg?.ok).toBe(false);
+      expect(cfg?.fix).toBe(`edit or remove ${globalConfigPath()}`);
     },
     TIMEOUT_MS,
   );
+});
+
+describe("installHint", () => {
+  it("uses brew on macOS", () => {
+    expect(installHint("git", "darwin")).toBe("brew install git");
+  });
+
+  it("uses apt on Linux", () => {
+    expect(installHint("podman", "linux")).toBe("apt install podman");
+  });
+});
+
+describe("doctor fix hints", () => {
+  const oldEnv = { ...process.env };
+  let tmp = "";
+
+  beforeEach(() => {
+    process.env = { ...oldEnv };
+    tmp = mkdtempSync(join(tmpdir(), "openlock-doctor-fix-"));
+    process.env.XDG_CONFIG_HOME = tmp;
+  });
+
+  afterEach(() => {
+    process.env = oldEnv;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("attaches `openlock login` fix to a failing credentials check", async () => {
+    const results = await runDoctorChecks("podman");
+    const cred = results.find((r) => r.name.startsWith("credentials"));
+    expect(cred?.ok).toBe(false);
+    expect(cred?.fix).toBe("openlock login");
+  });
+
+  it("attaches the platform install hint to the git check", async () => {
+    const results = await runDoctorChecks("podman");
+    const git = results.find((r) => r.name === "git");
+    expect(git?.fix).toBe(installHint("git"));
+  });
+});
+
+describe("doctor non-interactive runtime", () => {
+  it("emits a failing container-runtime check (no prompt) when no runtime resolves", async () => {
+    const results = await runDoctorChecks(null);
+    const rt = results.find((r) => r.name.startsWith("container runtime"));
+    expect(rt?.ok).toBe(false);
+    expect(rt?.fix).toContain("podman");
+    const runtimeSpecific = results.some(
+      (r) => r.name.includes("machine") || r.name.includes("socket") || r.name.includes("daemon"),
+    );
+    expect(runtimeSpecific).toBe(false);
+  });
+});
+
+describe("renderDoctorResults", () => {
+  it("prints `fix:` only for failed checks that have a fix", () => {
+    const { lines, failures } = renderDoctorResults([
+      { name: "git", ok: true, fix: "brew install git" },
+      { name: "credentials", ok: false, fix: "openlock login" },
+      { name: "global config", ok: false, detail: "parse error" },
+    ]);
+    const out = lines.join("\n");
+    expect(failures).toBe(2);
+    // passing check carries a static fix, but it must NOT be printed
+    expect(out).not.toContain("fix: brew install git");
+    // failing check with a fix → printed
+    expect(out).toContain("fix: openlock login");
+    // failing check without a fix → detail shown, no stray fix line
+    expect(out).toContain("parse error");
+    expect(out).not.toContain("fix: undefined");
+  });
 });

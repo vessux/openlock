@@ -1,5 +1,6 @@
 // src/runtime.ts
 
+import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import type { GlobalConfig } from "./global-config/schema";
 import { runWizard } from "./runtime-wizard";
@@ -37,18 +38,8 @@ export function autodetectRuntimeFromProbes(p: BinaryProbes): Runtime | null {
   return null;
 }
 
-async function commandExists(cmd: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["which", cmd], { stdout: "ignore", stderr: "ignore" });
-    return (await proc.exited) === 0;
-  } catch {
-    return false;
-  }
-}
-
 async function probeBinaries(): Promise<BinaryProbes> {
-  const [podman, docker] = await Promise.all([commandExists("podman"), commandExists("docker")]);
-  return { podman, docker };
+  return { podman: commandExists("podman"), docker: commandExists("docker") };
 }
 
 export interface GetRuntimeOpts {
@@ -77,18 +68,40 @@ export async function getRuntime(opts: GetRuntimeOpts): Promise<Runtime> {
   return opts.onMissing(probes);
 }
 
+function readConfigSafe(): Pick<GlobalConfig, "defaultRuntime"> {
+  try {
+    return readGlobalConfig() ?? {};
+  } catch {
+    return {};
+  }
+}
+
+const NO_RUNTIME = Symbol("no-runtime");
+
+/** Resolve the runtime without ever launching the interactive picker. Returns
+ * null when env+config are unset and autodetect is ambiguous (zero or two
+ * binaries). Safe to call from non-TTY contexts (e.g. install.sh). */
+export async function resolveRuntimeNonInteractive(): Promise<Runtime | null> {
+  try {
+    return await getRuntime({
+      readConfig: readConfigSafe,
+      probe: probeBinaries,
+      onMissing: async () => {
+        throw NO_RUNTIME;
+      },
+    });
+  } catch (e) {
+    if (e === NO_RUNTIME) return null;
+    throw e;
+  }
+}
+
 let cached: Runtime | null = null;
 
 export async function resolveRuntime(): Promise<Runtime> {
   if (cached !== null) return cached;
   const rt = await getRuntime({
-    readConfig: () => {
-      try {
-        return readGlobalConfig() ?? {};
-      } catch {
-        return {};
-      }
-    },
+    readConfig: readConfigSafe,
     probe: probeBinaries,
     onMissing: async (probes) => runWizard(probes),
   });
