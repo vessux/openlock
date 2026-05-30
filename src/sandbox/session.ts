@@ -104,12 +104,6 @@ function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string):
   } else if (folder.origin === "restored-containerfile") {
     console.log("Restored .openlock/Containerfile from seed.");
   }
-  if (folder.deprecations.includes("caps")) {
-    console.warn(
-      "warning: config.yaml has deprecated 'caps' field; ignored. " +
-        "Run `openlock validate --fix` (coming in v0.9.x) to remove it.",
-    );
-  }
   return {
     policy: folder.policyPath,
     mounts: folder.mounts,

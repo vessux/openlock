@@ -6,6 +6,7 @@ import type { Issue } from "./types";
 
 export { parseManifest } from "./manifest/index";
 export type { ConfigFile, Issue, ManifestConfig, Mount, MountType, Severity } from "./types";
+export { SANDBOX_OPENLOCK_PREFIX } from "./types";
 
 /** Validate the whole .openlock/ folder (manifest + policy). Collect-all,
  * never throws. Each issue is tagged with its source file. */
