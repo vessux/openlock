@@ -29,6 +29,7 @@ Other:
   update-base        Rewrite .openlock/Containerfile FROM to current base hash
   prune-images       Remove stale openlock images (use --legacy for pre-M5)
   refs               Inspect and promote sandbox commits to real branches
+  validate           Validate .openlock/ config + policy
   report             Collect diagnostic bundle for bug reports
   complete <shell>   Print shell completion script (bash|zsh|fish)
 
@@ -149,6 +150,9 @@ function main(): void {
       import("./cli/complete").then(({ completeCmd }) =>
         completeCmd(args.slice(1)).then(processExit),
       );
+      return;
+    case "validate":
+      import("./cli/validate").then(({ validateCmd }) => validateCmd(args.slice(1)));
       return;
     case "__list-sessions":
       import("./sandbox/session-store").then(({ listAllSessions, sessionsDir }) => {

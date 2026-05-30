@@ -17,6 +17,7 @@ import { flagSchema as shellFlags } from "./shell";
 import { flagSchema as statusFlags } from "./status";
 import { flagSchema as stopFlags } from "./stop";
 import { flagSchema as updateImagesFlags } from "./update-images";
+import { flagSchema as validateFlags } from "./validate";
 
 export const COMMAND_FLAGS = {
   sandbox: sandboxFlags,
@@ -37,6 +38,7 @@ export const COMMAND_FLAGS = {
   complete: completeFlags,
   refs: refsFlags,
   report: reportFlags,
+  validate: validateFlags,
 } as const satisfies Record<string, ParseArgsOptionsConfig>;
 
 export type CommandName = keyof typeof COMMAND_FLAGS;

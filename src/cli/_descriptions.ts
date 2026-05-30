@@ -26,6 +26,7 @@ export const COMMAND_DESCRIPTIONS = {
   complete: "Print shell completion script",
   refs: "Inspect and promote sandbox commits to real branches",
   report: "Collect diagnostic bundle for bug reports",
+  validate: "Validate .openlock/ config + policy",
 } as const;
 
 export type CommandName = keyof typeof COMMAND_DESCRIPTIONS;
