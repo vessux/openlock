@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installHint, runDoctorChecks } from "./doctor";
+import { globalConfigPath } from "./global-config/paths";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
 // runner `podman info` alone can take a few seconds; the bun-test default
@@ -117,6 +118,9 @@ describe("doctor global config check", () => {
       expect(r?.ok).toBe(false);
       expect(r?.detail).toBeDefined();
       expect(r?.detail).toMatch(/default_harness/);
+      const cfg = results.find((x) => x.name.startsWith("global config"));
+      expect(cfg?.ok).toBe(false);
+      expect(cfg?.fix).toBe(`edit or remove ${globalConfigPath()}`);
     },
     TIMEOUT_MS,
   );

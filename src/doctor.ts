@@ -172,6 +172,7 @@ export async function runDoctorChecks(runtime?: Runtime | null): Promise<DoctorR
     {
       name: `global config (${globalConfigPath()})`,
       test: checkGlobalConfig,
+      fix: `edit or remove ${globalConfigPath()}`,
     },
   ];
 
