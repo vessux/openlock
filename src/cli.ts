@@ -8,6 +8,10 @@ openlock - sandbox orchestration toolkit
 
 Usage: openlock <command>
 
+Getting started:
+  setup              Configure machine defaults (runtime, harness, provider)
+  init [path]        Scaffold .openlock/ for a project (interactive)
+
 Session lifecycle:
   sandbox [path]     Create or resume a sandbox session (path defaults to cwd; runs preflight; requires .openlock/ — run \`openlock init\` first)
   list               List all sessions
@@ -28,8 +32,6 @@ Other:
   update-images      Rebuild sandbox container images
   update-base        Rewrite .openlock/Containerfile FROM to current base hash
   prune-images       Remove stale openlock images (use --legacy for pre-M5)
-  init               Scaffold .openlock/ for a project (interactive)
-  setup              Configure machine defaults (runtime, harness, provider)
   refs               Inspect and promote sandbox commits to real branches
   validate           Validate .openlock/ config + policy
   report             Collect diagnostic bundle for bug reports

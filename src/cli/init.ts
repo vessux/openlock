@@ -9,7 +9,7 @@ import { scaffoldPolicy } from "../config-core/policy/scaffold";
 import { readGlobalConfig } from "../global-config";
 import { defaultPolicyContent } from "../sandbox/default-policies";
 import type { Harness } from "../sandbox/harness";
-import { resolveHarness } from "../sandbox/harness";
+import { harnessChoices, harnessDefaultIndex, resolveHarness } from "../sandbox/harness";
 import { renderSeedContainerfile } from "../sandbox/seed-containerfile";
 import { printCmdHelp } from "./_help";
 
@@ -115,11 +115,8 @@ async function collectGuided(io: InitIO, defaultHarness: Harness): Promise<Rende
 
   const harness = (await io.select(
     "Harness for this project (shapes policy + Containerfile)",
-    [
-      { label: "claude_code", value: "claude_code" },
-      { label: "opencode", value: "opencode" },
-    ],
-    defaultHarness === "opencode" ? 1 : 0,
+    harnessChoices(),
+    harnessDefaultIndex(defaultHarness),
   )) as Harness;
 
   const extraMounts: Mount[] = [];

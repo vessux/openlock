@@ -37,7 +37,11 @@ function workdirAlternative(workdir: "bind" | "git-bundle"): string {
 }
 
 function renderMount(m: Mount): string {
-  const lines = [`  - source: ${m.source}`, `    target: ${m.target}`, `    type: ${m.type}`];
+  const lines = [
+    `  - source: ${JSON.stringify(m.source)}`,
+    `    target: ${JSON.stringify(m.target)}`,
+    `    type: ${m.type}`,
+  ];
   if (m.readOnly !== undefined) lines.push(`    readOnly: ${m.readOnly}`);
   return lines.join("\n");
 }

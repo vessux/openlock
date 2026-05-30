@@ -1,11 +1,13 @@
 import { createInterface } from "node:readline";
 import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
+import { readGlobalConfig } from "../global-config";
 import { type GlobalDefaultKey, persistGlobalDefault } from "../global-config/persist";
+import type { GlobalConfig } from "../global-config/schema";
 import { login } from "../login";
 import { PROVIDER_IDS, PROVIDERS } from "../providers/registry";
 import type { ProviderId } from "../providers/types";
 import { type Runtime, resolveRuntime } from "../runtime";
-import { HARNESSES, type Harness } from "../sandbox/harness";
+import { type Harness, harnessChoices, harnessDefaultIndex } from "../sandbox/harness";
 import { printCmdHelp } from "./_help";
 
 export const flagSchema = {
@@ -28,6 +30,7 @@ interface SetupIO {
 
 export interface SetupDeps {
   io: SetupIO;
+  readGlobal: () => GlobalConfig | null;
   persist: (key: GlobalDefaultKey, value: string) => void;
   pickRuntime: () => Promise<Runtime>;
   loginForProvider: (id: ProviderId) => Promise<void>;
@@ -43,14 +46,19 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
     return 1;
   }
 
+  const current = deps.readGlobal();
+
   // 1) runtime
   const runtime = await deps.pickRuntime();
   deps.persist("default_runtime", runtime);
   deps.io.write(`default_runtime: ${runtime}\n`);
 
-  // 2) harness
-  const harnessOptions = [...HARNESSES].map((h) => ({ label: h, value: h }));
-  const harness = (await deps.io.select("Agent harness", harnessOptions, 0)) as Harness;
+  // 2) harness — preselect the current default
+  const harness = (await deps.io.select(
+    "Agent harness",
+    harnessChoices(),
+    harnessDefaultIndex(current?.defaultHarness),
+  )) as Harness;
   deps.persist("default_harness", harness);
   deps.io.write(`default_harness: ${harness}\n`);
 
@@ -60,10 +68,11 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
     deps.io.write(`No provider is compatible with harness '${harness}'.\n`);
     return 1;
   }
+  const provIdx = current?.defaultProvider ? Math.max(0, ids.indexOf(current.defaultProvider)) : 0;
   const provider = (await deps.io.select(
     "Provider",
     ids.map((id) => ({ label: `${id} (${PROVIDERS[id].displayName})`, value: id })),
-    0,
+    provIdx,
   )) as ProviderId;
   await deps.loginForProvider(provider);
   deps.persist("default_provider", provider);
@@ -108,6 +117,7 @@ export async function setupCmd(argv: string[]): Promise<number> {
   }
   return runSetup({
     io: defaultSetupIO(),
+    readGlobal: readGlobalConfig,
     persist: persistGlobalDefault,
     // resolveRuntime runs the runtime-wizard when ambiguous and persists itself;
     // runSetup also persists default_runtime for determinism.

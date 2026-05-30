@@ -24,6 +24,7 @@ describe("runSetup", () => {
         write: () => {},
         select: async (_q, opts, def) => opts[def].value,
       },
+      readGlobal: () => null,
       persist: (k, v) => persisted.push([k, v]),
       pickRuntime: async () => "podman",
       loginForProvider: async (id) => {
@@ -44,11 +45,25 @@ describe("runSetup", () => {
     const persisted: Array<[string, string]> = [];
     const deps: SetupDeps = {
       io: { isTTY: false, write: () => {}, select: async (_q, opts, def) => opts[def].value },
+      readGlobal: () => null,
       persist: (k, v) => persisted.push([k, v]),
       pickRuntime: async () => "podman",
       loginForProvider: async () => {},
     };
     expect(await runSetup(deps)).toBe(1);
     expect(persisted).toEqual([]);
+  });
+
+  it("preselects the persisted harness on re-run", async () => {
+    const persisted: Array<[string, string]> = [];
+    const deps: SetupDeps = {
+      io: { isTTY: true, write: () => {}, select: async (_q, opts, def) => opts[def].value },
+      readGlobal: () => ({ defaultHarness: "opencode" }),
+      persist: (k, v) => persisted.push([k, v]),
+      pickRuntime: async () => "podman",
+      loginForProvider: async () => {},
+    };
+    await runSetup(deps);
+    expect(persisted).toContainEqual(["default_harness", "opencode"]);
   });
 });

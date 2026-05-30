@@ -44,3 +44,16 @@ export function resolveHarness(args: ResolveHarnessArgs): Harness {
   if (global?.defaultHarness) return global.defaultHarness;
   return "claude_code";
 }
+
+/** Harness options for an interactive picker, derived from HARNESSES (the
+ * source of truth) so new harnesses surface everywhere automatically. */
+export function harnessChoices(): { label: string; value: string }[] {
+  return [...HARNESSES].map((h) => ({ label: h, value: h }));
+}
+
+/** Index of `defaultHarness` within harnessChoices(), or 0 if unset/unknown. */
+export function harnessDefaultIndex(defaultHarness: Harness | undefined): number {
+  if (defaultHarness === undefined) return 0;
+  const i = [...HARNESSES].indexOf(defaultHarness);
+  return i < 0 ? 0 : i;
+}

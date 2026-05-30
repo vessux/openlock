@@ -50,4 +50,13 @@ describe("scaffoldManifest", () => {
     expect(lintManifest(out, "/tmp", { offline: true })).toEqual([]);
     expect(out).toContain("readOnly: true");
   });
+
+  it("quotes extra-mount source/target so odd characters stay valid (offline)", () => {
+    const out = scaffoldManifest({
+      workdir: "bind",
+      extraMounts: [{ source: "./a: b", target: "/sandbox/.openlock/x: y", type: "copy-once" }],
+    });
+    expect(out).toContain('source: "./a: b"');
+    expect(lintManifest(out, "/tmp", { offline: true })).toEqual([]);
+  });
 });
