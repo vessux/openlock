@@ -47,6 +47,7 @@ const EXTRA_MOUNT_EXAMPLE = [
   "  # - source: ./assets",
   "  #   target: /sandbox/.openlock/assets",
   "  #   type: copy-once",
+  "  # (use type: copy-refresh instead to re-copy the source on every session start)",
   "  # readOnly is only valid on type: bind, e.g.:",
   "  # - source: ./shared",
   "  #   target: /sandbox/.openlock/shared",
@@ -79,7 +80,7 @@ export function scaffoldManifest(opts: ScaffoldManifestOpts): string {
     EXTRA_MOUNT_EXAMPLE,
   ].join("\n");
 
-  return `${[
+  return [
     "# .openlock/config.yaml — your sandbox manifest. Edit freely.",
     "#",
     "# Supported keys: mounts, args, env. Anything else is rejected by",
@@ -92,5 +93,5 @@ export function scaffoldManifest(opts: ScaffoldManifestOpts): string {
     "",
     renderArgs(opts.args ?? []),
     "",
-  ].join("\n")}`;
+  ].join("\n");
 }

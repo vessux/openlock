@@ -42,10 +42,12 @@ describe("scaffoldManifest", () => {
       workdir: "bind",
       extraMounts: [
         { source: "./secrets", target: "/sandbox/.openlock/secrets", type: "copy-once" },
+        { source: "./shared", target: "/sandbox/.openlock/shared", type: "bind", readOnly: true },
       ],
       env: { FOO: "bar", COUNT: "42", FLAG: "true" },
       args: ["--model", "x", "99"],
     });
     expect(lintManifest(out, "/tmp", { offline: true })).toEqual([]);
+    expect(out).toContain("readOnly: true");
   });
 });
