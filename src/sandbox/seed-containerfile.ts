@@ -1,5 +1,5 @@
-import type { Harness } from "./harness";
 import { computeBaseTag, GHCR_BASE_PREFIX } from "./ensure-base";
+import type { Harness } from "./harness";
 import { BASE_CONTAINERFILE } from "./image-build";
 import { HARNESS_SENTINEL } from "./update-containerfile";
 

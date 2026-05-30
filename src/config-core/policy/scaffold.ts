@@ -20,9 +20,7 @@ export function scaffoldPolicy(harness: string, defaultPolicyYaml: string): stri
     throw new Error("default policy has no network_policies mapping");
   }
   if (!(harness in np)) {
-    const known = Object.keys(np).filter(
-      (k) => !SHARED_NETWORK_POLICY_KEYS.includes(k),
-    );
+    const known = Object.keys(np).filter((k) => !SHARED_NETWORK_POLICY_KEYS.includes(k));
     throw new Error(
       `harness '${harness}' has no network_policies block in the default policy. Known: ${known.join(", ")}`,
     );
