@@ -78,16 +78,34 @@ jobs:
             golang-github-containers-image \
             containers-storage skopeo || true
           sudo mkdir -p /etc/apt/keyrings
-          curl -fsSL "https://download.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04/Release.key" \
+          # Fetch from downloadcontent.opensuse.org (openSUSE's canonical content
+          # host) rather than the download.opensuse.org mirror redirector. The
+          # redirector routes apt to regional mirrors that intermittently serve
+          # half-synced .debs — apt then rejects them ("File has unexpected size
+          # ... Mirror sync in progress?", exit 100), which blocked CI on every
+          # retry while the chosen mirror was mid-sync. The content host's index
+          # and packages are always mutually consistent. See bd openlock-k3g.
+          base="https://downloadcontent.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04"
+          curl -fsSL "${base}/Release.key" \
             | sudo gpg --dearmor -o /etc/apt/keyrings/alvistack.gpg
-          echo "deb [signed-by=/etc/apt/keyrings/alvistack.gpg] https://download.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04/ /" \
+          echo "deb [signed-by=/etc/apt/keyrings/alvistack.gpg] ${base}/ /" \
             | sudo tee /etc/apt/sources.list.d/alvistack.list > /dev/null
-          sudo apt-get update -qq
-          # `--force-overwrite` as belt-and-suspenders: catch any
-          # /etc/containers/* file we didn't purge above.
-          sudo apt-get install -y \
-            -o Dpkg::Options::=--force-overwrite \
-            podman podman-gvproxy podman-aardvark-dns podman-netavark
+          # Retry update+install a few times as belt-and-suspenders against any
+          # transient fetch error; `apt-get clean` drops partials between tries.
+          # `if`-condition form keeps a failed attempt from tripping `set -e`.
+          # `--force-overwrite` catches any /etc/containers/* file not purged above.
+          for attempt in 1 2 3; do
+            if sudo apt-get update -qq \
+              && sudo apt-get install -y \
+                -o Dpkg::Options::=--force-overwrite \
+                -o Acquire::Retries=3 \
+                podman podman-gvproxy podman-aardvark-dns podman-netavark; then
+              break
+            fi
+            echo "::warning::podman install attempt ${attempt} failed; cleaning and retrying"
+            sudo apt-get clean
+            sleep 15
+          done
           podman --version
 
       - name: Extend rootless subuid/subgid range
