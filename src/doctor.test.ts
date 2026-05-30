@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installHint, runDoctorChecks } from "./doctor";
+import { installHint, renderDoctorResults, runDoctorChecks } from "./doctor";
 import { globalConfigPath } from "./global-config/paths";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
@@ -175,5 +175,24 @@ describe("doctor non-interactive runtime", () => {
       (r) => r.name.includes("machine") || r.name.includes("socket") || r.name.includes("daemon"),
     );
     expect(runtimeSpecific).toBe(false);
+  });
+});
+
+describe("renderDoctorResults", () => {
+  it("prints `fix:` only for failed checks that have a fix", () => {
+    const { lines, failures } = renderDoctorResults([
+      { name: "git", ok: true, fix: "brew install git" },
+      { name: "credentials", ok: false, fix: "openlock login" },
+      { name: "global config", ok: false, detail: "parse error" },
+    ]);
+    const out = lines.join("\n");
+    expect(failures).toBe(2);
+    // passing check carries a static fix, but it must NOT be printed
+    expect(out).not.toContain("fix: brew install git");
+    // failing check with a fix → printed
+    expect(out).toContain("fix: openlock login");
+    // failing check without a fix → detail shown, no stray fix line
+    expect(out).toContain("parse error");
+    expect(out).not.toContain("fix: undefined");
   });
 });

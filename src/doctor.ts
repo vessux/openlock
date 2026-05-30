@@ -192,16 +192,29 @@ export async function runDoctorChecks(runtime?: Runtime | null): Promise<DoctorR
   return results;
 }
 
-export async function doctor(): Promise<void> {
-  const results = await runDoctorChecks();
+/** Render doctor results to display lines + a failure count. Pure (no I/O) so
+ * the formatting — notably that `fix:` prints only for failed checks — is unit
+ * testable without `doctor()`'s `process.exit`. */
+export function renderDoctorResults(results: DoctorResult[]): {
+  lines: string[];
+  failures: number;
+} {
+  const lines: string[] = [];
   let failures = 0;
   for (const r of results) {
     const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
-    console.log(`  ${icon} ${r.name}`);
-    if (r.detail !== undefined) console.log(`      ${r.detail}`);
-    if (!r.ok && r.fix !== undefined) console.log(`      fix: ${r.fix}`);
+    lines.push(`  ${icon} ${r.name}`);
+    if (r.detail !== undefined) lines.push(`      ${r.detail}`);
+    if (!r.ok && r.fix !== undefined) lines.push(`      fix: ${r.fix}`);
     if (!r.ok) failures++;
   }
+  return { lines, failures };
+}
+
+export async function doctor(): Promise<void> {
+  const results = await runDoctorChecks();
+  const { lines, failures } = renderDoctorResults(results);
+  for (const line of lines) console.log(line);
 
   console.log();
   if (failures > 0) {
