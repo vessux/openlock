@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import yaml from "js-yaml";
+import type { Mount } from "../config-core";
+import { type ManifestConfig, parseManifest } from "../config-core";
 import { defaultPolicyContent } from "./default-policies";
 import { computeBaseTag, GHCR_BASE_PREFIX } from "./ensure-base";
 import { resolveHarness } from "./harness";
 import { BASE_CONTAINERFILE } from "./image-build";
-import { type Mount, parseMounts } from "./mounts";
 import { seedContainerfile } from "./seed-containerfile";
 
 const FOLDER_NAME = ".openlock";
@@ -13,12 +14,7 @@ const CONFIG_FILENAME = "config.yaml";
 const POLICY_FILENAME = "policy.yaml";
 const CONTAINERFILE_FILENAME = "Containerfile";
 
-interface OpenlockFolderConfig {
-  mounts: Mount[];
-  args: string[];
-  env: Record<string, string>;
-  deprecations: string[];
-}
+type OpenlockFolderConfig = ManifestConfig;
 
 function configPath(folderPath: string): string {
   return join(folderPath, CONFIG_FILENAME);
@@ -30,34 +26,6 @@ function containerfilePath(folderPath: string): string {
   return join(folderPath, CONTAINERFILE_FILENAME);
 }
 
-function parseArgs(raw: unknown, where: string): string[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new Error(`Invalid config.yaml: 'args' must be a list at ${where}`);
-  }
-  for (const v of raw) {
-    if (typeof v !== "string") {
-      throw new Error(`Invalid config.yaml: 'args' must contain only strings at ${where}`);
-    }
-  }
-  return raw as string[];
-}
-
-function parseEnv(raw: unknown, where: string): Record<string, string> {
-  if (raw === undefined || raw === null) return {};
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`Invalid config.yaml: 'env' must be a mapping at ${where}`);
-  }
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof v !== "string") {
-      throw new Error(`Invalid config.yaml: env value for '${k}' must be a string at ${where}`);
-    }
-    out[k] = v;
-  }
-  return out;
-}
-
 function readConfig(folderPath: string): OpenlockFolderConfig {
   const path = configPath(folderPath);
   let raw: string;
@@ -66,23 +34,8 @@ function readConfig(folderPath: string): OpenlockFolderConfig {
   } catch {
     throw new Error(`config.yaml not found at ${path}`);
   }
-
-  const doc = (yaml.load(raw) ?? {}) as Record<string, unknown>;
-  if (typeof doc !== "object" || Array.isArray(doc)) {
-    throw new Error(`Invalid config.yaml: expected mapping at ${path}`);
-  }
-
-  const deprecations: string[] = [];
-  if (doc.caps !== undefined) {
-    deprecations.push("caps");
-  }
-
-  const projectRoot = dirname(folderPath);
-  const mounts = parseMounts(doc.mounts, projectRoot);
-  const args = parseArgs(doc.args, path);
-  const env = parseEnv(doc.env, path);
-
-  return { mounts, args, env, deprecations };
+  const doc = yaml.load(raw) ?? {};
+  return parseManifest(doc, dirname(folderPath));
 }
 
 function writeConfig(folderPath: string): void {
@@ -127,14 +80,13 @@ export interface ResolveResult {
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
-  deprecations: string[];
 }
 
 function folderPathFor(projectPath: string): string {
   return join(projectPath, FOLDER_NAME);
 }
 
-const EMPTY_CFG: OpenlockFolderConfig = { mounts: [], args: [], env: {}, deprecations: [] };
+const EMPTY_CFG: OpenlockFolderConfig = { mounts: [], args: [], env: {} };
 
 function buildResult(
   folder: string,
@@ -147,7 +99,6 @@ function buildResult(
     mounts: cfg.mounts,
     args: cfg.args,
     env: cfg.env,
-    deprecations: cfg.deprecations,
   };
 }
 

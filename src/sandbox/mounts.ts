@@ -1,88 +1,22 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import type { Mount } from "../config-core";
+import { SANDBOX_OPENLOCK_PREFIX } from "../config-core";
 import { execAsRoot, uploadToSandbox } from "./container";
 
-type MountType = "copy-once" | "copy-refresh" | "bind" | "git-bundle";
+export type { Mount } from "../config-core";
 
-export interface Mount {
-  source: string;
-  target: string;
-  type: MountType;
-  readOnly?: boolean;
-}
-
-const SANDBOX_OPENLOCK_PREFIX = "/sandbox/.openlock/";
-
-const RESERVED_MOUNT_NAMES: ReadonlySet<string> = new Set([".gitconfig", "bundles"]);
-
-function expandHome(p: string): string {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
-  return p;
-}
-
-function resolveSource(projectRoot: string, raw: string): string {
-  const expanded = expandHome(raw);
-  return isAbsolute(expanded) ? expanded : resolve(projectRoot, expanded);
-}
-
-function commonTargetChecks(target: string, where: string): void {
-  if (!isAbsolute(target)) {
-    throw new Error(`${where}: mount target must be absolute: ${target}`);
+// Defensive guards, intentionally self-contained: this runs only on Mount.target
+// values already validated by parseManifest, so it deliberately does not delegate
+// to config-core's semantic rules.
+export function stagingPathFor(target: string): string {
+  if (!target.startsWith("/")) {
+    throw new Error(`stagingPathFor: mount target must be absolute: ${target}`);
   }
   if (target.split("/").includes("..")) {
-    throw new Error(`${where}: mount target must not contain '..' segments: ${target}`);
+    throw new Error(`stagingPathFor: mount target must not contain '..' segments: ${target}`);
   }
-  if (target.startsWith(SANDBOX_OPENLOCK_PREFIX)) {
-    const rel = target.slice(SANDBOX_OPENLOCK_PREFIX.length);
-    const topSegment = rel.split("/")[0];
-    if (topSegment !== undefined && RESERVED_MOUNT_NAMES.has(topSegment)) {
-      throw new Error(
-        `${where}: mount target conflicts with openlock-internal name '${topSegment}': ${target}`,
-      );
-    }
-  }
-}
-
-function validateTargetForType(target: string, type: MountType, where: string): void {
-  commonTargetChecks(target, where);
-  if (type === "copy-once" || type === "copy-refresh") {
-    if (target === "/sandbox/repo") {
-      throw new Error(
-        `${where}: target /sandbox/repo not supported with type '${type}'; use git-bundle (host repo bundled in) or bind (live host sync), or omit the workdir mount`,
-      );
-    }
-    if (
-      !target.startsWith(SANDBOX_OPENLOCK_PREFIX) ||
-      target.length <= SANDBOX_OPENLOCK_PREFIX.length
-    ) {
-      throw new Error(
-        `${where}: mount target must be under /sandbox/.openlock/ for type '${type}': ${target}`,
-      );
-    }
-    return;
-  }
-  if (type === "git-bundle") {
-    if (target.startsWith(SANDBOX_OPENLOCK_PREFIX)) {
-      throw new Error(
-        `${where}: git-bundle target must not be under /sandbox/.openlock/: ${target}`,
-      );
-    }
-    return;
-  }
-  // type === "bind": no further restriction
-}
-
-function assertGitWorkingTree(source: string, where: string): void {
-  const dotGit = join(source, ".git");
-  if (!existsSync(dotGit)) {
-    throw new Error(`${where}: source ${source} is not a git working tree (missing .git)`);
-  }
-}
-
-export function stagingPathFor(target: string): string {
-  commonTargetChecks(target, "stagingPathFor");
   if (
     !target.startsWith(SANDBOX_OPENLOCK_PREFIX) ||
     target.length <= SANDBOX_OPENLOCK_PREFIX.length
@@ -90,99 +24,6 @@ export function stagingPathFor(target: string): string {
     throw new Error(`stagingPathFor: target must be under /sandbox/.openlock/: ${target}`);
   }
   return target.slice(SANDBOX_OPENLOCK_PREFIX.length);
-}
-
-interface RawMount {
-  source?: unknown;
-  target?: unknown;
-  type?: unknown;
-  readOnly?: unknown;
-}
-
-function parseRawType(raw: RawMount, where: string): MountType {
-  if (typeof raw.type !== "string") {
-    throw new Error(`${where}: 'type' must be one of copy-once, copy-refresh, bind, git-bundle`);
-  }
-  const type = raw.type;
-  if (type !== "copy-once" && type !== "copy-refresh" && type !== "bind" && type !== "git-bundle") {
-    throw new Error(
-      `${where}: unknown type '${type}' (allowed: copy-once, copy-refresh, bind, git-bundle)`,
-    );
-  }
-  return type;
-}
-
-function parseRawReadOnly(raw: RawMount, type: MountType, where: string): boolean | undefined {
-  if (raw.readOnly === undefined) return undefined;
-  if (typeof raw.readOnly !== "boolean") {
-    throw new Error(`${where}: readOnly must be a boolean`);
-  }
-  if (type !== "bind") {
-    throw new Error(`${where}: readOnly is only valid on type: bind`);
-  }
-  return raw.readOnly;
-}
-
-function validateSource(source: string, type: MountType, where: string): void {
-  if (!existsSync(source)) {
-    throw new Error(`${where}: source ${source} does not exist`);
-  }
-  const isDir = statSync(source).isDirectory();
-  if ((type === "copy-once" || type === "copy-refresh" || type === "git-bundle") && !isDir) {
-    throw new Error(`${where}: source ${source} is not a directory`);
-  }
-  if (type === "git-bundle") {
-    assertGitWorkingTree(source, where);
-  }
-}
-
-function parseOne(raw: RawMount, projectRoot: string, index: number): Mount {
-  const where = `mounts[${index}]`;
-  if (typeof raw.source !== "string" || raw.source.length === 0) {
-    throw new Error(`${where}: 'source' must be a non-empty string`);
-  }
-  if (typeof raw.target !== "string" || raw.target.length === 0) {
-    throw new Error(`${where}: 'target' must be a non-empty string`);
-  }
-  const type = parseRawType(raw, where);
-  const readOnly = parseRawReadOnly(raw, type, where);
-  validateTargetForType(raw.target, type, where);
-  const source = resolveSource(projectRoot, raw.source);
-  validateSource(source, type, where);
-  return readOnly !== undefined
-    ? { source, target: raw.target, type, readOnly }
-    : { source, target: raw.target, type };
-}
-
-export function parseMounts(raw: unknown, projectRoot: string): Mount[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new Error("'mounts' must be a list");
-  }
-  const out: Mount[] = [];
-  const targets = new Set<string>();
-  for (let i = 0; i < raw.length; i++) {
-    const m = parseOne(raw[i] as RawMount, projectRoot, i);
-    if (targets.has(m.target)) {
-      throw new Error(`mounts[${i}]: duplicate target ${m.target}`);
-    }
-    targets.add(m.target);
-    out.push(m);
-  }
-  const bundleBasenames = new Map<string, number>();
-  for (let i = 0; i < out.length; i++) {
-    const m = out[i]!;
-    if (m.type !== "git-bundle") continue;
-    const base = basename(m.source);
-    const prev = bundleBasenames.get(base);
-    if (prev !== undefined) {
-      throw new Error(
-        `mounts[${i}]: source basename '${base}' collides between git-bundle mounts (already used by mounts[${prev}])`,
-      );
-    }
-    bundleBasenames.set(base, i);
-  }
-  return out;
 }
 
 export function stageMounts(stagingDir: string, mounts: readonly Mount[]): void {

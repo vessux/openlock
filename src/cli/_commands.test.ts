@@ -13,7 +13,6 @@ describe("COMMAND_FLAGS", () => {
       "shell",
       "exec",
       "cred-refresh",
-      "validate-policy",
       "login",
       "logout",
       "providers",
@@ -23,6 +22,7 @@ describe("COMMAND_FLAGS", () => {
       "complete",
       "refs",
       "report",
+      "validate",
     ].sort();
     expect(Object.keys(COMMAND_FLAGS).sort()).toEqual(expected);
   });

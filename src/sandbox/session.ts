@@ -85,7 +85,7 @@ interface ResolvedRepo {
   env: Record<string, string>;
 }
 
-function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string): ResolvedRepo {
+function resolveRepoPolicy(projectPath: string, policyOverride?: string): ResolvedRepo {
   if (policyOverride) {
     return {
       policy: resolve(policyOverride),
@@ -103,12 +103,6 @@ function resolveRepoPolicyAndCaps(projectPath: string, policyOverride?: string):
     console.log("Restored .openlock/policy.yaml from default.yaml.");
   } else if (folder.origin === "restored-containerfile") {
     console.log("Restored .openlock/Containerfile from seed.");
-  }
-  if (folder.deprecations.includes("caps")) {
-    console.warn(
-      "warning: config.yaml has deprecated 'caps' field; ignored. " +
-        "Run `openlock validate --fix` (coming in v0.9.x) to remove it.",
-    );
   }
   return {
     policy: folder.policyPath,
@@ -621,7 +615,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps(runtime) }));
   const repoResult = await ensureRepoIsGit(projectPath);
   announceRepoAction(repoResult.action, projectPath);
-  const resolved = resolveRepoPolicyAndCaps(projectPath, opts.policy);
+  const resolved = resolveRepoPolicy(projectPath, opts.policy);
 
   const branchErr = validateBranchFlagAgainstWorkdir(opts.branch, workdirMount(resolved.mounts));
   if (branchErr !== null) {

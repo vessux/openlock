@@ -37,14 +37,13 @@ describe("resolveOpenlockFolder", () => {
     }
   });
 
-  it("deprecation warning when config.yaml has caps field", () => {
+  it("rejects a config.yaml with a leftover caps key", () => {
     const dir = makeProject();
     try {
       mkdirSync(join(dir, ".openlock"));
       writeFileSync(join(dir, ".openlock/config.yaml"), "caps: [js]\n");
-      writeFileSync(join(dir, ".openlock/policy.yaml"), "# test\n");
-      const out = resolveOpenlockFolder(dir);
-      expect(out.deprecations).toContain("caps");
+      writeFileSync(join(dir, ".openlock/policy.yaml"), "version: 1\n");
+      expect(() => resolveOpenlockFolder(dir)).toThrow(/unknown key "caps"/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
