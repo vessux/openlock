@@ -19,15 +19,15 @@ describe("scaffoldManifest", () => {
     expect(out).toMatch(/#\s*type: bind/);
   });
 
-  it("renders chosen env and args", () => {
+  it("renders chosen env and args (quoted so they stay strings)", () => {
     const out = scaffoldManifest({
       workdir: "bind",
       env: { FOO: "bar" },
       args: ["--model", "claude-sonnet-4-6"],
     });
-    expect(out).toContain("FOO: bar");
-    expect(out).toContain("- --model");
-    expect(out).toContain("- claude-sonnet-4-6");
+    expect(out).toContain('FOO: "bar"');
+    expect(out).toContain('- "--model"');
+    expect(out).toContain('- "claude-sonnet-4-6"');
   });
 
   it("lints clean for both workdir types (offline)", () => {
@@ -37,14 +37,14 @@ describe("scaffoldManifest", () => {
     }
   });
 
-  it("lints clean with extra mount, env, args (offline)", () => {
+  it("lints clean with extra mount, env, args incl. numeric/boolean-looking values (offline)", () => {
     const out = scaffoldManifest({
       workdir: "bind",
       extraMounts: [
         { source: "./secrets", target: "/sandbox/.openlock/secrets", type: "copy-once" },
       ],
-      env: { FOO: "bar" },
-      args: ["--model", "x"],
+      env: { FOO: "bar", COUNT: "42", FLAG: "true" },
+      args: ["--model", "x", "99"],
     });
     expect(lintManifest(out, "/tmp", { offline: true })).toEqual([]);
   });

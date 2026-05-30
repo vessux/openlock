@@ -59,14 +59,14 @@ function renderEnv(env: Record<string, string>): string {
   if (keys.length === 0) {
     return ["env: {}", '  # EXAMPLE_FLAG: "1"'].join("\n");
   }
-  return ["env:", ...keys.map((k) => `  ${k}: ${env[k]}`)].join("\n");
+  return ["env:", ...keys.map((k) => `  ${k}: ${JSON.stringify(env[k])}`)].join("\n");
 }
 
 function renderArgs(args: string[]): string {
   if (args.length === 0) {
     return ["args: []", "  # - --model", "  # - claude-sonnet-4-6"].join("\n");
   }
-  return ["args:", ...args.map((a) => `  - ${a}`)].join("\n");
+  return ["args:", ...args.map((a) => `  - ${JSON.stringify(a)}`)].join("\n");
 }
 
 export function scaffoldManifest(opts: ScaffoldManifestOpts): string {
