@@ -14,6 +14,7 @@ import { flagSchema as reapFlags } from "./reap";
 import { flagSchema as refsFlags } from "./refs";
 import { flagSchema as reportFlags } from "./report";
 import { flagSchema as sandboxFlags } from "./sandbox";
+import { flagSchema as setupFlags } from "./setup";
 import { flagSchema as shellFlags } from "./shell";
 import { flagSchema as statusFlags } from "./status";
 import { flagSchema as stopFlags } from "./stop";
@@ -22,6 +23,7 @@ import { flagSchema as validateFlags } from "./validate";
 
 export const COMMAND_FLAGS = {
   init: initFlags,
+  setup: setupFlags,
   sandbox: sandboxFlags,
   list: listFlags,
   status: statusFlags,

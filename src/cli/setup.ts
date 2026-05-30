@@ -1,9 +1,12 @@
-import type { ParseArgsOptionsConfig } from "node:util";
-import type { GlobalDefaultKey } from "../global-config/persist";
+import { createInterface } from "node:readline";
+import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
+import { type GlobalDefaultKey, persistGlobalDefault } from "../global-config/persist";
+import { login } from "../login";
 import { PROVIDER_IDS, PROVIDERS } from "../providers/registry";
 import type { ProviderId } from "../providers/types";
-import type { Runtime } from "../runtime";
+import { type Runtime, resolveRuntime } from "../runtime";
 import { HARNESSES, type Harness } from "../sandbox/harness";
+import { printCmdHelp } from "./_help";
 
 export const flagSchema = {
   help: { type: "boolean", short: "h" },
@@ -69,4 +72,46 @@ export async function runSetup(deps: SetupDeps): Promise<number> {
   deps.io.write(`\nDone. runtime=${runtime} harness=${harness} provider=${provider}\n`);
   deps.io.write("Next: cd <repo> && openlock init\n");
   return 0;
+}
+
+function defaultSetupIO(): SetupIO {
+  const ask = async (q: string): Promise<string> => {
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    return new Promise<string>((res) =>
+      rl.question(q, (a) => {
+        rl.close();
+        res(a);
+      }),
+    );
+  };
+  return {
+    isTTY: Boolean(process.stdin.isTTY),
+    write: (s) => process.stdout.write(s),
+    async select(question, options, defIndex) {
+      process.stderr.write(`${question}:\n`);
+      for (let i = 0; i < options.length; i++) {
+        process.stderr.write(`  ${i + 1}) ${options[i].label}\n`);
+      }
+      const a = (await ask(`> [${defIndex + 1}] `)).trim();
+      const n = a === "" ? defIndex + 1 : Number.parseInt(a, 10);
+      const idx = Number.isFinite(n) && n >= 1 && n <= options.length ? n - 1 : defIndex;
+      return options[idx].value;
+    },
+  };
+}
+
+export async function setupCmd(argv: string[]): Promise<number> {
+  const { values } = parseArgs({ args: argv, options: flagSchema, allowPositionals: false });
+  if (values.help === true) {
+    printCmdHelp("setup", flagSchema, "");
+    return 0;
+  }
+  return runSetup({
+    io: defaultSetupIO(),
+    persist: persistGlobalDefault,
+    // resolveRuntime runs the runtime-wizard when ambiguous and persists itself;
+    // runSetup also persists default_runtime for determinism.
+    pickRuntime: () => resolveRuntime(),
+    loginForProvider: (id) => login({ providerFlag: id }),
+  });
 }

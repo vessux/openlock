@@ -27,6 +27,7 @@ export const COMMAND_DESCRIPTIONS = {
   refs: "Inspect and promote sandbox commits to real branches",
   report: "Collect diagnostic bundle for bug reports",
   init: "Scaffold .openlock/ for a project (interactive)",
+  setup: "Configure machine defaults (runtime, harness, provider)",
   validate: "Validate .openlock/ config + policy",
 } as const;
 
