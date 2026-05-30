@@ -132,7 +132,7 @@ describe("openrouter cred_inject mechanism (live integration)", () => {
         // CA-bundle + echo-proxy bring-up. ~5s worst-case extra.
         const curlCmd = [
           "curl",
-          "-sf",
+          "-sSf",
           "--retry",
           "5",
           "--retry-all-errors",

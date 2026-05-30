@@ -185,9 +185,22 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
         // If openlock-hnp regressed (raw podman exec), curl would talk to
         // mock.opencode.test directly, fail DNS or be denied, and no echo
         // JSON would come back.
+        // --retry 5 + --retry-all-errors absorbs the transient TLS/recv race
+        // (curl exit 35/56) when the FIRST post-create egress beats the
+        // supervisor's CA-bundle + echo-proxy bring-up. waitForSandboxReady
+        // only proves /bin/true execs — NOT that egress is wired — so the
+        // first proxied request can still race. -S surfaces curl's real error
+        // if all retries are exhausted (so a true failure is no longer blind).
+        // Matches the sibling foreground tests (harness-cred-inject,
+        // openrouter-opencode-cred-inject). bd openlock-eh8.
         const curlArgv = [
           "curl",
-          "-sf",
+          "-sSf",
+          "--retry",
+          "5",
+          "--retry-all-errors",
+          "--retry-delay",
+          "1",
           "-H",
           "X-Original-Header: original-value",
           "https://mock.opencode.test:8443/",
