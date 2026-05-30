@@ -9,6 +9,7 @@ import {
   RUNTIMES,
   type Runtime,
   resolveRuntime,
+  resolveRuntimeNonInteractive,
 } from "./runtime";
 
 describe("RUNTIMES constant", () => {
@@ -155,5 +156,24 @@ describe("resolveRuntime", () => {
   it("env override takes precedence", async () => {
     process.env.OPENLOCK_RUNTIME = "docker";
     expect(await resolveRuntime()).toBe("docker");
+  });
+});
+
+describe("resolveRuntimeNonInteractive", () => {
+  const oldEnv = { ...process.env };
+  afterEach(() => {
+    process.env = oldEnv;
+  });
+
+  it("honors OPENLOCK_RUNTIME without probing", async () => {
+    process.env = { ...oldEnv, OPENLOCK_RUNTIME: "docker" };
+    expect(await resolveRuntimeNonInteractive()).toBe("docker");
+  });
+
+  it("returns Runtime | null and never throws when nothing is configured", async () => {
+    process.env = { ...oldEnv };
+    delete process.env.OPENLOCK_RUNTIME;
+    const rt = await resolveRuntimeNonInteractive();
+    expect(rt === null || rt === "podman" || rt === "docker").toBe(true);
   });
 });
