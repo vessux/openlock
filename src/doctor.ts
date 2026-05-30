@@ -8,14 +8,23 @@ import { type Runtime, resolveRuntime } from "./runtime";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { hasAnyProvider } from "./tokens";
 
+/** Platform-aware install command. Mac uses brew; Linux assumes apt and lets
+ * non-Debian users substitute their own package manager. */
+export function installHint(pkg: string, platform: NodeJS.Platform = process.platform): string {
+  const pm = platform === "darwin" ? "brew" : "apt";
+  return `${pm} install ${pkg}`;
+}
+
 interface CheckOutcome {
   ok: boolean;
   detail?: string;
+  fix?: string;
 }
 
 interface Check {
   name: string;
   test: () => Promise<boolean | CheckOutcome>;
+  fix?: string;
 }
 
 export async function podmanMachineRunning(): Promise<boolean> {
@@ -67,6 +76,7 @@ export interface DoctorResult {
   name: string;
   ok: boolean;
   detail?: string;
+  fix?: string;
 }
 
 async function checkGlobalConfig(): Promise<CheckOutcome> {

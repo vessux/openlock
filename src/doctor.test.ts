@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runDoctorChecks } from "./doctor";
+import { installHint, runDoctorChecks } from "./doctor";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
 // runner `podman info` alone can take a few seconds; the bun-test default
@@ -120,4 +120,14 @@ describe("doctor global config check", () => {
     },
     TIMEOUT_MS,
   );
+});
+
+describe("installHint", () => {
+  it("uses brew on macOS", () => {
+    expect(installHint("git", "darwin")).toBe("brew install git");
+  });
+
+  it("uses apt on Linux", () => {
+    expect(installHint("podman", "linux")).toBe("apt install podman");
+  });
 });
