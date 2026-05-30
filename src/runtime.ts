@@ -1,5 +1,6 @@
 // src/runtime.ts
 
+import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import type { GlobalConfig } from "./global-config/schema";
 import { runWizard } from "./runtime-wizard";
@@ -37,18 +38,8 @@ export function autodetectRuntimeFromProbes(p: BinaryProbes): Runtime | null {
   return null;
 }
 
-async function commandExists(cmd: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["which", cmd], { stdout: "ignore", stderr: "ignore" });
-    return (await proc.exited) === 0;
-  } catch {
-    return false;
-  }
-}
-
 async function probeBinaries(): Promise<BinaryProbes> {
-  const [podman, docker] = await Promise.all([commandExists("podman"), commandExists("docker")]);
-  return { podman, docker };
+  return { podman: commandExists("podman"), docker: commandExists("docker") };
 }
 
 export interface GetRuntimeOpts {

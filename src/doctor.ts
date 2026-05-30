@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
@@ -15,15 +16,6 @@ interface CheckOutcome {
 interface Check {
   name: string;
   test: () => Promise<boolean | CheckOutcome>;
-}
-
-async function commandExists(cmd: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["which", cmd], { stdout: "ignore", stderr: "ignore" });
-    return (await proc.exited) === 0;
-  } catch {
-    return false;
-  }
 }
 
 export async function podmanMachineRunning(): Promise<boolean> {
@@ -92,8 +84,8 @@ export async function runDoctorChecks(runtime?: Runtime): Promise<DoctorResult[]
   const isMac = process.platform === "darwin";
   const dev = isDevMode();
   const checks: Check[] = [
-    { name: "git", test: () => commandExists("git") },
-    { name: resolved, test: () => commandExists(resolved) },
+    { name: "git", test: async () => commandExists("git") },
+    { name: resolved, test: async () => commandExists(resolved) },
     ...(resolved === "podman"
       ? [
           isMac
@@ -103,10 +95,10 @@ export async function runDoctorChecks(runtime?: Runtime): Promise<DoctorResult[]
       : [{ name: "docker daemon reachable", test: dockerDaemonReachable }]),
     ...(dev
       ? [
-          { name: "bun", test: () => commandExists("bun") },
-          { name: "cargo", test: () => commandExists("cargo") },
+          { name: "bun", test: async () => commandExists("bun") },
+          { name: "cargo", test: async () => commandExists("cargo") },
           ...(isMac
-            ? [{ name: "cargo-zigbuild", test: () => commandExists("cargo-zigbuild") }]
+            ? [{ name: "cargo-zigbuild", test: async () => commandExists("cargo-zigbuild") }]
             : []),
           {
             name: "openshell-fork directory",
