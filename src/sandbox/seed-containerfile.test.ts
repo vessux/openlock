@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { seedContainerfile } from "./seed-containerfile";
+import { renderSeedContainerfile, seedContainerfile } from "./seed-containerfile";
 
 const SNAP_DIR = join(import.meta.dir, "seed-containerfile.snapshots");
 const BASE_CONTENT_FIXTURE = "FROM ubuntu:24.04\nRUN echo base\n";
@@ -62,5 +62,17 @@ describe("seedContainerfile", () => {
       baseContent: BASE_CONTENT_FIXTURE,
     });
     expect(out).toContain(`FROM ghcr.io/vessux/openlock-base:${FAKE_HASH}`);
+  });
+});
+
+describe("renderSeedContainerfile", () => {
+  it("produces a Containerfile that installs the requested harness", () => {
+    const out = renderSeedContainerfile("claude_code");
+    expect(out).toContain("FROM ghcr.io/vessux/openlock-base:");
+    expect(out).toContain("@anthropic-ai/claude-code@");
+  });
+
+  it("installs opencode for the opencode harness", () => {
+    expect(renderSeedContainerfile("opencode")).toContain("opencode-ai@");
   });
 });

@@ -1,4 +1,6 @@
 import type { Harness } from "./harness";
+import { computeBaseTag, GHCR_BASE_PREFIX } from "./ensure-base";
+import { BASE_CONTAINERFILE } from "./image-build";
 import { HARNESS_SENTINEL } from "./update-containerfile";
 
 function multiHarnessBlock(harnesses: Harness[]): string {
@@ -64,6 +66,13 @@ export interface SeedContainerfileArgs {
   harnesses: Harness[];
   baseHash: string;
   baseContent: string;
+}
+
+/** Full Containerfile contents seeded for a single harness, using the embedded
+ * base image hash. Shared by `openlock init` and the folder helpers. */
+export function renderSeedContainerfile(harness: Harness): string {
+  const baseHash = computeBaseTag(BASE_CONTAINERFILE).slice(GHCR_BASE_PREFIX.length);
+  return seedContainerfile({ harnesses: [harness], baseHash, baseContent: BASE_CONTAINERFILE });
 }
 
 export function seedContainerfile(args: SeedContainerfileArgs): string {
