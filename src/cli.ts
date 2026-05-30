@@ -28,6 +28,7 @@ Other:
   update-images      Rebuild sandbox container images
   update-base        Rewrite .openlock/Containerfile FROM to current base hash
   prune-images       Remove stale openlock images (use --legacy for pre-M5)
+  init               Scaffold .openlock/ for a project (interactive)
   refs               Inspect and promote sandbox commits to real branches
   validate           Validate .openlock/ config + policy
   report             Collect diagnostic bundle for bug reports
@@ -150,6 +151,9 @@ function main(): void {
       import("./cli/complete").then(({ completeCmd }) =>
         completeCmd(args.slice(1)).then(processExit),
       );
+      return;
+    case "init":
+      import("./cli/init").then(({ initCmd }) => initCmd(args.slice(1)).then(processExit));
       return;
     case "validate":
       import("./cli/validate").then(({ validateCmd }) => validateCmd(args.slice(1)));

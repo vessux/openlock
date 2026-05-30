@@ -5,6 +5,7 @@ import { flagSchema as credRefreshFlags } from "./cred-refresh";
 import { flagSchema as doctorFlags } from "./doctor";
 import { flagSchema as execFlags } from "./exec";
 import { flagSchema as gatewayFlags } from "./gateway";
+import { flagSchema as initFlags } from "./init";
 import { flagSchema as listFlags } from "./list";
 import { flagSchema as loginFlags } from "./login";
 import { flagSchema as logoutFlags } from "./logout";
@@ -20,6 +21,7 @@ import { flagSchema as updateImagesFlags } from "./update-images";
 import { flagSchema as validateFlags } from "./validate";
 
 export const COMMAND_FLAGS = {
+  init: initFlags,
   sandbox: sandboxFlags,
   list: listFlags,
   status: statusFlags,

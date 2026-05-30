@@ -1,12 +1,17 @@
-import type { ParseArgsOptionsConfig } from "node:util";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import type { ParseArgsOptionsConfig } from "node:util";
+import { parseArgs } from "node:util";
+import type { Mount } from "../config-core";
 import { scaffoldManifest } from "../config-core/manifest/scaffold";
 import { scaffoldPolicy } from "../config-core/policy/scaffold";
-import type { Mount } from "../config-core";
+import { readGlobalConfig } from "../global-config";
 import { defaultPolicyContent } from "../sandbox/default-policies";
 import type { Harness } from "../sandbox/harness";
+import { resolveHarness } from "../sandbox/harness";
 import { renderSeedContainerfile } from "../sandbox/seed-containerfile";
+import { printCmdHelp } from "./_help";
 
 export const flagSchema = {
   force: { type: "boolean" },
@@ -53,7 +58,11 @@ export function planInit(state: FolderState, force: boolean): InitMode {
 interface InitIO {
   isTTY: boolean;
   write(s: string): void;
-  select(question: string, options: { label: string; value: string }[], defIndex: number): Promise<string>;
+  select(
+    question: string,
+    options: { label: string; value: string }[],
+    defIndex: number,
+  ): Promise<string>;
   confirm(question: string, def: boolean): Promise<boolean>;
   prompt(question: string, def?: string): Promise<string>;
 }
@@ -94,6 +103,55 @@ function inspectInitFolder(folder: string): FolderState {
   };
 }
 
+async function collectGuided(io: InitIO, defaultHarness: Harness): Promise<RenderInitOpts> {
+  const workdir = (await io.select(
+    "Workdir mount type",
+    [
+      { label: "bind (live; host edits <-> sandbox)", value: "bind" },
+      { label: "git-bundle (isolated snapshot; required for --branch)", value: "git-bundle" },
+    ],
+    0,
+  )) as "bind" | "git-bundle";
+
+  const harness = (await io.select(
+    "Harness for this project (shapes policy + Containerfile)",
+    [
+      { label: "claude_code", value: "claude_code" },
+      { label: "opencode", value: "opencode" },
+    ],
+    defaultHarness === "opencode" ? 1 : 0,
+  )) as Harness;
+
+  const extraMounts: Mount[] = [];
+  while (await io.confirm("Add an extra mount?", false)) {
+    const source = await io.prompt("  source");
+    const target = await io.prompt("  target (under /sandbox/.openlock/ for copy types)");
+    const type = (await io.select(
+      "  type",
+      [
+        { label: "copy-once", value: "copy-once" },
+        { label: "copy-refresh", value: "copy-refresh" },
+        { label: "bind", value: "bind" },
+        { label: "git-bundle", value: "git-bundle" },
+      ],
+      0,
+    )) as Mount["type"];
+    extraMounts.push({ source, target, type });
+  }
+
+  const env: Record<string, string> = {};
+  while (await io.confirm("Add an env var?", false)) {
+    const kv = await io.prompt("  KEY=VALUE");
+    const eq = kv.indexOf("=");
+    if (eq > 0) env[kv.slice(0, eq).trim()] = kv.slice(eq + 1).trim();
+  }
+
+  const argsRaw = await io.prompt("Extra harness args (space-separated, blank for none)", "");
+  const args = argsRaw.trim().length > 0 ? argsRaw.trim().split(/\s+/) : [];
+
+  return { harness, workdir, extraMounts, env, args };
+}
+
 interface RunInitArgs {
   projectPath: string;
   force: boolean;
@@ -113,15 +171,28 @@ export async function runInit(args: RunInitArgs): Promise<number> {
     return 0;
   }
 
-  // NOTE: Task 7 inserts the interactive guided branch for `fresh` + TTY here.
-  // Until then, every path uses sensible defaults.
-  const opts: RenderInitOpts = {
+  let opts: RenderInitOpts = {
     harness: args.harness,
     workdir: args.defaults?.workdir ?? "bind",
     extraMounts: [],
     env: {},
     args: [],
   };
+
+  if (mode.kind === "fresh" && args.io.isTTY) {
+    const choice = await args.io.select(
+      "Configure how?",
+      [
+        { label: "Write sensible defaults; I'll edit .openlock/ by hand", value: "defaults" },
+        { label: "Walk me through it", value: "guided" },
+      ],
+      0,
+    );
+    if (choice === "guided") {
+      opts = await collectGuided(args.io, args.harness);
+    }
+  }
+
   const files = renderInitFiles(opts);
 
   if (mode.kind === "fresh" || mode.kind === "regenerate") {
@@ -138,4 +209,58 @@ export async function runInit(args: RunInitArgs): Promise<number> {
   args.io.write(`Wrote ${mode.write.join(", ")} (defaults). Kept ${mode.keep.join(", ")}.\n`);
   args.io.write("Edit the regenerated file(s) as needed, then `openlock sandbox`.\n");
   return 0;
+}
+
+function defaultInitIO(): InitIO {
+  const ask = async (q: string): Promise<string> => {
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    return new Promise<string>((res) =>
+      rl.question(q, (a) => {
+        rl.close();
+        res(a);
+      }),
+    );
+  };
+  return {
+    isTTY: Boolean(process.stdin.isTTY),
+    write: (s) => process.stdout.write(s),
+    async select(question, options, defIndex) {
+      process.stderr.write(`${question}:\n`);
+      for (const [i, o] of options.entries()) {
+        process.stderr.write(`  ${i + 1}) ${o.label}\n`);
+      }
+      const a = (await ask(`> [${defIndex + 1}] `)).trim();
+      const n = a === "" ? defIndex + 1 : Number.parseInt(a, 10);
+      const idx = Number.isFinite(n) && n >= 1 && n <= options.length ? n - 1 : defIndex;
+      return options[idx].value;
+    },
+    async confirm(question, def) {
+      const a = (await ask(`${question} [${def ? "Y/n" : "y/N"}] `)).trim().toLowerCase();
+      if (a === "") return def;
+      return a === "y" || a === "yes";
+    },
+    async prompt(question, def = "") {
+      const a = (await ask(`${question}${def ? ` [${def}]` : ""}: `)).trim();
+      return a === "" ? def : a;
+    },
+  };
+}
+
+export async function initCmd(argv: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: flagSchema,
+    allowPositionals: true,
+  });
+  if (values.help === true) {
+    printCmdHelp("init", flagSchema, "[path]");
+    return 0;
+  }
+  const projectPath = positionals[0] ?? process.cwd();
+  const harness = resolveHarness({
+    cliFlag: values.harness,
+    env: process.env,
+    readGlobal: readGlobalConfig,
+  });
+  return runInit({ projectPath, force: values.force === true, harness, io: defaultInitIO() });
 }

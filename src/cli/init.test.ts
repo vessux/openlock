@@ -3,8 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { lintFolder } from "../config-core";
-import { renderInitFiles, runInit } from "./init";
-import { flagSchema, planInit, type FolderState } from "./init";
+import { type FolderState, flagSchema, planInit, renderInitFiles, runInit } from "./init";
 
 const S = (c: boolean, p: boolean, cf: boolean): FolderState => ({
   config: c,
@@ -72,7 +71,12 @@ describe("renderInitFiles", () => {
 describe("runInit (non-interactive)", () => {
   it("fresh non-TTY writes a complete, lint-clean .openlock/", async () => {
     const proj = tmpProject();
-    const code = await runInit({ projectPath: proj, force: false, harness: "claude_code", io: nonTtyIO });
+    const code = await runInit({
+      projectPath: proj,
+      force: false,
+      harness: "claude_code",
+      io: nonTtyIO,
+    });
     expect(code).toBe(0);
     const folder = join(proj, ".openlock");
     expect(existsSync(join(folder, "config.yaml"))).toBe(true);
@@ -86,7 +90,12 @@ describe("runInit (non-interactive)", () => {
     const folder = join(proj, ".openlock");
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, "config.yaml"), "# hand edited\nmounts: []\n");
-    const code = await runInit({ projectPath: proj, force: false, harness: "claude_code", io: nonTtyIO });
+    const code = await runInit({
+      projectPath: proj,
+      force: false,
+      harness: "claude_code",
+      io: nonTtyIO,
+    });
     expect(code).toBe(0);
     expect(readFileSync(join(folder, "config.yaml"), "utf-8")).toBe("# hand edited\nmounts: []\n");
     expect(existsSync(join(folder, "policy.yaml"))).toBe(true);
@@ -113,9 +122,38 @@ describe("runInit (non-interactive)", () => {
     const folder = join(proj, ".openlock");
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, "config.yaml"), "stale");
-    const code = await runInit({ projectPath: proj, force: true, harness: "claude_code", io: nonTtyIO });
+    const code = await runInit({
+      projectPath: proj,
+      force: true,
+      harness: "claude_code",
+      io: nonTtyIO,
+    });
     expect(code).toBe(0);
     expect(readFileSync(join(folder, "config.yaml"), "utf-8")).not.toBe("stale");
     expect(lintFolder(proj, { offline: true })).toEqual([]);
+  });
+});
+
+describe("runInit guided (TTY)", () => {
+  it("threads guided answers into the scaffold", async () => {
+    const proj = tmpProject();
+    // entry fork → "guided"; workdir → "git-bundle"; harness → "claude_code";
+    // add extra mount? no; add env? no; extra args? "" (none)
+    const selects = ["guided", "git-bundle", "claude_code"];
+    const confirms = [false, false];
+    let si = 0;
+    let ci = 0;
+    const io = {
+      isTTY: true,
+      write: (_s: string) => {},
+      select: async () => selects[si++],
+      confirm: async () => confirms[ci++],
+      prompt: async (_q: string, d = "") => d,
+    };
+    const code = await runInit({ projectPath: proj, force: false, harness: "claude_code", io });
+    expect(code).toBe(0);
+    const cfg = readFileSync(join(proj, ".openlock", "config.yaml"), "utf-8");
+    // git-bundle is the ACTIVE (uncommented, 4-space-indented) workdir type
+    expect(cfg).toMatch(/\n {4}type: git-bundle/);
   });
 });
