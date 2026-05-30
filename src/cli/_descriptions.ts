@@ -17,7 +17,6 @@ export const COMMAND_DESCRIPTIONS = {
   shell: "Open bash inside the session container",
   exec: "Run a command inside the session container",
   "cred-refresh": "Start the credential refresh service",
-  "validate-policy": "Validate a sandbox policy YAML file",
   login: "Authenticate with the gateway",
   logout: "Remove stored provider credentials",
   providers: "List configured providers",

@@ -17,7 +17,6 @@ import { flagSchema as shellFlags } from "./shell";
 import { flagSchema as statusFlags } from "./status";
 import { flagSchema as stopFlags } from "./stop";
 import { flagSchema as updateImagesFlags } from "./update-images";
-import { flagSchema as validatePolicyFlags } from "./validate-policy";
 
 export const COMMAND_FLAGS = {
   sandbox: sandboxFlags,
@@ -29,7 +28,6 @@ export const COMMAND_FLAGS = {
   shell: shellFlags,
   exec: execFlags,
   "cred-refresh": credRefreshFlags,
-  "validate-policy": validatePolicyFlags,
   login: loginFlags,
   logout: logoutFlags,
   providers: providersFlags,

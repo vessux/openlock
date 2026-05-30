@@ -13,7 +13,6 @@ describe("COMMAND_FLAGS", () => {
       "shell",
       "exec",
       "cred-refresh",
-      "validate-policy",
       "login",
       "logout",
       "providers",

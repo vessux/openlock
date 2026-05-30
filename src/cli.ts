@@ -20,7 +20,6 @@ Session lifecycle:
 
 Other:
   cred-refresh       Start the credential refresh service
-  validate-policy    Validate a sandbox policy YAML file
   login              Authenticate with the gateway
   logout             Remove stored provider credentials
   providers          List configured providers
@@ -95,11 +94,6 @@ function main(): void {
       return;
     case "cred-refresh":
       import("./cli/cred-refresh").then(({ credRefreshCmd }) => credRefreshCmd(args.slice(1)));
-      return;
-    case "validate-policy":
-      import("./cli/validate-policy").then(({ validatePolicyCmd }) =>
-        validatePolicyCmd(args.slice(1)),
-      );
       return;
     case "echo-server":
       console.error("echo-server not yet implemented");

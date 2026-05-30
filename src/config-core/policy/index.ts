@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import * as yaml from "js-yaml";
+import type { Issue } from "../types";
 import { type ValidationError, validateSchema } from "./schema";
 import { validateSemantics } from "./semantic";
 import type { PolicyFile } from "./types";
@@ -44,4 +45,15 @@ export function formatErrors(errors: ValidationError[], filePath?: string): stri
       return `  ${prefix}${loc}${e.message}`;
     })
     .join("\n");
+}
+
+/** Adapt the policy validator's single-severity errors to the unified Issue
+ * shape consumed by lintFolder. */
+export function lintPolicy(content: string): Issue[] {
+  return validatePolicyYaml(content).map((e) => ({
+    file: "policy.yaml" as const,
+    severity: "error" as const,
+    path: e.path,
+    message: e.message,
+  }));
 }
