@@ -11,7 +11,7 @@ bun.lock
 *.srl
 
 # Local-only project context — agent/editor configs and internal docs.
-# Not for the public repo.
+# Not for the public repo. (docs/ is tracked/public; local artifacts live in .local/)
 .claude/
 .mcp.json
-docs/
+.local/
