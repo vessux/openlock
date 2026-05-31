@@ -5,7 +5,7 @@
 `.openlock/config.yaml` accepts three optional fields that let you inject host content into the sandbox and tweak the agent launch:
 
 - `mounts[]` — entries that wire host paths into the container. Each entry requires `source` (host path, absolute / `~/...` / relative-to-project-root), `target` (absolute container path), and `type` (one of `copy-once`, `copy-refresh`, `bind`, `git-bundle`). Optional `readOnly: true` is valid on `bind` only.
-- `args[]` — extra argv appended to the in-container agent launch (today: `claude`).
+- `args[]` — extra argv appended to the in-container agent launch (harness-dependent: `claude` or `opencode`).
 - `env{}` — extra environment variables set on the agent process.
 
 ### Mount types

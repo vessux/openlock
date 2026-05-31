@@ -1,10 +1,5 @@
 # Policies
 
-Default policies live in `policies/` and are selected by detected capabilities:
+A sandbox's egress + trust policy lives at `.openlock/policy.yaml`, scaffolded by `openlock init` (the template is shaped by the chosen harness) and linted by `openlock validate`. The full policy schema is in the [agent config reference](./agent-config-reference.md).
 
-- `default.yaml` — base
-- `default-js.yaml` — JavaScript projects
-- `default-py.yaml` — Python projects
-- `default-js-py.yaml` — both
-
-Override with `--policy /abs/path/to/policy.yaml`.
+The base template ships as `policies/default.yaml`. Point a run at an explicit policy file with `openlock sandbox --policy /abs/path/to/policy.yaml`.

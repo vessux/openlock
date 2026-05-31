@@ -26,10 +26,10 @@ openlock stop --all          # all sessions (skips ones currently attached)
 # fully tear down: rm container + state + host refs
 openlock clean [name]
 openlock clean --all
-openlock clean --stale       # only idle-stale (default 30 min, OPENLOCK_REAP_IDLE_MS)
+openlock clean --stale       # remove exited + missing sessions
 openlock clean <name> --copy ./out   # extract /sandbox/repo before teardown
 
-# stop idle sessions (no removal)
+# stop idle-stale sessions (no removal; default 30 min idle, OPENLOCK_REAP_IDLE_MS)
 openlock reap
 
 # attach a bash shell to the container
