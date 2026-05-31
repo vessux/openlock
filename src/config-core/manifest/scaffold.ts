@@ -59,12 +59,17 @@ const EXTRA_MOUNT_EXAMPLE = [
   "  #   readOnly: true",
 ].join("\n");
 
+// Quote a mapping key unless it's a bare-safe identifier; values are always
+// JSON.stringify'd so numeric/boolean-looking strings stay strings.
+const SAFE_YAML_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const yamlKey = (k: string): string => (SAFE_YAML_KEY.test(k) ? k : JSON.stringify(k));
+
 function renderEnv(env: Record<string, string>): string {
   const keys = Object.keys(env);
   if (keys.length === 0) {
     return ["env: {}", '  # EXAMPLE_FLAG: "1"'].join("\n");
   }
-  return ["env:", ...keys.map((k) => `  ${k}: ${JSON.stringify(env[k])}`)].join("\n");
+  return ["env:", ...keys.map((k) => `  ${yamlKey(k)}: ${JSON.stringify(env[k])}`)].join("\n");
 }
 
 function renderArgs(args: string[]): string {

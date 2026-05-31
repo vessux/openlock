@@ -194,6 +194,11 @@ export async function runInit(args: RunInitArgs): Promise<number> {
 
   if (mode.kind === "fresh" || mode.kind === "regenerate") {
     writeFiles(folder, files, ["config.yaml", "policy.yaml", "Containerfile"]);
+    if (mode.kind === "regenerate") {
+      args.io.write(
+        "Regenerated from defaults (--force) — any prior hand-edits were overwritten.\n",
+      );
+    }
     args.io.write(
       `Wrote .openlock/config.yaml, policy.yaml, Containerfile (harness: ${args.harness}, workdir: ${opts.workdir}).\n`,
     );

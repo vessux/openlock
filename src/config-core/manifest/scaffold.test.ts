@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import yaml from "js-yaml";
 import { lintManifest } from "./index";
 import { scaffoldManifest } from "./scaffold";
 
@@ -28,6 +29,16 @@ describe("scaffoldManifest", () => {
     expect(out).toContain('FOO: "bar"');
     expect(out).toContain('- "--model"');
     expect(out).toContain('- "claude-sonnet-4-6"');
+  });
+
+  it("quotes env keys that aren't bare-safe identifiers so output stays parseable YAML", () => {
+    const out = scaffoldManifest({ workdir: "bind", env: { "ODD: KEY": "v", PLAIN: "ok" } });
+    expect(out).toContain('"ODD: KEY": "v"');
+    expect(out).toContain('PLAIN: "ok"'); // bare-safe key left unquoted
+    // The whole manifest must still round-trip through the YAML parser.
+    const parsed = yaml.load(out) as { env: Record<string, string> };
+    expect(parsed.env["ODD: KEY"]).toBe("v");
+    expect(parsed.env.PLAIN).toBe("ok");
   });
 
   it("lints clean for both workdir types (offline)", () => {

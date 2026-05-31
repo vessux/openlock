@@ -154,8 +154,10 @@ If `[name]` is omitted and exactly one session exists, it is selected. Multiple 
 | Command | Purpose |
 |---|---|
 | `doctor` | Check prerequisites |
+| `setup` | Configure machine defaults (runtime, harness, provider) |
 | `login` | Store a Claude Code setup token |
-| `sandbox [path]` | Create or resume a Claude Code session for a repo (path defaults to cwd; runs preflight, auto-inits the repo, prompts for login if needed) |
+| `init [path]` | Scaffold `.openlock/` for a project (interactive) |
+| `sandbox [path]` | Create or resume a Claude Code session for a repo (path defaults to cwd; runs preflight, prompts for login if needed; requires `.openlock/` — run `openlock init` first) |
 | `list` | List all sessions |
 | `status [name]` | Session metadata + container state (`--json`) |
 | `stop [name]` | Stop the container (preserves state, refs) |
