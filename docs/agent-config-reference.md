@@ -16,14 +16,20 @@ Top-level keys (exactly these; unknown keys are rejected): `mounts`, `args`, `en
 
 ## `.openlock/policy.yaml`
 
-Top-level keys: `version`, `filesystem_policy`, `landlock`, `process`, `network_policies`.
+Top-level keys: `version` (required, integer) plus optional `filesystem_policy`, `landlock`, `process`, `network_policies`.
 
-- `network_policies[]` — each: `name`, `endpoints`, `binaries`, `allowed_secrets`.
+- `network_policies` — a **mapping** keyed by policy-name (NOT an array). Each value is a block with `endpoints`, `binaries`, `allowed_secrets` (an optional `name` field is accepted, but the policy name is normally the mapping key). For example:
+
+      network_policies:
+        claude_code:
+          binaries: [{ path: /usr/local/bin/claude }]
+          endpoints: [{ host: api.anthropic.com, port: 443 }]
+
   - endpoint keys: `host`, `port`, `ports`, `protocol`, `tls`, `enforcement`, `access`, `rules`, `allowed_ips`, `deny_rules`, `allow_encoded_slash`, `cred_inject`, `echo`, `trust_check`.
   - L7 rule: `allow` with matchers `method`, `path`, `command`, `query`; `deny_rules` use the same matchers. The query matcher key is `any`.
   - `cred_inject`: `provider`, `strip_headers`, `inject` (each inject entry has `header`, `from_credential`).
   - `trust_check`: `registry`.
-  - binary entry: `path`, `harness`.
+  - binary entry: `path` (string). A deprecated `harness` boolean is also accepted on a binary entry — legacy, unrelated to the top-level harness enum below; real policies omit it.
 - `filesystem_policy`: `include_workdir`, `read_only`, `read_write`.
 - `landlock`: `compatibility`.
 - `process`: `run_as_user`, `run_as_group`.

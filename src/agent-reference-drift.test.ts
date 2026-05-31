@@ -8,6 +8,8 @@ import { HARNESSES } from "./sandbox/harness";
 const DOC_PATH = join(import.meta.dir, "..", "docs", "agent-config-reference.md");
 
 describe("agent-config-reference.md drift guard", () => {
+  // NOTE: read at collection time — if the doc is missing this throws ENOENT
+  // and the whole file fails as one suite error rather than per-token failures.
   const text = readFileSync(DOC_PATH, "utf-8");
   // Every config key/enum the validators recognize, plus every harness, must
   // be mentioned in the reference. Catches "added a schema field, forgot to
