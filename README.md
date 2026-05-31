@@ -56,8 +56,9 @@ openlock validate /path/to/your/repo  # lint the manifest + policy
 openlock sandbox /path/to/your/repo   # launch (path defaults to cwd)
 ```
 
-The first `sandbox` run prompts for `claude setup-token` if you have no credentials,
-runs `git init` if the path isn't a git repo yet, and (re)attaches the session.
+`sandbox` requires an `.openlock/` (run `openlock init` first, or it errors). The first
+`sandbox` run prompts for `claude setup-token` if you have no credentials, runs `git init`
+if the path isn't a git repo yet, and (re)attaches the session.
 
 ## Usage
 
@@ -65,13 +66,10 @@ runs `git init` if the path isn't a git repo yet, and (re)attaches the session.
 # launch (or resume) a sandbox for a project
 openlock sandbox /path/to/your/repo
 
-# keep the gateway running across cleanups
-openlock gateway start
-
 # rebuild sandbox images
 openlock update-images
 
-# manage gateway directly
+# manage the gateway directly (start keeps it running across cleanups)
 openlock gateway start|stop|status
 ```
 
@@ -99,7 +97,7 @@ After the session exits, sandbox commits are in your repo under `refs/sandbox/<s
 | `refs` | Inspect and promote sandbox commits to real branches |
 | `report` | Collect diagnostic bundle for bug reports |
 | `gateway start\|stop\|status` | Manage the gateway |
-| `update-images` | Rebuild sandbox container images |
+| `update-images [--no-cache]` | Rebuild sandbox container images |
 | `complete <bash\|zsh\|fish>` | Print shell completion script |
 | `cred-refresh` | Start the credential refresh service |
 
