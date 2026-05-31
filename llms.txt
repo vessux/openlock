@@ -1,0 +1,12 @@
+# openlock
+
+> Sandbox orchestration for coding agents: runs an agent inside a Podman/Docker container behind a credential gateway that strips and re-injects API keys and enforces a YAML egress policy.
+
+## Docs
+
+- [Agent config reference](docs/agent-config-reference.md): complete .openlock config + policy schema, internals, and the {harness, provider, files} -> config decision procedure
+- [Mounts, args & env](docs/mounts.md): mount types and config.yaml seeds
+- [Policies](docs/policies.md): egress + trust policy selection
+- [Security & runtime](docs/security.md): sandbox boundary, runtime choice, threat model
+- [Sessions](docs/sessions.md): lifecycle and command reference
+- [Installation](docs/installation.md): install + shell completion
