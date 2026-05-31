@@ -1,9 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintManifest } from "./manifest/index";
-import { MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES } from "./manifest/schema";
-import { lintPolicy } from "./policy/index";
-import { ALL_POLICY_KEYS } from "./policy/schema";
+import { lintManifest, MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES } from "./manifest/index";
+import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
 
 export { parseManifest } from "./manifest/index";

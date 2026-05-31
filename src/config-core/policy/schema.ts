@@ -41,7 +41,9 @@ const TOP_LEVEL_KEYS = new Set([
 ]);
 
 /** Every recognized policy key across all nesting levels, flattened for the
- * agent-reference drift guard. Order/dedup handled by the consumer. */
+ * agent-reference drift guard. Order/dedup handled by the consumer.
+ * MAINTENANCE: when adding a new key-set const to this file, add it here too —
+ * otherwise the new keys are silently absent from the drift guard. */
 export const ALL_POLICY_KEYS: readonly string[] = [
   ...TOP_LEVEL_KEYS,
   ...NETWORK_POLICY_KEYS,

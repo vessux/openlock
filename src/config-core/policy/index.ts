@@ -6,6 +6,7 @@ import { validateSemantics } from "./semantic";
 import type { PolicyFile } from "./types";
 
 export type { ValidationError } from "./schema";
+export { ALL_POLICY_KEYS } from "./schema";
 
 export function validatePolicyYaml(content: string): ValidationError[] {
   let doc: unknown;
