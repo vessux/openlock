@@ -8,8 +8,12 @@ openlock - sandbox orchestration toolkit
 
 Usage: openlock <command>
 
+Getting started:
+  setup              Configure machine defaults (runtime, harness, provider)
+  init [path]        Scaffold .openlock/ for a project (interactive)
+
 Session lifecycle:
-  sandbox [path]     Create or resume a sandbox session (path defaults to cwd; runs preflight + auto-inits the repo)
+  sandbox [path]     Create or resume a sandbox session (path defaults to cwd; runs preflight; requires .openlock/ — run \`openlock init\` first)
   list               List all sessions
   status [name]      Show session metadata + container state
   stop [name]        Stop session containers (preserves state)
@@ -150,6 +154,12 @@ function main(): void {
       import("./cli/complete").then(({ completeCmd }) =>
         completeCmd(args.slice(1)).then(processExit),
       );
+      return;
+    case "init":
+      import("./cli/init").then(({ initCmd }) => initCmd(args.slice(1)).then(processExit));
+      return;
+    case "setup":
+      import("./cli/setup").then(({ setupCmd }) => setupCmd(args.slice(1)).then(processExit));
       return;
     case "validate":
       import("./cli/validate").then(({ validateCmd }) => validateCmd(args.slice(1)));

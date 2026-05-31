@@ -1,6 +1,4 @@
-import { closeSync, ftruncateSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
-import { dirname } from "node:path";
-import { globalConfigPath } from "./global-config/paths";
+import { persistGlobalDefault } from "./global-config/persist";
 import type { BinaryProbes, Runtime } from "./runtime";
 
 export function chooseRuntimeFromProbes(p: BinaryProbes): Runtime | null {
@@ -51,24 +49,8 @@ async function readLine(): Promise<string | null> {
   }
 }
 
-// Single-fd read+truncate+write avoids the path-based TOCTOU race that a
-// separate readFileSync/writeFileSync pair would create.
 function persistRuntimeChoice(runtime: Runtime): void {
-  const path = globalConfigPath();
-  mkdirSync(dirname(path), { recursive: true });
-  const fd = openSync(path, "a+", 0o600);
-  try {
-    const existing = readFileSync(fd, "utf-8");
-    const lines = existing.split("\n").filter((l) => !/^\s*default_runtime\s*:/.test(l));
-    while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-    lines.push(`default_runtime: ${runtime}`);
-    lines.push("");
-    const out = lines.join("\n");
-    ftruncateSync(fd, 0);
-    writeSync(fd, out, 0);
-  } finally {
-    closeSync(fd);
-  }
+  persistGlobalDefault("default_runtime", runtime);
 }
 
 export async function runWizard(p: BinaryProbes): Promise<Runtime> {

@@ -95,21 +95,7 @@ function resolveRepoPolicy(projectPath: string, policyOverride?: string): Resolv
     };
   }
   const folder = resolveOpenlockFolder(projectPath);
-  if (folder.origin === "first-run") {
-    console.log("Created .openlock/. Review and commit before sharing.");
-  } else if (folder.origin === "restored-config") {
-    console.log("Restored .openlock/config.yaml.");
-  } else if (folder.origin === "restored-policy") {
-    console.log("Restored .openlock/policy.yaml from default.yaml.");
-  } else if (folder.origin === "restored-containerfile") {
-    console.log("Restored .openlock/Containerfile from seed.");
-  }
-  return {
-    policy: folder.policyPath,
-    mounts: folder.mounts,
-    args: folder.args,
-    env: folder.env,
-  };
+  return { policy: folder.policyPath, mounts: folder.mounts, args: folder.args, env: folder.env };
 }
 
 interface NewSession {
@@ -615,7 +601,13 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps(runtime) }));
   const repoResult = await ensureRepoIsGit(projectPath);
   announceRepoAction(repoResult.action, projectPath);
-  const resolved = resolveRepoPolicy(projectPath, opts.policy);
+  let resolved: ResolvedRepo;
+  try {
+    resolved = resolveRepoPolicy(projectPath, opts.policy);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(2);
+  }
 
   const branchErr = validateBranchFlagAgainstWorkdir(opts.branch, workdirMount(resolved.mounts));
   if (branchErr !== null) {

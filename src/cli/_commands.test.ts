@@ -23,6 +23,8 @@ describe("COMMAND_FLAGS", () => {
       "refs",
       "report",
       "validate",
+      "init",
+      "setup",
     ].sort();
     expect(Object.keys(COMMAND_FLAGS).sort()).toEqual(expected);
   });
