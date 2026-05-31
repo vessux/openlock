@@ -1,8 +1,13 @@
 import type { Issue, MountType } from "../types";
 
-const MANIFEST_KEYS = new Set(["mounts", "args", "env"]);
-const MOUNT_ENTRY_KEYS = new Set(["source", "target", "type", "readOnly"]);
-const MOUNT_TYPES: readonly MountType[] = ["copy-once", "copy-refresh", "bind", "git-bundle"];
+export const MANIFEST_KEYS = new Set(["mounts", "args", "env"]);
+export const MOUNT_ENTRY_KEYS = new Set(["source", "target", "type", "readOnly"]);
+export const MOUNT_TYPES: readonly MountType[] = [
+  "copy-once",
+  "copy-refresh",
+  "bind",
+  "git-bundle",
+];
 
 function err(path: string, message: string, fix?: string): Issue {
   return fix === undefined

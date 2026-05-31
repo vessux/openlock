@@ -4,6 +4,8 @@ import { resolveSource, validateManifestFilesystem } from "./filesystem";
 import { validateManifestSchema } from "./schema";
 import { validateManifestSemantics } from "./semantic";
 
+export { MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES } from "./schema";
+
 interface ParsedDoc {
   doc: unknown;
   parseError?: Issue;

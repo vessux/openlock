@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { lintFolder } from "./index";
+import { knownConfigTokens, lintFolder } from "./index";
 
 let root: string;
 beforeEach(() => {
@@ -66,5 +66,33 @@ describe("lintFolder", () => {
     expect(lintFolder(root, { offline: false }).some((i) => i.severity === "filesystem")).toBe(
       true,
     );
+  });
+});
+
+describe("knownConfigTokens", () => {
+  it("includes manifest keys, mount types, and distinctive policy keys", () => {
+    const tokens = knownConfigTokens();
+    // manifest
+    expect(tokens).toContain("mounts");
+    expect(tokens).toContain("args");
+    expect(tokens).toContain("env");
+    // mount entry + types
+    expect(tokens).toContain("readOnly");
+    expect(tokens).toContain("copy-refresh");
+    expect(tokens).toContain("git-bundle");
+    // distinctive policy keys
+    expect(tokens).toContain("network_policies");
+    expect(tokens).toContain("cred_inject");
+    expect(tokens).toContain("strip_headers");
+    expect(tokens).toContain("from_credential");
+    expect(tokens).toContain("trust_check");
+    expect(tokens).toContain("allowed_secrets");
+    expect(tokens).toContain("include_workdir");
+    expect(tokens).toContain("run_as_user");
+  });
+
+  it("returns a de-duplicated, sorted list", () => {
+    const tokens = knownConfigTokens();
+    expect(tokens).toEqual([...new Set(tokens)].sort());
   });
 });

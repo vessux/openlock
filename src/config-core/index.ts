@@ -1,12 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintManifest } from "./manifest/index";
-import { lintPolicy } from "./policy/index";
+import { lintManifest, MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES } from "./manifest/index";
+import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
 
 export { parseManifest } from "./manifest/index";
 export type { ConfigFile, Issue, ManifestConfig, Mount, Severity } from "./types";
 export { SANDBOX_OPENLOCK_PREFIX } from "./types";
+
+/** Every schema key/enum the config validators recognize, de-duplicated and
+ * sorted. Source of truth for the agent-config-reference drift guard
+ * (src/agent-reference-drift.test.ts). */
+export function knownConfigTokens(): string[] {
+  return [
+    ...new Set<string>([...MANIFEST_KEYS, ...MOUNT_ENTRY_KEYS, ...MOUNT_TYPES, ...ALL_POLICY_KEYS]),
+  ].sort();
+}
 
 /** Validate the whole .openlock/ folder (manifest + policy). Collect-all,
  * never throws. Each issue is tagged with its source file. */
