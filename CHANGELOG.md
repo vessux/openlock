@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.9.0
+
+### Added
+
+- **Onboarding wizards — `openlock setup` and `openlock init`.** `setup` writes machine-wide defaults (runtime / harness / provider) to `~/.config/openlock/config.yaml`, with the provider list filtered to harness-compatible ids. `init` scaffolds a project's `.openlock/` — a commented `config.yaml` with a real workdir mount, a harness-trimmed `policy.yaml`, and a seeded `Containerfile` — via a fresh-entry fork (defaults or guided Q&A), gap-filling missing files without clobbering a complete folder (use `--force`). Non-TTY runs print a manual-config hint and exit non-zero.
+- **`openlock validate`.** Checks a project's `.openlock/` config and policy — structure, semantic mount rules, and filesystem source existence — against a single shared rule source, printing a per-file summary. Replaces the narrower `validate-policy` command.
+- **Slim, single-image sandbox with a multi-harness model.** One `base.Containerfile` (Ubuntu + Node + Python 3 + uv, with sha256-pinned Node/uv tarballs) replaces the previous four-capability image matrix; per-project images layer on top of `.openlock/Containerfile`. New commands: `openlock update-base` (re-point the `FROM` line to the current base hash, sentinel-guarded), `openlock prune-images [--legacy]` (remove stale sandbox/base image tags; `--legacy` also clears pre-v0.9.0 `openlock-core*` images), and `openlock --print-base-tag`.
+- **Prebuilt base image on ghcr.** Release tags now build and push a multi-arch (amd64 + arm64) `ghcr.io/vessux/openlock-base:<hash>`; fresh installs pull it instead of running the slow local apt/node/uv build. Local build stays the offline / air-gapped fallback and produces an identically-tagged image.
+- **Onboarding documentation.** Tracked `docs/` walking the install → doctor → init → validate → sandbox golden path, plus a harness-agnostic `docs/agent-config-reference.md` and `llms.txt`, drift-guarded against the live config schema.
+
+### Changed
+
+- **`.openlock/` is now complete-or-error.** `sandbox` no longer lazily scaffolds or restores a missing/incomplete `.openlock/`; it errors with a "run openlock init" hint instead. Run `openlock init` once per project up front.
+- **`doctor` is actionable and install-safe.** Each check carries a `fix` hint shown under failures, command detection uses `Bun.which` (fixing a Fedora false-negative), and a non-interactive mode skips the runtime wizard so `curl | sh` installs are safe — `install.sh` now runs `openlock doctor` at the end.
+- **Cached dev-mode gateway builds.** In fork-source dev mode, the `cargo build --release` output is cached by a fork-tree fingerprint under `~/.cache/openlock/dev-bin/`, turning a ~190 s cold build into a ~74 ms cache hit on later sessions. `OPENLOCK_REBUILD=1` forces a rebuild; the production release-binary path is unchanged.
+
+### Removed
+
+- **`caps` config key.** The single base image carries Node, Python, and uv unconditionally, so per-project capability selection no longer exists — a stale `caps:` key is now rejected by `openlock validate` (previously a deprecation warning). The cap-keyed default policies (`default-{js,py,js-py}.yaml`) and `core*.Containerfile` images are gone, collapsed into a single `default.yaml` and `base.Containerfile`.
+- `validate-policy` command, folded into `openlock validate`.
+
+### Fixed
+
+- **Sandbox harness symlinks.** Inherited `ln -sf` lines pointing harness binaries at `/usr/local/bin` were clobbering the correct npm-created symlinks under the tarball-slim Node prefix, leaving a dangling target; removed, and covered by a new live-integration smoke test.
+- Restored `mkdir -p /sandbox/repo` in the base image so the bind-mount target pre-exists.
+- Hardened the post-create exec integration test against an echo-proxy first-egress race (the recurring CI exit-56 flake), surfacing real `curl` errors (`-sSf`) instead of muting them.
+
 ## v0.8.0
 
 ### Added
