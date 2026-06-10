@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- **`openlock --version` now appends the build commit SHA** (e.g. `0.9.1 (a1b2c3d)`) when built in release CI, so a specific build is identifiable — including across force-moved pre-release tags. Local `bun run` still prints the bare version. The SHA is injected at compile time via `bun build --define`.
+
 ### Fixed
 
 - **x64 Linux binary runs on non-AVX2 CPUs.** The `openlock-x86_64-unknown-linux-gnu` release artifact is now built with Bun's `bun-linux-x64-baseline` target (x86-64-v2: SSE4.2/POPCNT, no AVX2). The previous `bun-linux-x64` build required AVX2 and crashed with `Illegal instruction (core dumped)` on older/limited CPUs the moment the binary ran (e.g. at the post-install `openlock doctor`).

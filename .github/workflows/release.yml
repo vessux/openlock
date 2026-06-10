@@ -54,9 +54,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          build_sha="$(git rev-parse --short HEAD)"
           bun build src/cli.ts \
             --compile \
             --target=${{ matrix.target }} \
+            --define "OPENLOCK_BUILD_SHA=\"${build_sha}\"" \
             --outfile=out/openlock
 
       - name: Package
