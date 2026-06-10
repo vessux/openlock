@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installHint, renderDoctorResults, runDoctorChecks } from "./doctor";
+import { buildRuntimeChecks, installHint, renderDoctorResults, runDoctorChecks } from "./doctor";
 import { globalConfigPath } from "./global-config/paths";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
@@ -162,6 +162,34 @@ describe("doctor fix hints", () => {
     const results = await runDoctorChecks("podman");
     const git = results.find((r) => r.name === "git");
     expect(git?.fix).toBe(installHint("git"));
+  });
+});
+
+describe("buildRuntimeChecks", () => {
+  it("reports BOTH runtimes (presence + readiness) when both are installed", () => {
+    const names = buildRuntimeChecks({ podman: true, docker: true }, false).map((c) => c.name);
+    expect(names).toEqual([
+      "podman",
+      "podman API socket active",
+      "docker",
+      "docker daemon reachable",
+    ]);
+  });
+
+  it("reports only the installed runtime", () => {
+    const names = buildRuntimeChecks({ podman: false, docker: true }, false).map((c) => c.name);
+    expect(names).toEqual(["docker", "docker daemon reachable"]);
+  });
+
+  it("emits a single install-a-runtime failure when neither is installed", () => {
+    const checks = buildRuntimeChecks({ podman: false, docker: false }, false);
+    expect(checks.map((c) => c.name)).toEqual(["container runtime (podman/docker)"]);
+    expect(checks[0]?.fix).toContain("podman");
+  });
+
+  it("uses the podman machine check on macOS instead of the API socket", () => {
+    const names = buildRuntimeChecks({ podman: true, docker: false }, true).map((c) => c.name);
+    expect(names).toEqual(["podman", "podman machine (running)"]);
   });
 });
 

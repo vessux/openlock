@@ -4,7 +4,7 @@ import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
-import { type Runtime, resolveRuntimeNonInteractive } from "./runtime";
+import { type BinaryProbes, RUNTIMES, type Runtime } from "./runtime";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { hasAnyProvider } from "./tokens";
 
@@ -91,8 +91,44 @@ async function checkGlobalConfig(): Promise<CheckOutcome> {
   }
 }
 
-function buildRuntimeChecks(resolved: Runtime | null, isMac: boolean): Check[] {
-  if (resolved === null) {
+/** Presence + readiness checks for a single installed runtime. */
+function runtimeChecksFor(rt: Runtime, isMac: boolean): Check[] {
+  const readiness: Check =
+    rt === "podman"
+      ? isMac
+        ? {
+            name: "podman machine (running)",
+            test: podmanMachineRunning,
+            fix: "podman machine start",
+          }
+        : {
+            name: "podman API socket active",
+            test: podmanSocketActive,
+            fix: "systemctl --user enable --now podman.socket",
+          }
+      : {
+          name: "docker daemon reachable",
+          test: dockerDaemonReachable,
+          fix: "start Docker (systemctl --user start docker, or launch Docker Desktop)",
+        };
+  return [
+    {
+      name: rt,
+      test: async () => commandExists(rt),
+      fix: rt === "podman" ? installHint("podman") : DOCKER_INSTALL_DOCS,
+    },
+    readiness,
+  ];
+}
+
+/** Report EVERY installed runtime and its readiness. A host with both podman
+ * and docker shows both — the prior code collapsed "two present" into the same
+ * null result as "none present", a false negative (the resolver only
+ * auto-picks when exactly one is installed). Only when neither is present do we
+ * emit the single install-a-runtime failure. */
+export function buildRuntimeChecks(probes: BinaryProbes, isMac: boolean): Check[] {
+  const present = RUNTIMES.filter((r) => probes[r]);
+  if (present.length === 0) {
     return [
       {
         name: "container runtime (podman/docker)",
@@ -101,37 +137,21 @@ function buildRuntimeChecks(resolved: Runtime | null, isMac: boolean): Check[] {
       },
     ];
   }
-  const podmanMachineCheck: Check = isMac
-    ? { name: "podman machine (running)", test: podmanMachineRunning, fix: "podman machine start" }
-    : {
-        name: "podman API socket active",
-        test: podmanSocketActive,
-        fix: "systemctl --user enable --now podman.socket",
-      };
-  const runtimeSpecificCheck: Check =
-    resolved === "podman"
-      ? podmanMachineCheck
-      : {
-          name: "docker daemon reachable",
-          test: dockerDaemonReachable,
-          fix: "start Docker (systemctl --user start docker, or launch Docker Desktop)",
-        };
-  return [
-    {
-      name: resolved,
-      test: async () => commandExists(resolved),
-      fix: resolved === "podman" ? installHint("podman") : DOCKER_INSTALL_DOCS,
-    },
-    runtimeSpecificCheck,
-  ];
+  return present.flatMap((r) => runtimeChecksFor(r, isMac));
 }
 
 export async function runDoctorChecks(runtime?: Runtime | null): Promise<DoctorResult[]> {
-  const resolved = runtime === undefined ? await resolveRuntimeNonInteractive() : runtime;
+  // No explicit runtime (standalone `openlock doctor`, report) → probe both and
+  // report every installed runtime. An explicit runtime (e.g. session preflight,
+  // where it's already resolved) narrows to that one; explicit null → no runtime.
+  const probes: BinaryProbes =
+    runtime === undefined
+      ? { podman: commandExists("podman"), docker: commandExists("docker") }
+      : { podman: runtime === "podman", docker: runtime === "docker" };
   const isMac = process.platform === "darwin";
   const dev = isDevMode();
 
-  const runtimeChecks = buildRuntimeChecks(resolved, isMac);
+  const runtimeChecks = buildRuntimeChecks(probes, isMac);
 
   const checks: Check[] = [
     { name: "git", test: async () => commandExists("git"), fix: installHint("git") },
