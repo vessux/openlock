@@ -30,7 +30,10 @@ jobs:
         include:
           - target: bun-darwin-arm64
             artifact: openlock-aarch64-apple-darwin
-          - target: bun-linux-x64
+          # baseline = x86-64-v2 (SSE4.2/POPCNT, no AVX2) so the binary runs on
+          # older/limited CPUs (e.g. the devbox). Bun's default x64 build requires
+          # AVX2 and traps with SIGILL on CPUs without it.
+          - target: bun-linux-x64-baseline
             artifact: openlock-x86_64-unknown-linux-gnu
           - target: bun-linux-arm64
             artifact: openlock-aarch64-unknown-linux-gnu

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **x64 Linux binary runs on non-AVX2 CPUs.** The `openlock-x86_64-unknown-linux-gnu` release artifact is now built with Bun's `bun-linux-x64-baseline` target (x86-64-v2: SSE4.2/POPCNT, no AVX2). The previous `bun-linux-x64` build required AVX2 and crashed with `Illegal instruction (core dumped)` on older/limited CPUs the moment the binary ran (e.g. at the post-install `openlock doctor`).
+- **`install.sh` usage and docs now pipe to `bash`, not `sh`.** The script's shebang and `set -euo pipefail` require Bash; the documented `| sh` invocation failed on Debian/Ubuntu (where `sh` is `dash`) with `Illegal option -o pipefail`.
+
 ## v0.9.0
 
 ### Added
