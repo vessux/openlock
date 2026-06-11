@@ -39,6 +39,25 @@ export const OPENROUTER: ProviderPlugin = {
           inject: [{ header: "Authorization", from_credential: "OPENROUTER_BEARER_TOKEN" }],
         },
       },
+      // models.dev is an opencode model-metadata requirement, NOT an OpenRouter
+      // API endpoint. opencode resolves model metadata from models.dev; models
+      // absent from its bundled registry (cloaked/new models) fail with
+      // UnknownError unless this read-only GET egress is allowed. opencode is
+      // currently the only openrouter-compatible harness so this is emitted
+      // unconditionally; if a second opencode-compatible provider is ever added,
+      // move this to a harness-level egress source to avoid duplication.
+      //
+      // opencode's startup @opencode-ai/plugin npm install (registry.npmjs.org)
+      // is intentionally NOT allowed — it's non-fatal (opencode runs without the
+      // plugin); allowing registry.npmjs.org would widen egress for a
+      // non-essential plugin.
+      {
+        host: "models.dev",
+        port: 443,
+        protocol: "rest",
+        rules: [{ allow: { method: "GET", path: "/**" } }],
+        // no cred_inject — public read-only model metadata
+      },
     ];
   },
 

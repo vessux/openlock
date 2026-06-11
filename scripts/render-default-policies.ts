@@ -24,8 +24,12 @@ function harnessBlock(harness: Harness): Record<string, unknown> {
     if (!plugin.compatibleHarnesses.has(harness)) continue;
     for (const ep of plugin.policyEndpoints(harness)) {
       endpoints.push(ep);
-      for (const inj of ep.cred_inject.inject) {
-        allowedSecrets.add(inj.from_credential);
+      // Endpoints with no cred_inject (public read-only metadata, e.g.
+      // models.dev) carry no credential, so contribute nothing to allowed_secrets.
+      if (ep.cred_inject) {
+        for (const inj of ep.cred_inject.inject) {
+          allowedSecrets.add(inj.from_credential);
+        }
       }
     }
   }
@@ -37,14 +41,20 @@ function harnessBlock(harness: Harness): Record<string, unknown> {
       protocol: ep.protocol,
       enforcement: "enforce",
       rules: ep.rules.map((r) => ({ allow: r.allow })),
-      cred_inject: {
-        provider: ep.cred_inject.provider,
-        strip_headers: [...ep.cred_inject.strip_headers],
-        inject: ep.cred_inject.inject.map((i) => ({
-          header: i.header,
-          from_credential: i.from_credential,
-        })),
-      },
+      // Only emit cred_inject for endpoints that carry a credential; a
+      // cred-less endpoint renders as a pure allow-egress rule.
+      ...(ep.cred_inject
+        ? {
+            cred_inject: {
+              provider: ep.cred_inject.provider,
+              strip_headers: [...ep.cred_inject.strip_headers],
+              inject: ep.cred_inject.inject.map((i) => ({
+                header: i.header,
+                from_credential: i.from_credential,
+              })),
+            },
+          }
+        : {}),
     })),
     allowed_secrets: [...allowedSecrets],
   };

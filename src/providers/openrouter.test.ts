@@ -58,14 +58,25 @@ describe("OPENROUTER plugin", () => {
   describe("policyEndpoints", () => {
     it("emits openrouter.ai with Authorization Bearer cred_inject", () => {
       const endpoints = OPENROUTER.policyEndpoints("opencode");
-      expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].host).toBe("openrouter.ai");
-      expect(endpoints[0].cred_inject.inject).toEqual([
+      const openrouter = endpoints.find((e) => e.host === "openrouter.ai");
+      expect(openrouter).toBeDefined();
+      expect(openrouter?.cred_inject?.inject).toEqual([
         { header: "Authorization", from_credential: "OPENROUTER_BEARER_TOKEN" },
       ]);
-      expect(endpoints[0].cred_inject.strip_headers).toContain("Authorization");
-      expect(endpoints[0].cred_inject.strip_headers).toContain("x-api-key");
-      expect(endpoints[0].cred_inject.strip_headers).toContain("Cookie");
+      expect(openrouter?.cred_inject?.strip_headers).toContain("Authorization");
+      expect(openrouter?.cred_inject?.strip_headers).toContain("x-api-key");
+      expect(openrouter?.cred_inject?.strip_headers).toContain("Cookie");
+    });
+
+    it("emits a models.dev read-only GET endpoint with no cred_inject (opencode model metadata)", () => {
+      const endpoints = OPENROUTER.policyEndpoints("opencode");
+      const modelsDev = endpoints.find((e) => e.host === "models.dev");
+      expect(modelsDev).toBeDefined();
+      expect(modelsDev?.port).toBe(443);
+      expect(modelsDev?.protocol).toBe("rest");
+      expect(modelsDev?.rules).toEqual([{ allow: { method: "GET", path: "/**" } }]);
+      // public read-only metadata carries no credential
+      expect(modelsDev?.cred_inject).toBeUndefined();
     });
   });
 
