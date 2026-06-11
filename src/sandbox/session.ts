@@ -663,5 +663,11 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
   handleGatewayShutdown(listAllSessions(sessionsDir()).length);
   await autoReapStaleSessions();
-  if (exitCode !== 0) process.exit(exitCode);
+  // Exit explicitly with the harness's code. The persistent-container tether
+  // (openshellSandboxCreateAsync's `openshell sandbox create … sleep infinity`
+  // child) and the gateway client are intentionally left running, so the
+  // compiled-bun event loop never drains and the CLI would otherwise hang here
+  // after the harness exits (it hung only on the compiled binary; `bun run`
+  // auto-exits, which masked it). See openlock-to9.
+  process.exit(exitCode);
 }
