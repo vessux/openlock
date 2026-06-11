@@ -2,8 +2,8 @@
 # openlock installer.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/<user>/openlock/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/<user>/openlock/main/install.sh | OPENLOCK_VERSION=v0.1.0 sh
+#   curl -fsSL https://raw.githubusercontent.com/<user>/openlock/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/<user>/openlock/main/install.sh | OPENLOCK_VERSION=v0.1.0 bash
 #
 # Drops the openlock binary into ~/.local/bin (or $OPENLOCK_INSTALL_DIR
 # if set). The fork binaries (openshell-gateway, openshell-sandbox,

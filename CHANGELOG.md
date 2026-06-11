@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.1
+
+### Changed
+
+- **The sandbox now works on a fresh bare-metal rootless-podman Linux box.** The in-image sandbox user UID/GID dropped from `999999` to `60000` so podman's `--userns=keep-id:uid=N` mapping fits the *stock* `/etc/subuid` range (`100000:65536`). At `999999` a fresh Ubuntu host couldn't represent the mapping, so the agent didn't own `/sandbox` and the workdir/dotfile upload failed with `tar: /sandbox: Cannot open: Permission denied` (and every subsequent `exec` too). VMs (macOS podman-machine, Lima) masked this with larger default subuid ranges. Fresh installs pull the rebuilt base image at its new content hash automatically.
+- **opencode routes to OpenRouter out of the box.** `openlock init --harness opencode` now scaffolds commented `--model` / `small_model` guidance for a tool-use-capable OpenRouter model, and the opencode egress policy allows read-only `GET models.dev` so opencode can resolve models outside its bundled registry. Policy endpoints may now omit `cred_inject` for credential-free read-only hosts (cred-bearing hosts still strip-and-inject as before).
+- **openshell fork binaries static-link z3 on Linux (fork v0.6.3).** The released Linux `openshell` no longer needs `libz3.so.4` at runtime, so sandbox creation works on a fresh box without installing system z3. macOS continues to link Homebrew's z3.
+- **`openlock --version` now appends the build commit SHA** (e.g. `0.9.1 (a1b2c3d)`) when built in release CI, so a specific build is identifiable — including across force-moved pre-release tags. Local `bun run` still prints the bare version. The SHA is injected at compile time via `bun build --define`.
+
+### Fixed
+
+- **`doctor` and sandbox preflight catch an insufficient rootless subuid range.** On rootless podman (Linux, non-root), openlock now reads `/etc/subuid` and verifies the user's range covers the sandbox UID; if not, it fails legibly with a `sudo usermod --add-subuids …` fix hint up front instead of dying later at the upload with `Permission denied`. Skipped on macOS, docker, and rootful/root podman.
+- **The agent owns its HOME subtree in the sandbox.** The per-project image now reclaims ownership of `/sandbox` after the root-run harness install, so the agent can write `~/.local` / `~/.config`. This fixes opencode's `unable to open database file` on a fresh sandbox, where `/sandbox/.local` had been left root-owned.
+- **`doctor` no longer false-negatives when both podman and docker are installed.** The non-interactive runtime resolver only auto-picks when *exactly one* runtime is present; with both installed it returned `null`, which `doctor` rendered identically to "no runtime installed" (a misleading `✗ container runtime (podman/docker)` with an "install one" hint). `doctor` now probes both and reports **every** installed runtime plus its readiness (podman API socket / docker daemon / podman machine on macOS), so a host with both shows both. Session preflight still checks only the runtime it resolved.
+- **x64 Linux binary runs on non-AVX2 CPUs.** The `openlock-x86_64-unknown-linux-gnu` release artifact is now built with Bun's `bun-linux-x64-baseline` target (x86-64-v2: SSE4.2/POPCNT, no AVX2). The previous `bun-linux-x64` build required AVX2 and crashed with `Illegal instruction (core dumped)` on older/limited CPUs the moment the binary ran (e.g. at the post-install `openlock doctor`).
+- **`install.sh` usage and docs now pipe to `bash`, not `sh`.** The script's shebang and `set -euo pipefail` require Bash; the documented `| sh` invocation failed on Debian/Ubuntu (where `sh` is `dash`) with `Illegal option -o pipefail`.
+- **Test suite no longer overwrites real provider credentials.** Several credential-touching suites (`login`, `logout`, `providers`, `resolve`) isolated only `HOME`, not `XDG_CONFIG_HOME`. Because `credentialsPath()` honors `XDG_CONFIG_HOME` first, running `bun test` on a machine with that variable set (common on Linux) wrote fixture data over the developer's real `~/.config/openlock/credentials.json`. These suites now neutralize `XDG_CONFIG_HOME` in setup like the already-correct ones, keeping the suite hermetic.
+
 ## v0.9.0
 
 ### Added

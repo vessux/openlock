@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
+import os from "node:os";
 import { type PreflightDeps, preflight } from "./preflight";
+
+const CURRENT_USER = os.userInfo().username || process.env.USER || "";
+// Good range: count 65536 > SANDBOX_UID (60000); bad range: count 50000 < SANDBOX_UID.
+const GOOD_SUBUID = `${CURRENT_USER}:100000:65536\n`;
+const BAD_SUBUID = `${CURRENT_USER}:100000:50000\n`;
 
 function makeDeps(overrides: Partial<PreflightDeps> = {}): PreflightDeps {
   return {
@@ -187,5 +193,67 @@ describe("preflight", () => {
     const result = await preflight({ tty: true, deps });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("docker is required");
+  });
+
+  it("passes on Linux podman when subuid count covers SANDBOX_UID", async () => {
+    const deps = makeDeps({
+      isMac: false,
+      isRoot: false,
+      podmanSocketActive: async () => true,
+      readSubuid: () => GOOD_SUBUID,
+    });
+    const result = await preflight({ tty: false, deps });
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails on Linux podman when subuid count is too small", async () => {
+    const deps = makeDeps({
+      isMac: false,
+      isRoot: false,
+      podmanSocketActive: async () => true,
+      readSubuid: () => BAD_SUBUID,
+    });
+    const result = await preflight({ tty: false, deps });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("usermod");
+    expect(result.reason).toContain("podman system migrate");
+  });
+
+  it("skips subuid check when running as root (rootful podman uses no subuid map)", async () => {
+    const deps = makeDeps({
+      isMac: false,
+      isRoot: true,
+      podmanSocketActive: async () => true,
+      readSubuid: () => BAD_SUBUID,
+    });
+    const result = await preflight({ tty: false, deps });
+    expect(result.ok).toBe(true);
+  });
+
+  it("skips subuid check on macOS podman", async () => {
+    // isMac: true — podman runs in a VM, subuid is irrelevant
+    const deps = makeDeps({
+      isMac: true,
+      readSubuid: () => BAD_SUBUID,
+    });
+    const result = await preflight({ tty: true, deps });
+    expect(result.ok).toBe(true);
+  });
+
+  it("skips subuid check when runtime is docker", async () => {
+    const deps = makeDeps({
+      runtime: "docker",
+      isMac: false,
+      runDoctorChecks: async () => [
+        { name: "git", ok: true },
+        { name: "docker", ok: true },
+        { name: "docker daemon reachable", ok: true },
+        { name: "credentials (openlock login)", ok: true },
+      ],
+      dockerDaemonReachable: async () => true,
+      readSubuid: () => BAD_SUBUID,
+    });
+    const result = await preflight({ tty: false, deps });
+    expect(result.ok).toBe(true);
   });
 });

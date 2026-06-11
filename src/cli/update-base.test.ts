@@ -15,8 +15,8 @@ describe("updateBaseCmd", () => {
   it("rewrites FROM to current embedded hash", async () => {
     const original = `FROM ghcr.io/vessux/openlock-base:OLDHASH123abc
 
-ARG SANDBOX_UID=999999
-ARG SANDBOX_GID=999999
+ARG SANDBOX_UID=60000
+ARG SANDBOX_GID=60000
 
 # ---- Harness ---------------------------------------------------------------
 USER root

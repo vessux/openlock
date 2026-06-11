@@ -19,12 +19,12 @@ describe("ANTHROPIC plugin", () => {
       expect(endpoints).toHaveLength(1);
       const e = endpoints[0];
       expect(e.host).toBe("api.anthropic.com");
-      expect(e.cred_inject.inject).toEqual([
+      expect(e.cred_inject?.inject).toEqual([
         { header: "Authorization", from_credential: "ANTHROPIC_BEARER_TOKEN" },
       ]);
-      expect(e.cred_inject.strip_headers).toContain("Authorization");
-      expect(e.cred_inject.strip_headers).toContain("x-api-key");
-      expect(e.cred_inject.strip_headers).toContain("Cookie");
+      expect(e.cred_inject?.strip_headers).toContain("Authorization");
+      expect(e.cred_inject?.strip_headers).toContain("x-api-key");
+      expect(e.cred_inject?.strip_headers).toContain("Cookie");
     });
 
     it("uses x-api-key cred_inject for opencode", () => {
@@ -32,12 +32,12 @@ describe("ANTHROPIC plugin", () => {
       expect(endpoints).toHaveLength(1);
       const e = endpoints[0];
       expect(e.host).toBe("api.anthropic.com");
-      expect(e.cred_inject.inject).toEqual([
+      expect(e.cred_inject?.inject).toEqual([
         { header: "x-api-key", from_credential: "ANTHROPIC_API_KEY" },
       ]);
-      expect(e.cred_inject.strip_headers).toContain("Authorization");
-      expect(e.cred_inject.strip_headers).toContain("x-api-key");
-      expect(e.cred_inject.strip_headers).toContain("Cookie");
+      expect(e.cred_inject?.strip_headers).toContain("Authorization");
+      expect(e.cred_inject?.strip_headers).toContain("x-api-key");
+      expect(e.cred_inject?.strip_headers).toContain("Cookie");
     });
   });
 

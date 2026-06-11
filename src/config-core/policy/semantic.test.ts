@@ -162,6 +162,27 @@ describe("validateSemantics", () => {
     expect(errors).toHaveLength(0);
   });
 
+  test("accepts an endpoint with no cred_inject (pure allow-egress)", () => {
+    const errors = validateSemantics(
+      minimal({
+        network_policies: {
+          opencode: {
+            endpoints: [
+              {
+                host: "models.dev",
+                port: 443,
+                rules: [{ allow: { method: "GET", path: "/**" } }],
+              },
+            ],
+            // non-empty allowed_secrets must not make a cred-less endpoint fail
+            allowed_secrets: ["OPENROUTER_BEARER_TOKEN"],
+          },
+        },
+      }),
+    );
+    expect(errors).toHaveLength(0);
+  });
+
   test("rejects unknown trust_check registry", () => {
     const errors = validateSemantics(
       minimal({

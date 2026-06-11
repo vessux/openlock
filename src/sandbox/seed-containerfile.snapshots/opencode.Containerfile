@@ -9,8 +9,8 @@ FROM ghcr.io/vessux/openlock-base:abc123def456
 
 # Sandbox uid/gid — must match the base image's user. The openshell fork
 # parses Config.User from the image and applies userns mapping; keep numeric.
-ARG SANDBOX_UID=999999
-ARG SANDBOX_GID=999999
+ARG SANDBOX_UID=60000
+ARG SANDBOX_GID=60000
 
 # ---- Base image (inline reference) ----------------------------------------
 # Build the base locally instead of pulling: comment out FROM + ARGs above,
@@ -24,4 +24,5 @@ ARG SANDBOX_GID=999999
 # Add/remove harness installs below. Keep the final USER directive.
 USER root
 RUN npm install -g opencode-ai@1.15.5
+RUN chown -R ${SANDBOX_UID}:${SANDBOX_GID} /sandbox
 USER ${SANDBOX_UID}:${SANDBOX_GID}

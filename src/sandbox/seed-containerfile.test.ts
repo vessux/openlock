@@ -76,3 +76,58 @@ describe("renderSeedContainerfile", () => {
     expect(renderSeedContainerfile("opencode")).toContain("opencode-ai@");
   });
 });
+
+describe("chown after root harness installs (openlock-ef6)", () => {
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional Dockerfile ARG syntax
+  const CHOWN_LINE = "RUN chown -R ${SANDBOX_UID}:${SANDBOX_GID} /sandbox";
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional Dockerfile ARG syntax
+  const USER_SWITCH = "USER ${SANDBOX_UID}:${SANDBOX_GID}";
+
+  it("opencode: chown appears after npm install and before USER switch", () => {
+    const out = seedContainerfile({
+      harnesses: ["opencode"],
+      baseHash: FAKE_HASH,
+      baseContent: BASE_CONTENT_FIXTURE,
+    });
+    expect(out).toContain(CHOWN_LINE);
+    const installIdx = out.indexOf("RUN npm install -g opencode-ai@");
+    const chownIdx = out.indexOf(CHOWN_LINE);
+    const userIdx = out.lastIndexOf(USER_SWITCH);
+    expect(installIdx).toBeGreaterThan(-1);
+    expect(chownIdx).toBeGreaterThan(installIdx);
+    expect(userIdx).toBeGreaterThan(chownIdx);
+  });
+
+  it("claude_code: chown appears after npm install and before USER switch", () => {
+    const out = seedContainerfile({
+      harnesses: ["claude_code"],
+      baseHash: FAKE_HASH,
+      baseContent: BASE_CONTENT_FIXTURE,
+    });
+    expect(out).toContain(CHOWN_LINE);
+    const installIdx = out.indexOf("RUN npm install -g @anthropic-ai/claude-code@");
+    const chownIdx = out.indexOf(CHOWN_LINE);
+    const userIdx = out.lastIndexOf(USER_SWITCH);
+    expect(installIdx).toBeGreaterThan(-1);
+    expect(chownIdx).toBeGreaterThan(installIdx);
+    expect(userIdx).toBeGreaterThan(chownIdx);
+  });
+
+  it("multi-harness (claude_code+opencode): chown appears after all installs and before USER switch", () => {
+    const out = seedContainerfile({
+      harnesses: ["claude_code", "opencode"],
+      baseHash: FAKE_HASH,
+      baseContent: BASE_CONTENT_FIXTURE,
+    });
+    expect(out).toContain(CHOWN_LINE);
+    const lastInstallIdx = Math.max(
+      out.indexOf("RUN npm install -g @anthropic-ai/claude-code@"),
+      out.indexOf("RUN npm install -g opencode-ai@"),
+    );
+    const chownIdx = out.indexOf(CHOWN_LINE);
+    const userIdx = out.lastIndexOf(USER_SWITCH);
+    expect(lastInstallIdx).toBeGreaterThan(-1);
+    expect(chownIdx).toBeGreaterThan(lastInstallIdx);
+    expect(userIdx).toBeGreaterThan(chownIdx);
+  });
+});

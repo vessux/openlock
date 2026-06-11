@@ -25,7 +25,9 @@ export interface PolicyEndpointSpec {
   port: number;
   protocol: "rest";
   rules: ReadonlyArray<{ allow: { method: string; path: string } }>;
-  cred_inject: CredInjectSpec;
+  /** Optional: endpoints carrying no credential (e.g. public read-only
+   * metadata like models.dev) omit this and render as a plain allow-egress rule. */
+  cred_inject?: CredInjectSpec;
 }
 
 /** Contract every openlock credential provider implements. */

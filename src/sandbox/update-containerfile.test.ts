@@ -9,8 +9,8 @@ function makeSeed(hash: string, harnessBlock: string): string {
   return `# .openlock/Containerfile
 FROM ghcr.io/vessux/openlock-base:${hash}
 
-ARG SANDBOX_UID=999999
-ARG SANDBOX_GID=999999
+ARG SANDBOX_UID=60000
+ARG SANDBOX_GID=60000
 
 # ---- Base image (inline reference) ----------------------------------------
 # (inline ref omitted)

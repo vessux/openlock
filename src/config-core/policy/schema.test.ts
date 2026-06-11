@@ -42,6 +42,27 @@ describe("validateSchema", () => {
     expect(errors).toHaveLength(0);
   });
 
+  test("accepts an endpoint with no cred_inject (pure allow-egress)", () => {
+    const errors = validateSchema({
+      version: 1,
+      network_policies: {
+        opencode: {
+          endpoints: [
+            {
+              host: "models.dev",
+              port: 443,
+              protocol: "rest",
+              enforcement: "enforce",
+              rules: [{ allow: { method: "GET", path: "/**" } }],
+            },
+          ],
+          allowed_secrets: [],
+        },
+      },
+    });
+    expect(errors).toHaveLength(0);
+  });
+
   test("rejects missing version", () => {
     const errors = validateSchema({});
     expect(errors).toHaveLength(1);

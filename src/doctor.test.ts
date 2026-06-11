@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { installHint, renderDoctorResults, runDoctorChecks } from "./doctor";
+import {
+  buildRuntimeChecks,
+  buildSubuidCheck,
+  installHint,
+  renderDoctorResults,
+  runDoctorChecks,
+} from "./doctor";
 import { globalConfigPath } from "./global-config/paths";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
@@ -165,6 +171,34 @@ describe("doctor fix hints", () => {
   });
 });
 
+describe("buildRuntimeChecks", () => {
+  it("reports BOTH runtimes (presence + readiness) when both are installed", () => {
+    const names = buildRuntimeChecks({ podman: true, docker: true }, false).map((c) => c.name);
+    expect(names).toEqual([
+      "podman",
+      "podman API socket active",
+      "docker",
+      "docker daemon reachable",
+    ]);
+  });
+
+  it("reports only the installed runtime", () => {
+    const names = buildRuntimeChecks({ podman: false, docker: true }, false).map((c) => c.name);
+    expect(names).toEqual(["docker", "docker daemon reachable"]);
+  });
+
+  it("emits a single install-a-runtime failure when neither is installed", () => {
+    const checks = buildRuntimeChecks({ podman: false, docker: false }, false);
+    expect(checks.map((c) => c.name)).toEqual(["container runtime (podman/docker)"]);
+    expect(checks[0]?.fix).toContain("podman");
+  });
+
+  it("uses the podman machine check on macOS instead of the API socket", () => {
+    const names = buildRuntimeChecks({ podman: true, docker: false }, true).map((c) => c.name);
+    expect(names).toEqual(["podman", "podman machine (running)"]);
+  });
+});
+
 describe("doctor non-interactive runtime", () => {
   it("emits a failing container-runtime check (no prompt) when no runtime resolves", async () => {
     const results = await runDoctorChecks(null);
@@ -175,6 +209,88 @@ describe("doctor non-interactive runtime", () => {
       (r) => r.name.includes("machine") || r.name.includes("socket") || r.name.includes("daemon"),
     );
     expect(runtimeSpecific).toBe(false);
+  });
+});
+
+describe("rootless podman subuid check", () => {
+  // The doctor check resolves the *real* current user via os.userInfo(), so the
+  // injected subuid content must be keyed to that user (matches preflight.test).
+  const CURRENT_USER = userInfo().username || process.env.USER || process.env.LOGNAME || "";
+  const GOOD_SUBUID = `${CURRENT_USER}:100000:65536\n`; // 65536 > 60000 → pass
+  const BAD_SUBUID = `${CURRENT_USER}:100000:50000\n`; // 50000 < 60000 → fail
+
+  it(
+    "passes when the subuid count exceeds SANDBOX_UID on Linux podman",
+    async () => {
+      // Simulate Linux rootless podman: runtime=podman, readSubuid returns valid content.
+      // We patch process.platform via the isMac path by running on actual platform;
+      // to keep the test platform-agnostic we call runDoctorChecks and look only for
+      // the check being present+passing on Linux, or absent on Mac (checked separately).
+      if (process.platform === "darwin") return; // subuid check is skipped on Mac — covered below
+      if (process.getuid?.() === 0) return; // skipped as root (rootful podman) — covered by unit tests
+      const results = await runDoctorChecks("podman", () => GOOD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeDefined();
+      expect(r?.ok).toBe(true);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "fails with fix hint when the subuid count is too small on Linux podman",
+    async () => {
+      if (process.platform === "darwin") return; // subuid check is skipped on Mac — covered below
+      if (process.getuid?.() === 0) return; // skipped as root (rootful podman) — covered by unit tests
+      const results = await runDoctorChecks("podman", () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeDefined();
+      expect(r?.ok).toBe(false);
+      expect(r?.fix).toContain("usermod");
+      expect(r?.fix).toContain("podman system migrate");
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "is absent when runtime is docker (not podman)",
+    async () => {
+      const results = await runDoctorChecks("docker", () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "is absent when runtime is null",
+    async () => {
+      const results = await runDoctorChecks(null, () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "is absent on macOS (podman runs in a VM, not rootless)",
+    async () => {
+      if (process.platform !== "darwin") return; // only meaningful on Mac
+      const results = await runDoctorChecks("podman", () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+
+  // Deterministic unit coverage of buildSubuidCheck (no dependency on the test runner's uid).
+  it("buildSubuidCheck skips when running as root (rootful podman uses no subuid map)", () => {
+    expect(buildSubuidCheck(true, false, () => BAD_SUBUID, true)).toEqual([]);
+  });
+
+  it("buildSubuidCheck emits the check when non-root (failing outcome covered above)", () => {
+    const checks = buildSubuidCheck(true, false, () => BAD_SUBUID, false);
+    expect(checks).toHaveLength(1);
+    expect(checks[0].name).toBe("rootless podman subuid range");
   });
 });
 

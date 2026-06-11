@@ -88,6 +88,14 @@ network_policies:
           inject:
             - header: Authorization
               from_credential: OPENROUTER_BEARER_TOKEN
+      - host: models.dev
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /**
     allowed_secrets:
       - ANTHROPIC_API_KEY
       - OPENROUTER_BEARER_TOKEN

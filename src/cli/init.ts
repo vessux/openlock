@@ -78,6 +78,7 @@ interface RenderInitOpts {
 export function renderInitFiles(opts: RenderInitOpts): Record<FileKind, string> {
   return {
     "config.yaml": scaffoldManifest({
+      harness: opts.harness,
       workdir: opts.workdir,
       extraMounts: opts.extraMounts,
       env: opts.env,

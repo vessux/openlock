@@ -147,7 +147,6 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
             "generic",
             "--credential",
             // BEARER comes from ~/.config/openlock/credentials.json (real key).
-            // biome-ignore lint/style/noNonNullAssertion: skipIf above gates BEARER===null.
             `OPENROUTER_BEARER_TOKEN=${BEARER!}`,
           ],
           cli.cwd,

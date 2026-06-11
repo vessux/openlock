@@ -3,6 +3,9 @@ import type { Harness } from "./harness";
 import { BASE_CONTAINERFILE } from "./image-build";
 import { HARNESS_SENTINEL } from "./update-containerfile";
 
+/** In-image sandbox user uid; must match the ARG in base.Containerfile / generators. */
+export const SANDBOX_UID = 60000;
+
 function multiHarnessBlock(harnesses: Harness[]): string {
   const installs: string[] = [];
   const postInstalls: string[] = [];
@@ -29,12 +32,14 @@ JSON`);
   }
   return `USER root
 ${installs.join("\n")}
+RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
 USER \${SANDBOX_UID}:\${SANDBOX_GID}${postInstalls.length > 0 ? `\n${postInstalls.join("\n")}` : ""}`;
 }
 
 const HARNESS_FRAGMENTS: Record<Harness, string> = {
   claude_code: `USER root
 RUN npm install -g @anthropic-ai/claude-code@2.1.128
+RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
 USER \${SANDBOX_UID}:\${SANDBOX_GID}
 RUN cat > /sandbox/.claude.json <<'JSON'
 {
@@ -52,6 +57,7 @@ RUN cat > /sandbox/.claude.json <<'JSON'
 JSON`,
   opencode: `USER root
 RUN npm install -g opencode-ai@1.15.5
+RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
 USER \${SANDBOX_UID}:\${SANDBOX_GID}`,
 };
 
@@ -95,8 +101,8 @@ FROM ghcr.io/vessux/openlock-base:${args.baseHash}
 
 # Sandbox uid/gid — must match the base image's user. The openshell fork
 # parses Config.User from the image and applies userns mapping; keep numeric.
-ARG SANDBOX_UID=999999
-ARG SANDBOX_GID=999999
+ARG SANDBOX_UID=60000
+ARG SANDBOX_GID=60000
 
 # ---- Base image (inline reference) ----------------------------------------
 # Build the base locally instead of pulling: comment out FROM + ARGs above,

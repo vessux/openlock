@@ -3,6 +3,10 @@ import pkg from "../package.json" with { type: "json" };
 import { computeBaseTag } from "./sandbox/ensure-base";
 import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 
+// Replaced with the build commit SHA via `bun build --define` in release CI;
+// undefined for local/dev runs (guarded with `typeof` at the use site).
+declare const OPENLOCK_BUILD_SHA: string;
+
 const USAGE = `
 openlock - sandbox orchestration toolkit
 
@@ -51,7 +55,11 @@ function main(): void {
   const args = process.argv.slice(2);
 
   if (args.includes("--version") || args.includes("-v") || args[0] === "version") {
-    console.log(pkg.version);
+    // OPENLOCK_BUILD_SHA is substituted at compile time via `bun build --define`
+    // (see .github/workflows/release.yml). Absent for local `bun run`, where
+    // `typeof` on the undeclared identifier safely yields "undefined".
+    const buildSha = typeof OPENLOCK_BUILD_SHA === "string" ? OPENLOCK_BUILD_SHA : null;
+    console.log(buildSha ? `${pkg.version} (${buildSha})` : pkg.version);
     process.exit(0);
   }
 

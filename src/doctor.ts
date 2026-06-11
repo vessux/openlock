@@ -1,12 +1,27 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
-import { type Runtime, resolveRuntimeNonInteractive } from "./runtime";
+import { type BinaryProbes, RUNTIMES, type Runtime } from "./runtime";
 import { isDevMode } from "./sandbox/fork-binaries";
+import { SANDBOX_UID } from "./sandbox/seed-containerfile";
+import { rangeCoversUid } from "./sandbox/subuid";
 import { hasAnyProvider } from "./tokens";
+
+const SUBUID_FIX =
+  "sudo usermod --add-subuids 100000-1100000 --add-subgids 100000-1100000 $USER && podman system migrate";
+
+/** Read /etc/subuid for injection in tests; defaults to the real file. */
+function defaultReadSubuid(): string {
+  try {
+    return readFileSync("/etc/subuid", "utf8");
+  } catch {
+    return "";
+  }
+}
 
 const DOCKER_INSTALL_DOCS = "https://docs.docker.com/engine/install/";
 
@@ -91,8 +106,44 @@ async function checkGlobalConfig(): Promise<CheckOutcome> {
   }
 }
 
-function buildRuntimeChecks(resolved: Runtime | null, isMac: boolean): Check[] {
-  if (resolved === null) {
+/** Presence + readiness checks for a single installed runtime. */
+function runtimeChecksFor(rt: Runtime, isMac: boolean): Check[] {
+  const readiness: Check =
+    rt === "podman"
+      ? isMac
+        ? {
+            name: "podman machine (running)",
+            test: podmanMachineRunning,
+            fix: "podman machine start",
+          }
+        : {
+            name: "podman API socket active",
+            test: podmanSocketActive,
+            fix: "systemctl --user enable --now podman.socket",
+          }
+      : {
+          name: "docker daemon reachable",
+          test: dockerDaemonReachable,
+          fix: "start Docker (systemctl --user start docker, or launch Docker Desktop)",
+        };
+  return [
+    {
+      name: rt,
+      test: async () => commandExists(rt),
+      fix: rt === "podman" ? installHint("podman") : DOCKER_INSTALL_DOCS,
+    },
+    readiness,
+  ];
+}
+
+/** Report EVERY installed runtime and its readiness. A host with both podman
+ * and docker shows both — the prior code collapsed "two present" into the same
+ * null result as "none present", a false negative (the resolver only
+ * auto-picks when exactly one is installed). Only when neither is present do we
+ * emit the single install-a-runtime failure. */
+export function buildRuntimeChecks(probes: BinaryProbes, isMac: boolean): Check[] {
+  const present = RUNTIMES.filter((r) => probes[r]);
+  if (present.length === 0) {
     return [
       {
         name: "container runtime (podman/docker)",
@@ -101,41 +152,63 @@ function buildRuntimeChecks(resolved: Runtime | null, isMac: boolean): Check[] {
       },
     ];
   }
-  const podmanMachineCheck: Check = isMac
-    ? { name: "podman machine (running)", test: podmanMachineRunning, fix: "podman machine start" }
-    : {
-        name: "podman API socket active",
-        test: podmanSocketActive,
-        fix: "systemctl --user enable --now podman.socket",
-      };
-  const runtimeSpecificCheck: Check =
-    resolved === "podman"
-      ? podmanMachineCheck
-      : {
-          name: "docker daemon reachable",
-          test: dockerDaemonReachable,
-          fix: "start Docker (systemctl --user start docker, or launch Docker Desktop)",
-        };
+  return present.flatMap((r) => runtimeChecksFor(r, isMac));
+}
+
+/** Rootless podman (Linux only): verify the host subuid range covers SANDBOX_UID.
+ * Returns an empty array on macOS, when podman is not the runtime, or when running
+ * as root (rootful podman doesn't use subuid maps, so the check would false-fire). */
+export function buildSubuidCheck(
+  hasPodman: boolean,
+  isMac: boolean,
+  readSubuid: () => string,
+  isRoot: boolean,
+): Check[] {
+  if (!hasPodman || isMac || isRoot) return [];
   return [
     {
-      name: resolved,
-      test: async () => commandExists(resolved),
-      fix: resolved === "podman" ? installHint("podman") : DOCKER_INSTALL_DOCS,
+      name: "rootless podman subuid range",
+      test: (): Promise<CheckOutcome> => {
+        const user = os.userInfo().username || process.env.USER || process.env.LOGNAME || "";
+        const content = readSubuid();
+        const ok = rangeCoversUid(content, user, SANDBOX_UID);
+        return Promise.resolve(
+          ok
+            ? { ok: true }
+            : {
+                ok: false,
+                detail: `subuid count for '${user}' must exceed ${SANDBOX_UID} (keep-id:uid=${SANDBOX_UID} mapping)`,
+                fix: SUBUID_FIX,
+              },
+        );
+      },
     },
-    runtimeSpecificCheck,
   ];
 }
 
-export async function runDoctorChecks(runtime?: Runtime | null): Promise<DoctorResult[]> {
-  const resolved = runtime === undefined ? await resolveRuntimeNonInteractive() : runtime;
+export async function runDoctorChecks(
+  runtime?: Runtime | null,
+  readSubuid: () => string = defaultReadSubuid,
+): Promise<DoctorResult[]> {
+  // No explicit runtime (standalone `openlock doctor`, report) → probe both and
+  // report every installed runtime. An explicit runtime (e.g. session preflight,
+  // where it's already resolved) narrows to that one; explicit null → no runtime.
+  const probes: BinaryProbes =
+    runtime === undefined
+      ? { podman: commandExists("podman"), docker: commandExists("docker") }
+      : { podman: runtime === "podman", docker: runtime === "docker" };
   const isMac = process.platform === "darwin";
   const dev = isDevMode();
 
-  const runtimeChecks = buildRuntimeChecks(resolved, isMac);
+  const runtimeChecks = buildRuntimeChecks(probes, isMac);
+  // Rootless podman (Linux only) requires the host's subuid range to cover
+  // the in-image sandbox UID so `--userns=keep-id:uid=N` can map it.
+  const subuidChecks = buildSubuidCheck(probes.podman, isMac, readSubuid, process.getuid?.() === 0);
 
   const checks: Check[] = [
     { name: "git", test: async () => commandExists("git"), fix: installHint("git") },
     ...runtimeChecks,
+    ...subuidChecks,
     ...(dev
       ? [
           {
