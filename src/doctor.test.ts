@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
   buildRuntimeChecks,
@@ -213,8 +213,11 @@ describe("doctor non-interactive runtime", () => {
 });
 
 describe("rootless podman subuid check", () => {
-  const GOOD_SUBUID = "testuser:100000:65536\n"; // 65536 > 60000 → pass
-  const BAD_SUBUID = "testuser:100000:50000\n"; // 50000 < 60000 → fail
+  // The doctor check resolves the *real* current user via os.userInfo(), so the
+  // injected subuid content must be keyed to that user (matches preflight.test).
+  const CURRENT_USER = userInfo().username || process.env.USER || process.env.LOGNAME || "";
+  const GOOD_SUBUID = `${CURRENT_USER}:100000:65536\n`; // 65536 > 60000 → pass
+  const BAD_SUBUID = `${CURRENT_USER}:100000:50000\n`; // 50000 < 60000 → fail
 
   it(
     "passes when the subuid count exceeds SANDBOX_UID on Linux podman",
@@ -224,6 +227,7 @@ describe("rootless podman subuid check", () => {
       // to keep the test platform-agnostic we call runDoctorChecks and look only for
       // the check being present+passing on Linux, or absent on Mac (checked separately).
       if (process.platform === "darwin") return; // subuid check is skipped on Mac — covered below
+      if (process.getuid?.() === 0) return; // skipped as root (rootful podman) — covered by unit tests
       const results = await runDoctorChecks("podman", () => GOOD_SUBUID);
       const r = results.find((x) => x.name === "rootless podman subuid range");
       expect(r).toBeDefined();
@@ -236,6 +240,7 @@ describe("rootless podman subuid check", () => {
     "fails with fix hint when the subuid count is too small on Linux podman",
     async () => {
       if (process.platform === "darwin") return; // subuid check is skipped on Mac — covered below
+      if (process.getuid?.() === 0) return; // skipped as root (rootful podman) — covered by unit tests
       const results = await runDoctorChecks("podman", () => BAD_SUBUID);
       const r = results.find((x) => x.name === "rootless podman subuid range");
       expect(r).toBeDefined();
