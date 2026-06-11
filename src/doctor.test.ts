@@ -206,6 +206,72 @@ describe("doctor non-interactive runtime", () => {
   });
 });
 
+describe("rootless podman subuid check", () => {
+  const GOOD_SUBUID = "testuser:100000:65536\n"; // 65536 > 60000 → pass
+  const BAD_SUBUID = "testuser:100000:50000\n"; // 50000 < 60000 → fail
+
+  it(
+    "passes when the subuid count exceeds SANDBOX_UID on Linux podman",
+    async () => {
+      // Simulate Linux rootless podman: runtime=podman, readSubuid returns valid content.
+      // We patch process.platform via the isMac path by running on actual platform;
+      // to keep the test platform-agnostic we call runDoctorChecks and look only for
+      // the check being present+passing on Linux, or absent on Mac (checked separately).
+      if (process.platform === "darwin") return; // subuid check is skipped on Mac — covered below
+      const results = await runDoctorChecks("podman", () => GOOD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeDefined();
+      expect(r?.ok).toBe(true);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "fails with fix hint when the subuid count is too small on Linux podman",
+    async () => {
+      if (process.platform === "darwin") return; // subuid check is skipped on Mac — covered below
+      const results = await runDoctorChecks("podman", () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeDefined();
+      expect(r?.ok).toBe(false);
+      expect(r?.fix).toContain("usermod");
+      expect(r?.fix).toContain("podman system migrate");
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "is absent when runtime is docker (not podman)",
+    async () => {
+      const results = await runDoctorChecks("docker", () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "is absent when runtime is null",
+    async () => {
+      const results = await runDoctorChecks(null, () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "is absent on macOS (podman runs in a VM, not rootless)",
+    async () => {
+      if (process.platform !== "darwin") return; // only meaningful on Mac
+      const results = await runDoctorChecks("podman", () => BAD_SUBUID);
+      const r = results.find((x) => x.name === "rootless podman subuid range");
+      expect(r).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+});
+
 describe("renderDoctorResults", () => {
   it("prints `fix:` only for failed checks that have a fix", () => {
     const { lines, failures } = renderDoctorResults([

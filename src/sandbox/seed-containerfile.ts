@@ -3,6 +3,9 @@ import type { Harness } from "./harness";
 import { BASE_CONTAINERFILE } from "./image-build";
 import { HARNESS_SENTINEL } from "./update-containerfile";
 
+/** In-image sandbox user uid; must match the ARG in base.Containerfile / generators. */
+export const SANDBOX_UID = 60000;
+
 function multiHarnessBlock(harnesses: Harness[]): string {
   const installs: string[] = [];
   const postInstalls: string[] = [];

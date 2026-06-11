@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
@@ -6,7 +7,21 @@ import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
 import { type BinaryProbes, RUNTIMES, type Runtime } from "./runtime";
 import { isDevMode } from "./sandbox/fork-binaries";
+import { SANDBOX_UID } from "./sandbox/seed-containerfile";
+import { rangeCoversUid } from "./sandbox/subuid";
 import { hasAnyProvider } from "./tokens";
+
+const SUBUID_FIX =
+  "sudo usermod --add-subuids 100000-1100000 --add-subgids 100000-1100000 $USER && podman system migrate";
+
+/** Read /etc/subuid for injection in tests; defaults to the real file. */
+function defaultReadSubuid(): string {
+  try {
+    return readFileSync("/etc/subuid", "utf8");
+  } catch {
+    return "";
+  }
+}
 
 const DOCKER_INSTALL_DOCS = "https://docs.docker.com/engine/install/";
 
@@ -140,7 +155,39 @@ export function buildRuntimeChecks(probes: BinaryProbes, isMac: boolean): Check[
   return present.flatMap((r) => runtimeChecksFor(r, isMac));
 }
 
-export async function runDoctorChecks(runtime?: Runtime | null): Promise<DoctorResult[]> {
+/** Rootless podman (Linux only): verify the host subuid range covers SANDBOX_UID.
+ * Returns an empty array on macOS or when podman is not the runtime. */
+export function buildSubuidCheck(
+  hasPodman: boolean,
+  isMac: boolean,
+  readSubuid: () => string,
+): Check[] {
+  if (!hasPodman || isMac) return [];
+  return [
+    {
+      name: "rootless podman subuid range",
+      test: (): Promise<CheckOutcome> => {
+        const user = os.userInfo().username || process.env.USER || process.env.LOGNAME || "";
+        const content = readSubuid();
+        const ok = rangeCoversUid(content, user, SANDBOX_UID);
+        return Promise.resolve(
+          ok
+            ? { ok: true }
+            : {
+                ok: false,
+                detail: `subuid count for '${user}' must exceed ${SANDBOX_UID} (keep-id:uid=${SANDBOX_UID} mapping)`,
+                fix: SUBUID_FIX,
+              },
+        );
+      },
+    },
+  ];
+}
+
+export async function runDoctorChecks(
+  runtime?: Runtime | null,
+  readSubuid: () => string = defaultReadSubuid,
+): Promise<DoctorResult[]> {
   // No explicit runtime (standalone `openlock doctor`, report) → probe both and
   // report every installed runtime. An explicit runtime (e.g. session preflight,
   // where it's already resolved) narrows to that one; explicit null → no runtime.
@@ -152,10 +199,14 @@ export async function runDoctorChecks(runtime?: Runtime | null): Promise<DoctorR
   const dev = isDevMode();
 
   const runtimeChecks = buildRuntimeChecks(probes, isMac);
+  // Rootless podman (Linux only) requires the host's subuid range to cover
+  // the in-image sandbox UID so `--userns=keep-id:uid=N` can map it.
+  const subuidChecks = buildSubuidCheck(probes.podman, isMac, readSubuid);
 
   const checks: Check[] = [
     { name: "git", test: async () => commandExists("git"), fix: installHint("git") },
     ...runtimeChecks,
+    ...subuidChecks,
     ...(dev
       ? [
           {
