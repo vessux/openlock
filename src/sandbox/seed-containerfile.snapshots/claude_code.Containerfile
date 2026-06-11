@@ -24,6 +24,7 @@ ARG SANDBOX_GID=60000
 # Add/remove harness installs below. Keep the final USER directive.
 USER root
 RUN npm install -g @anthropic-ai/claude-code@2.1.128
+RUN chown -R ${SANDBOX_UID}:${SANDBOX_GID} /sandbox
 USER ${SANDBOX_UID}:${SANDBOX_GID}
 RUN cat > /sandbox/.claude.json <<'JSON'
 {

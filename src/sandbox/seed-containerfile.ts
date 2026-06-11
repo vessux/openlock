@@ -32,12 +32,14 @@ JSON`);
   }
   return `USER root
 ${installs.join("\n")}
+RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
 USER \${SANDBOX_UID}:\${SANDBOX_GID}${postInstalls.length > 0 ? `\n${postInstalls.join("\n")}` : ""}`;
 }
 
 const HARNESS_FRAGMENTS: Record<Harness, string> = {
   claude_code: `USER root
 RUN npm install -g @anthropic-ai/claude-code@2.1.128
+RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
 USER \${SANDBOX_UID}:\${SANDBOX_GID}
 RUN cat > /sandbox/.claude.json <<'JSON'
 {
@@ -55,6 +57,7 @@ RUN cat > /sandbox/.claude.json <<'JSON'
 JSON`,
   opencode: `USER root
 RUN npm install -g opencode-ai@1.15.5
+RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
 USER \${SANDBOX_UID}:\${SANDBOX_GID}`,
 };
 

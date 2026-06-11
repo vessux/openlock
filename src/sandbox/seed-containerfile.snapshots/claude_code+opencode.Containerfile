@@ -25,6 +25,7 @@ ARG SANDBOX_GID=60000
 USER root
 RUN npm install -g @anthropic-ai/claude-code@2.1.128
 RUN npm install -g opencode-ai@1.15.5
+RUN chown -R ${SANDBOX_UID}:${SANDBOX_GID} /sandbox
 USER ${SANDBOX_UID}:${SANDBOX_GID}
 RUN cat > /sandbox/.claude.json <<'JSON'
 {
