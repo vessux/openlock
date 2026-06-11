@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.2
+
+### Fixed
+
+- **The macOS `openshell` binary no longer needs Homebrew's z3 at runtime (fork v0.6.4).** v0.9.1 promised "works on a clean box" but only fixed Linux — the macOS aarch64 binary still dynamically linked `/opt/homebrew/opt/z3/lib/libz3.4.15.dylib`, so on a Mac without `brew install z3` it died at startup with `dyld: Library not loaded: libz3.4.15.dylib` and `openlock sandbox` failed at the provider step. The fork now static-links z3 (`bundled-z3`) on macOS too, compiled with zig as the C/C++ toolchain (GitHub's Apple-clang runners can't build the vendored z3). `otool -L` on the released binary shows only system libraries — no z3, no Homebrew — so macOS now matches Linux's clean-box guarantee.
+- **Compiled `openlock sandbox` exits cleanly after the harness instead of hanging.** After the harness (e.g. opencode) exited `0`, the compiled CLI printed `Gateway kept running (N session(s) remain).` and never returned to the shell, because the detached container tether and gateway client keep the bun event loop alive and `runSandbox` only force-exited on a non-zero harness code. It now exits unconditionally with the harness's exit code; the detached session and gateway survive untouched. (`bun run` auto-exits, which masked this in dev — the same compiled-vs-interpreter footgun as v0.5.1.) This also avoids having to `^C` the hung CLI, which on a fresh box killed the auto-started gateway and wedged the container.
+
 ## v0.9.1
 
 ### Changed
