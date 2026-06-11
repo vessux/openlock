@@ -21,6 +21,8 @@ export interface PreflightDeps {
   login: () => Promise<void>;
   /** Injectable for tests; defaults to reading /etc/subuid on Linux. */
   readSubuid?: () => string;
+  /** Injectable for tests; defaults to `process.getuid() === 0`. */
+  isRoot?: boolean;
 }
 
 export interface PreflightOpts {
@@ -112,7 +114,9 @@ function defaultReadSubuid(): string {
 
 /** Rootless podman on Linux: abort early if the subuid range can't cover SANDBOX_UID. */
 function checkSubuid(deps: PreflightDeps): PreflightResult | null {
-  if (deps.runtime !== "podman" || deps.isMac) return null;
+  const isRoot = deps.isRoot ?? process.getuid?.() === 0;
+  // Rootful podman (run as root) doesn't use subuid maps — skip to avoid a false failure.
+  if (deps.runtime !== "podman" || deps.isMac || isRoot) return null;
   const reader = deps.readSubuid ?? defaultReadSubuid;
   const content = reader();
   const user = os.userInfo().username || process.env.USER || process.env.LOGNAME || "";

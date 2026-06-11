@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRuntimeChecks, installHint, renderDoctorResults, runDoctorChecks } from "./doctor";
+import {
+  buildRuntimeChecks,
+  buildSubuidCheck,
+  installHint,
+  renderDoctorResults,
+  runDoctorChecks,
+} from "./doctor";
 import { globalConfigPath } from "./global-config/paths";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
@@ -270,6 +276,17 @@ describe("rootless podman subuid check", () => {
     },
     TIMEOUT_MS,
   );
+
+  // Deterministic unit coverage of buildSubuidCheck (no dependency on the test runner's uid).
+  it("buildSubuidCheck skips when running as root (rootful podman uses no subuid map)", () => {
+    expect(buildSubuidCheck(true, false, () => BAD_SUBUID, true)).toEqual([]);
+  });
+
+  it("buildSubuidCheck emits the check when non-root (failing outcome covered above)", () => {
+    const checks = buildSubuidCheck(true, false, () => BAD_SUBUID, false);
+    expect(checks).toHaveLength(1);
+    expect(checks[0].name).toBe("rootless podman subuid range");
+  });
 });
 
 describe("renderDoctorResults", () => {

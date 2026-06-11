@@ -156,13 +156,15 @@ export function buildRuntimeChecks(probes: BinaryProbes, isMac: boolean): Check[
 }
 
 /** Rootless podman (Linux only): verify the host subuid range covers SANDBOX_UID.
- * Returns an empty array on macOS or when podman is not the runtime. */
+ * Returns an empty array on macOS, when podman is not the runtime, or when running
+ * as root (rootful podman doesn't use subuid maps, so the check would false-fire). */
 export function buildSubuidCheck(
   hasPodman: boolean,
   isMac: boolean,
   readSubuid: () => string,
+  isRoot: boolean,
 ): Check[] {
-  if (!hasPodman || isMac) return [];
+  if (!hasPodman || isMac || isRoot) return [];
   return [
     {
       name: "rootless podman subuid range",
@@ -201,7 +203,7 @@ export async function runDoctorChecks(
   const runtimeChecks = buildRuntimeChecks(probes, isMac);
   // Rootless podman (Linux only) requires the host's subuid range to cover
   // the in-image sandbox UID so `--userns=keep-id:uid=N` can map it.
-  const subuidChecks = buildSubuidCheck(probes.podman, isMac, readSubuid);
+  const subuidChecks = buildSubuidCheck(probes.podman, isMac, readSubuid, process.getuid?.() === 0);
 
   const checks: Check[] = [
     { name: "git", test: async () => commandExists("git"), fix: installHint("git") },

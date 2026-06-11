@@ -198,6 +198,7 @@ describe("preflight", () => {
   it("passes on Linux podman when subuid count covers SANDBOX_UID", async () => {
     const deps = makeDeps({
       isMac: false,
+      isRoot: false,
       podmanSocketActive: async () => true,
       readSubuid: () => GOOD_SUBUID,
     });
@@ -208,6 +209,7 @@ describe("preflight", () => {
   it("fails on Linux podman when subuid count is too small", async () => {
     const deps = makeDeps({
       isMac: false,
+      isRoot: false,
       podmanSocketActive: async () => true,
       readSubuid: () => BAD_SUBUID,
     });
@@ -215,6 +217,17 @@ describe("preflight", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("usermod");
     expect(result.reason).toContain("podman system migrate");
+  });
+
+  it("skips subuid check when running as root (rootful podman uses no subuid map)", async () => {
+    const deps = makeDeps({
+      isMac: false,
+      isRoot: true,
+      podmanSocketActive: async () => true,
+      readSubuid: () => BAD_SUBUID,
+    });
+    const result = await preflight({ tty: false, deps });
+    expect(result.ok).toBe(true);
   });
 
   it("skips subuid check on macOS podman", async () => {
