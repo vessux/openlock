@@ -1,7 +1,9 @@
+import type { Harness } from "../../sandbox/harness";
 import type { Mount } from "../types";
 
 export interface ScaffoldManifestOpts {
   workdir: "bind" | "git-bundle";
+  harness: Harness;
   extraMounts?: Mount[];
   env?: Record<string, string>;
   args?: string[];
@@ -72,8 +74,22 @@ function renderEnv(env: Record<string, string>): string {
   return ["env:", ...keys.map((k) => `  ${yamlKey(k)}: ${JSON.stringify(env[k])}`)].join("\n");
 }
 
-function renderArgs(args: string[]): string {
+function renderArgs(args: string[], harness: Harness): string {
   if (args.length === 0) {
+    if (harness === "opencode") {
+      return [
+        "args: []",
+        "  # opencode + OpenRouter: pin a tool-use-capable model your OpenRouter token allows.",
+        "  # Example (free tier):",
+        "  # - --model",
+        "  # - openrouter/nvidia/nemotron-3-super:free",
+        "  # NOTE: --model sets the MAIN model only. opencode's title sub-agent uses `small_model`,",
+        "  # which is config-only (not a CLI flag) and otherwise falls back to a PAID default",
+        "  # (anthropic/claude-haiku-4.5) that errors on a free-only token. To set it, add an",
+        '  # opencode.json to your repo root, e.g.: { "small_model": "openrouter/nvidia/nemotron-3-super:free" }',
+        "  # The model MUST support tool use (opencode's build agent enables tools).",
+      ].join("\n");
+    }
     return ["args: []", "  # - --model", "  # - claude-sonnet-4-6"].join("\n");
   }
   return ["args:", ...args.map((a) => `  - ${JSON.stringify(a)}`)].join("\n");
@@ -100,7 +116,7 @@ export function scaffoldManifest(opts: ScaffoldManifestOpts): string {
     "",
     renderEnv(opts.env ?? {}),
     "",
-    renderArgs(opts.args ?? []),
+    renderArgs(opts.args ?? [], opts.harness),
     "",
   ].join("\n");
 }
