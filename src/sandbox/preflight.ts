@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
+import os from "node:os";
 import type { DoctorResult } from "../doctor";
 import type { Runtime } from "../runtime";
+import { SANDBOX_UID } from "./seed-containerfile";
+import { rangeCoversUid } from "./subuid";
+
+const SUBUID_FIX =
+  "sudo usermod --add-subuids 100000-1100000 --add-subgids 100000-1100000 $USER && podman system migrate";
 
 export interface PreflightDeps {
   runDoctorChecks: () => Promise<DoctorResult[]>;
@@ -12,6 +19,8 @@ export interface PreflightDeps {
   podmanSocketActive: () => Promise<boolean>;
   dockerDaemonReachable: () => Promise<boolean>;
   login: () => Promise<void>;
+  /** Injectable for tests; defaults to reading /etc/subuid on Linux. */
+  readSubuid?: () => string;
 }
 
 export interface PreflightOpts {
@@ -93,12 +102,33 @@ async function checkCredentials(
   return null;
 }
 
+function defaultReadSubuid(): string {
+  try {
+    return readFileSync("/etc/subuid", "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Rootless podman on Linux: abort early if the subuid range can't cover SANDBOX_UID. */
+function checkSubuid(deps: PreflightDeps): PreflightResult | null {
+  if (deps.runtime !== "podman" || deps.isMac) return null;
+  const reader = deps.readSubuid ?? defaultReadSubuid;
+  const content = reader();
+  const user = os.userInfo().username || process.env.USER || process.env.LOGNAME || "";
+  if (rangeCoversUid(content, user, SANDBOX_UID)) return null;
+  return fail(
+    `subuid range for '${user}' too small for keep-id:uid=${SANDBOX_UID}. Fix: ${SUBUID_FIX}`,
+  );
+}
+
 export async function preflight(opts: PreflightOpts): Promise<PreflightResult> {
   const { tty, deps } = opts;
   const results = await deps.runDoctorChecks();
   return (
     checkDoctor(results, deps.runtime) ??
     (await checkRuntimeDaemon(deps, tty)) ??
+    checkSubuid(deps) ??
     (await checkCredentials(deps, tty)) ?? { ok: true }
   );
 }
