@@ -51,6 +51,9 @@ function harnessBlock(harness: Harness): Record<string, unknown> {
               inject: ep.cred_inject.inject.map((i) => ({
                 header: i.header,
                 from_credential: i.from_credential,
+                // Preserve the literal prefix (e.g. "Bearer ") when present; a
+                // cred whose stored value carries no prefix omits the key.
+                ...(i.value_prefix ? { value_prefix: i.value_prefix } : {}),
               })),
             },
           }

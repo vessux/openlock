@@ -47,7 +47,7 @@ network_policies:
           inject:
             - header: Authorization
               from_credential: ANTHROPIC_BEARER_TOKEN
-              value_prefix: "Bearer "
+              value_prefix: 'Bearer '
     allowed_secrets:
       - ANTHROPIC_BEARER_TOKEN
   opencode:

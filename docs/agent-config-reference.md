@@ -27,7 +27,7 @@ Top-level keys: `version` (required, integer) plus optional `filesystem_policy`,
 
   - endpoint keys: `host`, `port`, `ports`, `protocol`, `tls`, `enforcement`, `access`, `rules`, `allowed_ips`, `deny_rules`, `allow_encoded_slash`, `cred_inject`, `echo`, `trust_check`.
   - L7 rule: `allow` with matchers `method`, `path`, `command`, `query`; `deny_rules` use the same matchers. The query matcher key is `any`.
-  - `cred_inject`: `provider`, `strip_headers`, `inject` (each inject entry has `header`, `from_credential`).
+  - `cred_inject`: `provider`, `strip_headers`, `inject` (each inject entry has `header`, `from_credential`, and an optional `value_prefix` — a literal string such as `"Bearer "` prepended to the resolved credential when composing the header).
   - `trust_check`: `registry`.
   - binary entry: `path` (string). A deprecated `harness` boolean is also accepted on a binary entry — legacy, unrelated to the top-level harness enum below; real policies omit it.
 - `filesystem_policy`: `include_workdir`, `read_only`, `read_write`.
