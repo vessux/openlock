@@ -19,6 +19,17 @@ describe("registry", () => {
       expect(PROVIDERS[id].compatibleHarnesses.size).toBeGreaterThan(0);
     }
   });
+
+  it("every plugin exposes sandboxFiles returning an array", () => {
+    for (const id of PROVIDER_IDS) {
+      const files = PROVIDERS[id].sandboxFiles("claude_code");
+      expect(Array.isArray(files)).toBe(true);
+    }
+  });
+
+  it("openrouter.sandboxFiles returns []", () => {
+    expect(PROVIDERS.openrouter.sandboxFiles("opencode")).toEqual([]);
+  });
 });
 
 describe("validateProviderId", () => {

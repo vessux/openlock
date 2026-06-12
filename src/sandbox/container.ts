@@ -70,7 +70,12 @@ export interface BuildSandboxEnvArgs {
 
 export function buildSandboxEnv(args: BuildSandboxEnvArgs): Record<string, string> {
   const placeholders = PROVIDERS[args.providerId].sandboxEnvPlaceholders(args.harness);
-  return { ...placeholders, ...args.repoConfigEnv };
+  // Claude Code reads OAuth/config state (the staged .credentials.json) from
+  // CLAUDE_CONFIG_DIR. opencode doesn't use it. The dir is staged under
+  // /sandbox/.openlock/ and provisioned by createSession's bootstrap.
+  const harnessEnv: Record<string, string> =
+    args.harness === "claude_code" ? { CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config" } : {};
+  return { ...placeholders, ...harnessEnv, ...args.repoConfigEnv };
 }
 
 export async function execHarness(

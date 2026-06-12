@@ -70,6 +70,10 @@ export const ANTHROPIC: ProviderPlugin = {
     return { ANTHROPIC_API_KEY: "managed-by-openlock-do-not-leak" };
   },
 
+  // TEMPORARY: real impl (dummy OAuth-shaped .credentials.json that flips
+  // Claude Code into OAuth mode) lands in Phase 5. See bd openlock-ndb.
+  sandboxFiles: () => [],
+
   redactionPatterns(): readonly RegExp[] {
     return [
       /sk-ant-oat[0-9]{2}-[a-zA-Z0-9_-]{20,}/g,

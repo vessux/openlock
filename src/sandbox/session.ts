@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   dockerDaemonReachable,
   podmanMachineRunning,
@@ -9,8 +9,9 @@ import {
 } from "../doctor";
 import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
+import { PROVIDERS } from "../providers/registry";
 import { resolveProvider } from "../providers/resolve";
-import type { ProviderId } from "../providers/types";
+import type { ProviderId, SandboxFile } from "../providers/types";
 import { type Runtime, resolveRuntime } from "../runtime";
 import { hasAnyProvider } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
@@ -47,6 +48,7 @@ import {
   type Mount,
   restageMount,
   stageMounts,
+  stagingPathFor,
   workdirMount,
 } from "./mounts";
 import { resolveOpenlockFolder } from "./openlock-folder";
@@ -117,6 +119,22 @@ interface NewSession {
   image: string;
 }
 
+// Provider-supplied files (e.g. anthropic's dummy OAuth .credentials.json)
+// land under /sandbox/.openlock/. The staging dir IS the uploaded .openlock,
+// so we derive the staging-relative path via stagingPathFor — the SAME
+// hardened guard stageMounts uses (absolute + no '..' segments + prefix),
+// which prevents a provider writing outside .openlock (a bare prefix check
+// would let `/sandbox/.openlock/../../etc/foo` escape on write). Exported for
+// unit-testing the traversal rejection.
+export function stageProviderSandboxFiles(staging: string, files: readonly SandboxFile[]): void {
+  for (const f of files) {
+    const rel = stagingPathFor(f.sandboxPath);
+    const dest = join(staging, rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, f.content, { mode: 0o600 });
+  }
+}
+
 async function createSession(
   projectPath: string,
   resolved: ResolvedRepo,
@@ -157,6 +175,7 @@ async function createSession(
     }
 
     stageMounts(staging, mounts);
+    stageProviderSandboxFiles(staging, PROVIDERS[providerId].sandboxFiles(harness));
 
     const gitconfigPath = await prepareGitIdentity(staging);
     console.log(
@@ -174,6 +193,14 @@ async function createSession(
     const setupLines = [
       "cd /sandbox",
       "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
+      // Claude Code's CLAUDE_CONFIG_DIR must be writable by the sandbox user.
+      // We could not runtime-verify the writability requirement without a real
+      // account, so provision + chown defensively; `|| true` keeps it
+      // non-fatal for harnesses that don't use it. NOTE: this `mkdir` is
+      // currently load-bearing — while anthropic's sandboxFiles() returns []
+      // (the Phase 4 interim stub), this is the ONLY thing creating the dir.
+      // Phase 5 will also stage the dir host-side; keep this unconditional.
+      "mkdir -p .openlock/claude-config && chown -R sandbox:sandbox .openlock/claude-config 2>/dev/null || true",
     ];
     for (const bm of bundleMounts) {
       const bundleName = `${basename(bm.source)}.bundle`;

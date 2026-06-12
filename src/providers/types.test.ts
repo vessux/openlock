@@ -49,6 +49,9 @@ describe("provider types", () => {
       sandboxEnvPlaceholders() {
         return {};
       },
+      sandboxFiles() {
+        return [];
+      },
       redactionPatterns() {
         return [];
       },

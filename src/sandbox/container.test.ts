@@ -340,6 +340,24 @@ describe("buildSandboxEnv (provider placeholders)", () => {
     });
     expect(env.OPENROUTER_API_KEY).toBe("user-explicitly-set");
   });
+
+  it("sets CLAUDE_CONFIG_DIR for claude_code harness", () => {
+    const env = buildSandboxEnv({
+      providerId: "anthropic",
+      harness: "claude_code",
+      repoConfigEnv: {},
+    });
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/sandbox/.openlock/claude-config");
+  });
+
+  it("does NOT set CLAUDE_CONFIG_DIR for opencode harness", () => {
+    const env = buildSandboxEnv({
+      providerId: "anthropic",
+      harness: "opencode",
+      repoConfigEnv: {},
+    });
+    expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+  });
 });
 
 describe("buildOpenshellCreateArgv", () => {

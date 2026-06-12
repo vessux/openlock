@@ -20,6 +20,12 @@ interface CredInjectSpec {
   inject: ReadonlyArray<{ header: string; from_credential: string; value_prefix?: string }>;
 }
 
+export interface SandboxFile {
+  /** Absolute sandbox path under /sandbox/.openlock/. */
+  sandboxPath: string;
+  content: string;
+}
+
 export interface PolicyEndpointSpec {
   host: string;
   port: number;
@@ -42,5 +48,9 @@ export interface ProviderPlugin {
   policyEndpoints(harness: Harness): readonly PolicyEndpointSpec[];
   /** Returns placeholder strings, not real credential values — the real credential never enters the sandbox. The gateway strip-replaces placeholders with real values at HTTP egress. */
   sandboxEnvPlaceholders(harness: Harness): Record<string, string>;
+  /** Files staged into the sandbox under /sandbox/.openlock/. These carry no
+   * real secrets — placeholders the gateway swaps at egress (e.g. a dummy
+   * OAuth-shaped .credentials.json that flips Claude Code into OAuth mode). */
+  sandboxFiles(harness: Harness): readonly SandboxFile[];
   redactionPatterns(): readonly RegExp[];
 }

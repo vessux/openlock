@@ -65,6 +65,8 @@ export const OPENROUTER: ProviderPlugin = {
     return { OPENROUTER_API_KEY: "managed-by-openlock-do-not-leak" };
   },
 
+  sandboxFiles: () => [],
+
   redactionPatterns(): readonly RegExp[] {
     return [/sk-or-v1-[a-zA-Z0-9_-]{20,}/g, /sk-or-[a-zA-Z0-9_-]{20,}/g];
   },
