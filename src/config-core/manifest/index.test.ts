@@ -76,6 +76,18 @@ describe("parseManifest", () => {
     expect(parseManifest({}, root)).toEqual({ mounts: [], args: [], env: {} });
   });
 
+  it("extracts a valid harness key", () => {
+    expect(parseManifest({ harness: "opencode" }, root).harness).toBe("opencode");
+  });
+
+  it("leaves harness undefined when the key is absent", () => {
+    expect(parseManifest({ mounts: [] }, root).harness).toBeUndefined();
+  });
+
+  it("throws on an unknown harness value", () => {
+    expect(() => parseManifest({ harness: "bogus" }, root)).toThrow(/unknown harness/);
+  });
+
   it("throws on an unknown key (caps)", () => {
     expect(() => parseManifest({ caps: ["js"] }, root)).toThrow(/unknown key "caps"/);
   });

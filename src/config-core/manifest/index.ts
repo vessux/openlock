@@ -69,5 +69,8 @@ export function parseManifest(raw: unknown, projectRoot: string): ManifestConfig
   });
   const args = Array.isArray(obj.args) ? (obj.args as string[]) : [];
   const env = (obj.env ?? {}) as Record<string, string>;
-  return { mounts, args, env };
+  const config: ManifestConfig = { mounts, args, env };
+  // Validated by lintManifest above, so this is a known harness or absent.
+  if (typeof obj.harness === "string") config.harness = obj.harness as ManifestConfig["harness"];
+  return config;
 }

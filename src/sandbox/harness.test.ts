@@ -87,6 +87,50 @@ describe("resolveHarness", () => {
     ).toBe("opencode");
   });
 
+  it("project harness wins over global and default", () => {
+    expect(
+      resolveHarness({
+        cliFlag: undefined,
+        env: {},
+        projectHarness: "opencode",
+        readGlobal: () => ({ defaultHarness: "claude_code" }),
+      }),
+    ).toBe("opencode");
+  });
+
+  it("env wins over project harness", () => {
+    expect(
+      resolveHarness({
+        cliFlag: undefined,
+        env: { OPENLOCK_HARNESS: "claude_code" },
+        projectHarness: "opencode",
+        readGlobal: () => null,
+      }),
+    ).toBe("claude_code");
+  });
+
+  it("CLI flag wins over project harness", () => {
+    expect(
+      resolveHarness({
+        cliFlag: "claude_code",
+        env: {},
+        projectHarness: "opencode",
+        readGlobal: () => null,
+      }),
+    ).toBe("claude_code");
+  });
+
+  it("falls through to global when no project harness is set", () => {
+    expect(
+      resolveHarness({
+        cliFlag: undefined,
+        env: {},
+        projectHarness: undefined,
+        readGlobal: () => ({ defaultHarness: "opencode" }),
+      }),
+    ).toBe("opencode");
+  });
+
   it("rejects invalid CLI flag", () => {
     expect(() => resolveHarness({ cliFlag: "foo", env: {}, readGlobal: () => null })).toThrow(
       /--harness/,
