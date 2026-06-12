@@ -86,6 +86,24 @@ describe("writeProvider/readProvider roundtrip", () => {
     expect(readProvider("openrouter", path)).toBeNull();
   });
 
+  it("round-trips a record carrying an oauth2 refresh block", () => {
+    const record = {
+      type: "claude-oauth",
+      credentials: { ANTHROPIC_BEARER_TOKEN: "sk-ant-oat01-roundtrip" },
+      created_at: "2026-06-12T00:00:00.000Z",
+      refresh: {
+        strategy: "oauth2_refresh_token" as const,
+        token_url: "https://platform.claude.com/v1/oauth/token",
+        scopes: ["user:inference", "user:profile"],
+        client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        refresh_token: "sk-ant-ort01-roundtrip",
+        access_expires_at: "2026-06-12T01:00:00.000Z",
+      },
+    };
+    writeProvider("anthropic", record, path);
+    expect(readProvider("anthropic", path)).toEqual(record);
+  });
+
   it("does not clobber sibling providers", () => {
     writeProvider(
       "anthropic",
@@ -135,7 +153,7 @@ describe("deleteProvider", () => {
 });
 
 describe("v1 -> v2 migration", () => {
-  it("converts legacy {token,created_at} into providers.anthropic", () => {
+  it("drops the legacy {token,created_at} (incompatible with OAuth) and bumps the file to v2", () => {
     writeFileSync(
       path,
       JSON.stringify({ token: "legacy-token", created_at: "2026-04-01T00:00:00.000Z" }),
@@ -143,17 +161,14 @@ describe("v1 -> v2 migration", () => {
     );
     const file = readCredentials(path);
     expect(file.version).toBe(2);
-    expect(file.providers.anthropic).toEqual({
-      type: "claude",
-      credentials: {
-        ANTHROPIC_BEARER_TOKEN: "Bearer legacy-token",
-        ANTHROPIC_AUTH_TOKEN: "legacy-token",
-      },
-      created_at: "2026-04-01T00:00:00.000Z",
-    });
+    // The V1 setup-token bearer cannot be carried into the OAuth-subscription
+    // model (no refresh material, wrong prefix mode), so it is discarded.
+    expect(file.providers.anthropic).toBeUndefined();
+    expect(file.providers).toEqual({});
     // and the new shape is now on disk:
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
     expect(onDisk.version).toBe(2);
+    expect(onDisk.providers).toEqual({});
   });
 
   it("is idempotent", () => {

@@ -41,7 +41,7 @@ describe("provider types", () => {
       credentialEnvVars: ["X"],
       compatibleHarnesses: new Set(["claude_code"]),
       async loginInteractive() {
-        return {};
+        return { credentials: {} };
       },
       policyEndpoints() {
         return [];

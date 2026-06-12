@@ -7,7 +7,7 @@ import type { LoginIO } from "./types";
 // authorization-code exchange and later (gateway-side) for refresh.
 const CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CLAUDE_OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"; // max/subscription mode
-const CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+export const CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 // HOSTED redirect: after consent the page displays a `code#state` string the
 // user pastes back. There is no localhost server — this is a fixed constant.
 const CLAUDE_OAUTH_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback";

@@ -1,5 +1,5 @@
 import type { Harness } from "../sandbox/harness";
-import type { LoginIO, PolicyEndpointSpec, ProviderCredentials, ProviderPlugin } from "./types";
+import type { LoginIO, LoginResult, PolicyEndpointSpec, ProviderPlugin } from "./types";
 
 function validateOpenRouterKey(raw: string): string {
   const k = raw.trim();
@@ -20,10 +20,10 @@ export const OPENROUTER: ProviderPlugin = {
   credentialEnvVars: ["OPENROUTER_BEARER_TOKEN"],
   compatibleHarnesses: new Set<Harness>(["opencode"]),
 
-  async loginInteractive(io: LoginIO): Promise<ProviderCredentials> {
+  async loginInteractive(io: LoginIO): Promise<LoginResult> {
     const raw = await io.readLine("Paste your OpenRouter API key (starts with sk-or-):\n> ");
     const key = validateOpenRouterKey(raw);
-    return { OPENROUTER_BEARER_TOKEN: `Bearer ${key}` };
+    return { credentials: { OPENROUTER_BEARER_TOKEN: `Bearer ${key}` } };
   },
 
   policyEndpoints(_harness: Harness): readonly PolicyEndpointSpec[] {

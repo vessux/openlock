@@ -52,11 +52,12 @@ export async function _loginForTests(args: {
   const id = args.providerFlag ? validateProviderId(args.providerFlag) : await args.pick(args.io);
   const plugin = PROVIDERS[id];
   args.io.writeStdout(`\nAuthenticating with ${plugin.displayName}...\n`);
-  const creds = await plugin.loginInteractive(args.io);
+  const result = await plugin.loginInteractive(args.io);
   writeProvider(id, {
     type: plugin.openshellType,
-    credentials: creds,
+    credentials: result.credentials,
     created_at: new Date().toISOString(),
+    refresh: result.refresh,
   });
   args.io.writeStdout(`\nCredentials saved for provider '${id}'.\n`);
 }

@@ -26,12 +26,14 @@ describe("OPENROUTER plugin", () => {
   });
 
   describe("loginInteractive", () => {
-    it("returns { OPENROUTER_BEARER_TOKEN } with Bearer prefix when prefix and length valid", async () => {
-      const creds = await OPENROUTER.loginInteractive(
+    it("returns { credentials: { OPENROUTER_BEARER_TOKEN } } with Bearer prefix when prefix and length valid", async () => {
+      const result = await OPENROUTER.loginInteractive(
         makeIO("sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
       );
-      expect(creds).toEqual({
-        OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      expect(result).toEqual({
+        credentials: {
+          OPENROUTER_BEARER_TOKEN: "Bearer sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        },
       });
     });
     it("rejects empty input", async () => {
@@ -48,10 +50,12 @@ describe("OPENROUTER plugin", () => {
       );
     });
     it("trims whitespace before validation", async () => {
-      const creds = await OPENROUTER.loginInteractive(
+      const result = await OPENROUTER.loginInteractive(
         makeIO("  sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"),
       );
-      expect(creds.OPENROUTER_BEARER_TOKEN).toBe("Bearer sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+      expect(result.credentials.OPENROUTER_BEARER_TOKEN).toBe(
+        "Bearer sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      );
     });
   });
 

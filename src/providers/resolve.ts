@@ -13,8 +13,16 @@ function ensureCompatible(id: ProviderId, harness: Harness): void {
   const plugin = PROVIDERS[id];
   if (!plugin.compatibleHarnesses.has(harness)) {
     const compatible = [...plugin.compatibleHarnesses].join(", ");
+    let hint = "";
+    // The Anthropic subscription provider only works with claude_code (it flips
+    // Claude Code into OAuth mode via a staged .credentials.json). Point
+    // opencode users at the supported alternatives instead of a dead end.
+    if (id === "anthropic" && harness === "opencode") {
+      hint =
+        " To use Claude with opencode, choose --provider openrouter, or wire up the OpenCode Claude-auth plugin.";
+    }
     throw new Error(
-      `Provider '${id}' is not compatible with harness '${harness}'. Compatible harnesses: ${compatible}.`,
+      `Provider '${id}' is not compatible with harness '${harness}'. Compatible harnesses: ${compatible}.${hint}`,
     );
   }
 }

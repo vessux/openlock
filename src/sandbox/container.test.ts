@@ -323,13 +323,17 @@ describe("buildSandboxEnv (provider placeholders)", () => {
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("injects ANTHROPIC_API_KEY placeholder for opencode+anthropic", () => {
+  it("injects no provider env placeholder for anthropic+claude_code (OAuth-file flow)", () => {
+    // anthropic is now claude_code-only and uses a staged .credentials.json,
+    // not an env placeholder. The previous opencode+anthropic x-api-key path no
+    // longer exists.
     const env = buildSandboxEnv({
       providerId: "anthropic",
-      harness: "opencode",
+      harness: "claude_code",
       repoConfigEnv: {},
     });
-    expect(env.ANTHROPIC_API_KEY).toBe("managed-by-openlock-do-not-leak");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
   });
 
   it("repo-config env wins over placeholder when user explicitly sets the same key", () => {

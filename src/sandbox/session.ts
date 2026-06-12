@@ -194,12 +194,12 @@ async function createSession(
       "cd /sandbox",
       "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
       // Claude Code's CLAUDE_CONFIG_DIR must be writable by the sandbox user.
-      // We could not runtime-verify the writability requirement without a real
-      // account, so provision + chown defensively; `|| true` keeps it
-      // non-fatal for harnesses that don't use it. NOTE: this `mkdir` is
-      // currently load-bearing — while anthropic's sandboxFiles() returns []
-      // (the Phase 4 interim stub), this is the ONLY thing creating the dir.
-      // Phase 5 will also stage the dir host-side; keep this unconditional.
+      // The anthropic provider normally stages .credentials.json into
+      // .openlock/claude-config/ host-side (stageProviderSandboxFiles calls
+      // mkdirSync on the parent), so the dir exists before the container starts.
+      // This mkdir + chown runs unconditionally to: (a) normalize ownership to
+      // the sandbox user after host-side upload, and (b) cover harnesses or
+      // providers that stage no file there. `|| true` keeps it non-fatal.
       "mkdir -p .openlock/claude-config && chown -R sandbox:sandbox .openlock/claude-config 2>/dev/null || true",
     ];
     for (const bm of bundleMounts) {
