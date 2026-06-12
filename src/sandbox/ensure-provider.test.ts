@@ -97,4 +97,105 @@ describe("_ensureProviderForTests", () => {
     const m = makeShell({ existing: [] });
     await expect(_ensureProviderForTests("openrouter", m.shell)).rejects.toThrow(/No credentials/);
   });
+
+  describe("anthropic OAuth refresh branch", () => {
+    function writeAnthropic() {
+      writeProvider("anthropic", {
+        type: "claude-oauth",
+        credentials: { ANTHROPIC_BEARER_TOKEN: "raw-access-token" },
+        created_at: "t",
+        refresh: {
+          strategy: "oauth2_refresh_token",
+          token_url: "https://console.anthropic.com/v1/oauth/token",
+          scopes: ["user:inference"],
+          client_id: "client-abc",
+          refresh_token: "rt-secret",
+          access_expires_at: "2026-06-12T12:00:00Z",
+        },
+      });
+    }
+
+    function verb(calls: string[][], a: string, b: string): string[] | undefined {
+      return calls.find((c) => c[0] === "provider" && c[1] === a && c[2] === b);
+    }
+
+    it("seeds once when absent: import, create, update, refresh-configure in order", async () => {
+      writeAnthropic();
+      const m = makeShell({ existing: [] });
+      await _ensureProviderForTests("anthropic", m.shell);
+
+      const imp = verb(m.calls, "profile", "import");
+      const create = m.calls.find((c) => c[1] === "create");
+      const update = m.calls.find((c) => c[1] === "update");
+      const configure = verb(m.calls, "refresh", "configure");
+
+      expect(imp).toBeDefined();
+      expect(create).toBeDefined();
+      expect(update).toBeDefined();
+      expect(configure).toBeDefined();
+
+      // ordering: import < create < update < configure
+      const idx = (target: string[]) => m.calls.indexOf(target);
+      expect(idx(imp as string[])).toBeLessThan(idx(create as string[]));
+      expect(idx(create as string[])).toBeLessThan(idx(update as string[]));
+      expect(idx(update as string[])).toBeLessThan(idx(configure as string[]));
+
+      // create uses --type claude-oauth and the raw access token
+      expect(create).toContain("--type");
+      expect(create?.[create.indexOf("--type") + 1]).toBe("claude-oauth");
+      expect(create).toContain("ANTHROPIC_BEARER_TOKEN=raw-access-token");
+
+      // update seeds credential expiry
+      expect(update).toContain("--credential-expires-at");
+      expect(update).toContain("ANTHROPIC_BEARER_TOKEN=2026-06-12T12:00:00Z");
+
+      // refresh configure: NAME is positional (not --name), kebab strategy,
+      // material values, secret-material-key, and its OWN expires-at.
+      expect(configure?.[3]).toBe("anthropic");
+      expect(configure).not.toContain("--name");
+      expect(configure).toContain("--strategy");
+      expect(configure?.[configure.indexOf("--strategy") + 1]).toBe("oauth2-refresh-token");
+      expect(configure).toContain("--material");
+      expect(configure).toContain("client_id=client-abc");
+      expect(configure).toContain("refresh_token=rt-secret");
+      expect(configure).toContain("--secret-material-key");
+      expect(configure?.[configure.indexOf("--secret-material-key") + 1]).toBe("refresh_token");
+      expect(configure).toContain("--credential-expires-at");
+      expect(configure).toContain("2026-06-12T12:00:00Z");
+    });
+
+    it("never clobbers when present: no create/update/refresh-configure", async () => {
+      writeAnthropic();
+      const m = makeShell({ existing: ["anthropic"] });
+      await _ensureProviderForTests("anthropic", m.shell);
+
+      expect(m.calls.find((c) => c[1] === "create")).toBeUndefined();
+      expect(m.calls.find((c) => c[1] === "update")).toBeUndefined();
+      expect(verb(m.calls, "refresh", "configure")).toBeUndefined();
+      // idempotent profile import still runs.
+      expect(verb(m.calls, "profile", "import")).toBeDefined();
+    });
+
+    it("throws on the seed path when refresh material lacks ANTHROPIC_BEARER_TOKEN", async () => {
+      writeProvider("anthropic", {
+        type: "claude-oauth",
+        credentials: {},
+        created_at: "t",
+        refresh: {
+          strategy: "oauth2_refresh_token",
+          token_url: "https://console.anthropic.com/v1/oauth/token",
+          scopes: ["user:inference"],
+          client_id: "client-abc",
+          refresh_token: "rt-secret",
+          access_expires_at: "2026-06-12T12:00:00Z",
+        },
+      });
+      const m = makeShell({ existing: [] });
+      await expect(_ensureProviderForTests("anthropic", m.shell)).rejects.toThrow(
+        /no ANTHROPIC_BEARER_TOKEN credential/,
+      );
+      // create must NOT have run with an undefined credential.
+      expect(m.calls.find((c) => c[1] === "create")).toBeUndefined();
+    });
+  });
 });
