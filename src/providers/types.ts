@@ -17,7 +17,7 @@ export interface LoginIO {
 interface CredInjectSpec {
   provider: ProviderId;
   strip_headers: readonly string[];
-  inject: ReadonlyArray<{ header: string; from_credential: string }>;
+  inject: ReadonlyArray<{ header: string; from_credential: string; value_prefix?: string }>;
 }
 
 export interface PolicyEndpointSpec {

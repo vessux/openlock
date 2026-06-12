@@ -40,5 +40,5 @@ network_policies:
           provider: anthropic
           strip_headers: [Authorization, x-api-key, Cookie]
           inject:
-            - { header: Authorization, from_credential: ANTHROPIC_BEARER_TOKEN }
-    allowed_secrets: [ANTHROPIC_BEARER_TOKEN, ANTHROPIC_AUTH_TOKEN]
+            - { header: Authorization, from_credential: ANTHROPIC_BEARER_TOKEN, value_prefix: "Bearer " }
+    allowed_secrets: [ANTHROPIC_BEARER_TOKEN]

@@ -47,6 +47,7 @@ network_policies:
           inject:
             - header: Authorization
               from_credential: ANTHROPIC_BEARER_TOKEN
+              value_prefix: "Bearer "
     allowed_secrets:
       - ANTHROPIC_BEARER_TOKEN
   opencode:
@@ -54,23 +55,6 @@ network_policies:
       - path: /usr/local/bin/opencode
       - path: /usr/local/bin/node
     endpoints:
-      - host: api.anthropic.com
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        rules:
-          - allow:
-              method: POST
-              path: /v1/**
-        cred_inject:
-          provider: anthropic
-          strip_headers:
-            - Authorization
-            - x-api-key
-            - Cookie
-          inject:
-            - header: x-api-key
-              from_credential: ANTHROPIC_API_KEY
       - host: openrouter.ai
         port: 443
         protocol: rest
@@ -97,7 +81,6 @@ network_policies:
               method: GET
               path: /**
     allowed_secrets:
-      - ANTHROPIC_API_KEY
       - OPENROUTER_BEARER_TOKEN
   npm_packages:
     binaries:

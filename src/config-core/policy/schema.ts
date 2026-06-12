@@ -4,7 +4,7 @@ const L7_ALLOW_KEYS = new Set(["method", "path", "command", "query"]);
 const L7_RULE_KEYS = new Set(["allow"]);
 const L7_DENY_KEYS = new Set(["method", "path", "command", "query"]);
 
-const CRED_INJECT_HEADER_KEYS = new Set(["header", "from_credential"]);
+const CRED_INJECT_HEADER_KEYS = new Set(["header", "from_credential", "value_prefix"]);
 const CRED_INJECT_KEYS = new Set(["provider", "strip_headers", "inject"]);
 const TRUST_CHECK_KEYS = new Set(["registry"]);
 
@@ -281,6 +281,7 @@ function validateCredInjectHeader(val: unknown, path: string): ValidationError[]
   for (const f of ["header", "from_credential"] as const) {
     requireScalar(errors, obj, f, "string", path);
   }
+  optionalScalar(errors, obj, "value_prefix", "string", path);
   return errors;
 }
 
