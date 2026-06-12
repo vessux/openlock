@@ -61,4 +61,22 @@ describe("validateManifestSchema", () => {
     );
     expect(validateManifestSchema({ env: { A: 1 } })[0]?.message).toMatch(/must be a string/);
   });
+
+  it("accepts a valid harness key", () => {
+    expect(validateManifestSchema({ harness: "opencode" })).toEqual([]);
+    expect(validateManifestSchema({ harness: "claude_code" })).toEqual([]);
+  });
+
+  it("rejects an unknown harness value with the allowed list", () => {
+    const issues = validateManifestSchema({ harness: "bogus" });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toBe("harness");
+    expect(issues[0]?.message).toMatch(/bogus/);
+    expect(issues[0]?.message).toMatch(/claude_code/);
+    expect(issues[0]?.message).toMatch(/opencode/);
+  });
+
+  it("rejects a non-string harness", () => {
+    expect(validateManifestSchema({ harness: 1 })[0]?.path).toBe("harness");
+  });
 });

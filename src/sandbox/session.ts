@@ -83,9 +83,13 @@ interface ResolvedRepo {
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
+  /** Harness persisted in the project's .openlock/config.yaml, if any. Feeds
+   * resolveHarness so `openlock init --harness X` carries into later `sandbox`
+   * runs. Absent on the --policy override path (no .openlock/ is read). */
+  harness?: Harness;
 }
 
-function resolveRepoPolicy(projectPath: string, policyOverride?: string): ResolvedRepo {
+export function resolveRepoPolicy(projectPath: string, policyOverride?: string): ResolvedRepo {
   if (policyOverride) {
     return {
       policy: resolve(policyOverride),
@@ -95,7 +99,14 @@ function resolveRepoPolicy(projectPath: string, policyOverride?: string): Resolv
     };
   }
   const folder = resolveOpenlockFolder(projectPath);
-  return { policy: folder.policyPath, mounts: folder.mounts, args: folder.args, env: folder.env };
+  const repo: ResolvedRepo = {
+    policy: folder.policyPath,
+    mounts: folder.mounts,
+    args: folder.args,
+    env: folder.env,
+  };
+  if (folder.harness !== undefined) repo.harness = folder.harness;
+  return repo;
 }
 
 interface NewSession {
@@ -622,6 +633,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const resolvedHarness = resolveHarness({
     cliFlag: opts.harness,
     env: process.env,
+    projectHarness: resolved.harness,
     readGlobal: readGlobalConfig,
   });
   const pick = pickSessionHarness({

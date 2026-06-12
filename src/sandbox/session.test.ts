@@ -1,5 +1,34 @@
 import { describe, expect, it } from "bun:test";
-import { pickSessionHarness, userExplicitlyPickedHarness } from "./session";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pickSessionHarness, resolveRepoPolicy, userExplicitlyPickedHarness } from "./session";
+
+describe("resolveRepoPolicy", () => {
+  function projectWith(configBody: string): string {
+    const proj = mkdtempSync(join(tmpdir(), "rrp-"));
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), configBody);
+    writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+    writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
+    return proj;
+  }
+
+  it("carries the persisted harness from config.yaml", () => {
+    const proj = projectWith("harness: opencode\nmounts: []\n");
+    expect(resolveRepoPolicy(proj).harness).toBe("opencode");
+  });
+
+  it("leaves harness undefined when config.yaml omits it", () => {
+    const proj = projectWith("mounts: []\n");
+    expect(resolveRepoPolicy(proj).harness).toBeUndefined();
+  });
+
+  it("leaves harness undefined on the --policy override path (no .openlock read)", () => {
+    expect(resolveRepoPolicy("/nonexistent", "/tmp/some-policy.yaml").harness).toBeUndefined();
+  });
+});
 
 describe("userExplicitlyPickedHarness", () => {
   it("returns false when neither cliFlag nor env is set", () => {

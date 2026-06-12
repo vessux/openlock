@@ -1,9 +1,29 @@
 import { describe, expect, it } from "bun:test";
 import yaml from "js-yaml";
-import { lintManifest } from "./index";
+import { lintManifest, parseManifest } from "./index";
 import { scaffoldManifest } from "./scaffold";
 
 describe("scaffoldManifest", () => {
+  it("persists the chosen harness as a top-level key", () => {
+    expect(scaffoldManifest({ workdir: "bind", harness: "opencode" })).toMatch(
+      /^harness: opencode$/m,
+    );
+    expect(scaffoldManifest({ workdir: "bind", harness: "claude_code" })).toMatch(
+      /^harness: claude_code$/m,
+    );
+  });
+
+  it("the persisted harness round-trips through parseManifest", () => {
+    const out = scaffoldManifest({ workdir: "bind", harness: "opencode" });
+    expect(parseManifest(out, "/tmp").harness).toBe("opencode");
+  });
+
+  it("documents harness in the supported-keys header comment", () => {
+    expect(scaffoldManifest({ workdir: "bind", harness: "opencode" })).toMatch(
+      /Supported keys: harness, mounts, args, env/,
+    );
+  });
+
   it("emits a bind workdir mount at /sandbox/repo by default", () => {
     const out = scaffoldManifest({ workdir: "bind", harness: "claude_code" });
     expect(out).toContain("target: /sandbox/repo");
