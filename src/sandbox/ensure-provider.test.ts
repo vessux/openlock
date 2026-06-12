@@ -106,7 +106,7 @@ describe("_ensureProviderForTests", () => {
         created_at: "t",
         refresh: {
           strategy: "oauth2_refresh_token",
-          token_url: "https://console.anthropic.com/v1/oauth/token",
+          token_url: "https://platform.claude.com/v1/oauth/token",
           scopes: ["user:inference"],
           client_id: "client-abc",
           refresh_token: "rt-secret",
@@ -183,7 +183,7 @@ describe("_ensureProviderForTests", () => {
         created_at: "t",
         refresh: {
           strategy: "oauth2_refresh_token",
-          token_url: "https://console.anthropic.com/v1/oauth/token",
+          token_url: "https://platform.claude.com/v1/oauth/token",
           scopes: ["user:inference"],
           client_id: "client-abc",
           refresh_token: "rt-secret",
