@@ -19,7 +19,10 @@ export function parseClaudeOauthBlob(raw: string): LoginResult {
   } catch {
     throw new Error("Claude Code credential is not valid JSON.");
   }
-  const o = ((parsed.claudeAiOauth as Record<string, unknown>) ?? parsed) as Record<string, unknown>;
+  const o = ((parsed.claudeAiOauth as Record<string, unknown>) ?? parsed) as Record<
+    string,
+    unknown
+  >;
   const accessToken = o.accessToken as string | undefined;
   const refreshToken = o.refreshToken as string | undefined;
   if (!accessToken || !refreshToken) {

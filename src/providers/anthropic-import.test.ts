@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   claudeKeychainService,
   type ImportDeps,
@@ -150,9 +150,9 @@ describe("importFromClaudeCode", () => {
   });
 
   it("throws an actionable error when claude is not on PATH", async () => {
-    await expect(importFromClaudeCode(silentIO(), baseDeps({ hasClaude: () => false }))).rejects.toThrow(
-      /not found on PATH/,
-    );
+    await expect(
+      importFromClaudeCode(silentIO(), baseDeps({ hasClaude: () => false })),
+    ).rejects.toThrow(/not found on PATH/);
   });
 
   it("throws when the login subprocess exits non-zero", async () => {
