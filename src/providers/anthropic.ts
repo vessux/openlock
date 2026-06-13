@@ -1,5 +1,5 @@
 import type { Harness } from "../sandbox/harness";
-import { CLAUDE_OAUTH_SCOPES, CLAUDE_OAUTH_TOKEN_URL, runLogin } from "./anthropic-oauth";
+import { importFromClaudeCode, realImportDeps } from "./anthropic-import";
 import type {
   LoginIO,
   LoginResult,
@@ -35,20 +35,12 @@ export const ANTHROPIC: ProviderPlugin = {
   compatibleHarnesses: new Set<Harness>(["claude_code"]),
 
   async loginInteractive(io: LoginIO): Promise<LoginResult> {
-    const t = await runLogin(io);
-    return {
-      // RAW access token — NO "Bearer " prefix. The gateway prepends "Bearer "
-      // via the policy cred_inject value_prefix at egress.
-      credentials: { ANTHROPIC_BEARER_TOKEN: t.access_token },
-      refresh: {
-        strategy: "oauth2_refresh_token",
-        token_url: CLAUDE_OAUTH_TOKEN_URL,
-        scopes: [...CLAUDE_OAUTH_SCOPES],
-        client_id: t.client_id,
-        refresh_token: t.refresh_token,
-        access_expires_at: t.expires_at,
-      },
-    };
+    // Import the subscription token from an isolated Claude Code login rather
+    // than reimplementing Claude's OAuth handshake (which proved fragile across
+    // endpoint/scope changes). Claude Code's login is always-correct by
+    // construction; the harvested raw token carries NO "Bearer " prefix — the
+    // gateway prepends it via the policy cred_inject value_prefix at egress.
+    return importFromClaudeCode(io, realImportDeps());
   },
 
   policyEndpoints(_harness: Harness): readonly PolicyEndpointSpec[] {

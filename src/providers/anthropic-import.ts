@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LoginIO, LoginResult } from "./types";
 
@@ -115,4 +117,48 @@ export async function importFromClaudeCode(io: LoginIO, deps: ImportDeps): Promi
     }
     deps.removeDir(configDir);
   }
+}
+
+/** Production wiring for ImportDeps. */
+export function realImportDeps(): ImportDeps {
+  return {
+    platform: process.platform,
+    hasClaude: () => Bun.which("claude") !== null,
+    makeConfigDir: () => mkdtempSync(join(tmpdir(), "openlock-cc-login-")),
+    async spawnLogin(configDir: string): Promise<number> {
+      const proc = Bun.spawn(["claude", "auth", "login", "--claudeai"], {
+        // Set BOTH: CLAUDE_CONFIG_DIR isolates all CC state; and
+        // CLAUDE_SECURESTORAGE_CONFIG_DIR makes the macOS Keychain item name
+        // deterministic (see claudeKeychainService).
+        env: {
+          ...process.env,
+          CLAUDE_CONFIG_DIR: configDir,
+          CLAUDE_SECURESTORAGE_CONFIG_DIR: configDir,
+        },
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      return await proc.exited;
+    },
+    readFile(path: string): string | null {
+      try {
+        return readFileSync(path, "utf-8");
+      } catch {
+        return null;
+      }
+    },
+    readKeychain(service: string): string | null {
+      const r = Bun.spawnSync(["security", "find-generic-password", "-s", service, "-w"]);
+      if (r.exitCode !== 0) return null;
+      const out = r.stdout.toString().trim();
+      return out.length > 0 ? out : null;
+    },
+    deleteKeychain(service: string): void {
+      Bun.spawnSync(["security", "delete-generic-password", "-s", service]);
+    },
+    removeDir(dir: string): void {
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
