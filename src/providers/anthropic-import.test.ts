@@ -149,6 +149,24 @@ describe("importFromClaudeCode", () => {
     expect(deletedService).toBe(claudeKeychainService("/tmp/cfgMac"));
   });
 
+  it("on macOS falls back to .credentials.json when the keychain is empty", async () => {
+    // CC writes configDir/.credentials.json when the keychain write fails
+    // (locked/headless/SSH). readKeychain returns null → read the file instead.
+    let readPath = "";
+    const deps = baseDeps({
+      platform: "darwin",
+      makeConfigDir: () => "/tmp/cfgMac",
+      readKeychain: () => null,
+      readFile: (p) => {
+        readPath = p;
+        return BLOB;
+      },
+    });
+    const r = await importFromClaudeCode(silentIO(), deps);
+    expect(r.credentials.ANTHROPIC_BEARER_TOKEN).toBe("AT");
+    expect(readPath).toBe("/tmp/cfgMac/.credentials.json");
+  });
+
   it("throws an actionable error when claude is not on PATH", async () => {
     await expect(
       importFromClaudeCode(silentIO(), baseDeps({ hasClaude: () => false })),

@@ -49,12 +49,15 @@ export function parseClaudeOauthBlob(raw: string): LoginResult {
   };
 }
 
-/** The macOS Keychain service name Claude Code uses for its credential item
- * when `CLAUDE_SECURESTORAGE_CONFIG_DIR` is set to `dir`. CC builds it as
+/** The macOS Keychain service name Claude Code uses for its credential item,
+ * derived from its config dir `dir`. CC builds it as
  * `Claude Code` + OAUTH_FILE_SUFFIX("" for a stock build) + "-credentials" +
- * "-" + sha256(dir.normalize("NFC")).hex.slice(0,8). openlock sets that env to
- * its own throwaway dir, so this is fully deterministic — we read exactly the
- * one item CC just created, never the user's real credential. */
+ * "-" + sha256(dir).hex.slice(0,8). realImportDeps points BOTH CLAUDE_CONFIG_DIR
+ * and CLAUDE_SECURESTORAGE_CONFIG_DIR at the same throwaway dir, so whichever CC
+ * keys the hash off, this computes the identical name — we read exactly the one
+ * item CC just created, never the user's real credential. (The `.normalize("NFC")`
+ * is a no-op for our ASCII mkdtemp paths; the file fallback in importFromClaudeCode
+ * covers any residual item-name mismatch.) */
 export function claudeKeychainService(dir: string): string {
   const suffix = createHash("sha256").update(dir.normalize("NFC")).digest("hex").slice(0, 8);
   return `Claude Code-credentials-${suffix}`;
@@ -100,10 +103,17 @@ export async function importFromClaudeCode(io: LoginIO, deps: ImportDeps): Promi
     if (code !== 0) {
       throw new Error(`Claude Code login exited with code ${code}.`);
     }
+    // On macOS, Claude Code's credential store is a composite: it prefers the
+    // Keychain but falls back to writing configDir/.credentials.json when the
+    // Keychain is unavailable (locked, headless/CI, SSH session, access denied).
+    // So read the Keychain first, then fall back to the file — the same path the
+    // Linux branch reads. Reading the file is also a safety net against any
+    // Keychain item-name mismatch.
+    const credFile = join(configDir, ".credentials.json");
     const raw =
       deps.platform === "darwin"
-        ? deps.readKeychain(service as string)
-        : deps.readFile(join(configDir, ".credentials.json"));
+        ? (deps.readKeychain(service as string) ?? deps.readFile(credFile))
+        : deps.readFile(credFile);
     if (!raw) {
       throw new Error(
         "Could not read the credential Claude Code stored after login. Did the subscription login complete?",

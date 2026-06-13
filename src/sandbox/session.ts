@@ -701,11 +701,17 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   if (opts.noAttach === true) {
     // Detached create: the persistent container is up (the sleep-infinity
     // tether), so skip attaching the harness — a scripted/CI caller drives it
-    // via `openlock exec <name> -- <cmd>`. The session is never-attached
-    // (lastAttachedAt: null), so classifySession returns idle-recent and it is
-    // NOT auto-reaped. Keep the gateway alive (>=1 session) and exit cleanly:
-    // the tether + gateway client otherwise keep the compiled-bun event loop
-    // from draining and the CLI would hang here (see openlock-to9).
+    // via `openlock exec <name> -- <cmd>`. resolveOrCreateSession stamped this
+    // CLI's pid as attachedPid; reset the meta to never-attached so (a) the dead
+    // pid can't trigger a false "in use by pid" rejection on PID reuse, and
+    // (b) classifySession returns idle-recent (lastAttachedAt: null) so the
+    // detached session is NOT auto-reaped while it waits to be exec'd. Keep the
+    // gateway alive (>=1 session) and exit cleanly: the tether + gateway client
+    // otherwise keep the compiled-bun event loop from draining (see openlock-to9).
+    const meta = findSessionByName(sessionName);
+    if (meta) {
+      updateSessionMeta(sessionsDir(), meta.id, { attachedPid: null, lastAttachedAt: null });
+    }
     console.log(`Session ${sessionName} created (detached, harness not attached).`);
     console.log(`Run a command with:  openlock exec ${sessionName} -- <cmd>`);
     handleGatewayShutdown(listAllSessions(sessionsDir()).length);
