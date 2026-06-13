@@ -1,6 +1,7 @@
+import { HARNESSES } from "../../sandbox/harness";
 import type { Issue, MountType } from "../types";
 
-export const MANIFEST_KEYS = new Set(["mounts", "args", "env"]);
+export const MANIFEST_KEYS = new Set(["harness", "mounts", "args", "env"]);
 export const MOUNT_ENTRY_KEYS = new Set(["source", "target", "type", "readOnly"]);
 export const MOUNT_TYPES: readonly MountType[] = [
   "copy-once",
@@ -78,6 +79,20 @@ function validateArgs(doc: Record<string, unknown>, issues: Issue[]): void {
   }
 }
 
+function validateHarness(doc: Record<string, unknown>, issues: Issue[]): void {
+  if (doc.harness === undefined || doc.harness === null) return;
+  const allowed = [...HARNESSES].join(", ");
+  if (typeof doc.harness !== "string" || !HARNESSES.has(doc.harness as never)) {
+    issues.push(
+      err(
+        "harness",
+        `unknown harness ${JSON.stringify(doc.harness)} (allowed: ${allowed})`,
+        `set harness to one of: ${allowed}`,
+      ),
+    );
+  }
+}
+
 function validateEnv(doc: Record<string, unknown>, issues: Issue[]): void {
   if (doc.env === undefined || doc.env === null) return;
   if (!isPlainObject(doc.env)) {
@@ -107,6 +122,7 @@ export function validateManifestSchema(doc: unknown): Issue[] {
       );
     }
   }
+  validateHarness(doc, issues);
   validateMounts(doc, issues);
   validateArgs(doc, issues);
   validateEnv(doc, issues);

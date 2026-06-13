@@ -33,6 +33,9 @@ export function harnessBinaryPath(harness: Harness): string {
 export interface ResolveHarnessArgs {
   cliFlag: string | undefined;
   env: Readonly<Record<string, string | undefined>>;
+  /** Harness persisted in the project's .openlock/config.yaml, if any. Sits
+   * below env (a per-shell override) and above the user-global default. */
+  projectHarness?: Harness | undefined;
   readGlobal: () => { defaultHarness?: Harness } | null;
 }
 
@@ -40,6 +43,7 @@ export function resolveHarness(args: ResolveHarnessArgs): Harness {
   if (args.cliFlag) return validateHarness(args.cliFlag, "--harness");
   const envVal = args.env.OPENLOCK_HARNESS;
   if (envVal) return validateHarness(envVal, "OPENLOCK_HARNESS");
+  if (args.projectHarness) return args.projectHarness;
   const global = args.readGlobal();
   if (global?.defaultHarness) return global.defaultHarness;
   return "claude_code";

@@ -12,10 +12,25 @@ import {
   buildSandboxStopArgv,
   buildSandboxUploadArgv,
   parseSandboxGetPhase,
+  TETHER_STDIO,
   wrapCmdWithEnv,
 } from "./container";
 
 const CLI = ["openshell"] as const;
+
+describe("TETHER_STDIO (openlock-sqw regression guard)", () => {
+  // The container tether outlives the CLI; if it inherits stdout, a detached
+  // create (`openlock sandbox --no-attach`) hangs any piped/CI stdout capture
+  // after the CLI process.exit()s. Tripwire against re-`inherit`ing it.
+  it("never inherits the CLI's stdout/stderr", () => {
+    expect(TETHER_STDIO.stdout).not.toBe("inherit");
+    expect(TETHER_STDIO.stderr).not.toBe("inherit");
+  });
+
+  it("ignores stdin (no parent stdin held)", () => {
+    expect(TETHER_STDIO.stdin).toBe("ignore");
+  });
+});
 
 describe("wrapCmdWithEnv", () => {
   it("returns cmd unchanged when env is empty", () => {
@@ -323,13 +338,17 @@ describe("buildSandboxEnv (provider placeholders)", () => {
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("injects ANTHROPIC_API_KEY placeholder for opencode+anthropic", () => {
+  it("injects no provider env placeholder for anthropic+claude_code (OAuth-file flow)", () => {
+    // anthropic is now claude_code-only and uses a staged .credentials.json,
+    // not an env placeholder. The previous opencode+anthropic x-api-key path no
+    // longer exists.
     const env = buildSandboxEnv({
       providerId: "anthropic",
-      harness: "opencode",
+      harness: "claude_code",
       repoConfigEnv: {},
     });
-    expect(env.ANTHROPIC_API_KEY).toBe("managed-by-openlock-do-not-leak");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
   });
 
   it("repo-config env wins over placeholder when user explicitly sets the same key", () => {
@@ -339,6 +358,24 @@ describe("buildSandboxEnv (provider placeholders)", () => {
       repoConfigEnv: { OPENROUTER_API_KEY: "user-explicitly-set" },
     });
     expect(env.OPENROUTER_API_KEY).toBe("user-explicitly-set");
+  });
+
+  it("sets CLAUDE_CONFIG_DIR for claude_code harness", () => {
+    const env = buildSandboxEnv({
+      providerId: "anthropic",
+      harness: "claude_code",
+      repoConfigEnv: {},
+    });
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/sandbox/.openlock/claude-config");
+  });
+
+  it("does NOT set CLAUDE_CONFIG_DIR for opencode harness", () => {
+    const env = buildSandboxEnv({
+      providerId: "anthropic",
+      harness: "opencode",
+      repoConfigEnv: {},
+    });
+    expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
   });
 });
 
