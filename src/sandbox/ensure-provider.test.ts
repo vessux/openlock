@@ -44,30 +44,37 @@ describe("providerExistsInGateway", () => {
   });
 });
 
+interface MockState {
+  existing: string[];
+  profilePresent?: boolean;
+}
+
+const ok = (stdout = "") => ({ exitCode: 0, stdout, stderr: "" });
+
+// Flat fake-gateway responder (kept out of the closure to bound complexity).
+// `provider profile import` is non-idempotent in the real gateway, so the probe
+// (`profile export`) reports present/absent and `import` flips it to present.
+function fakeGateway(args: string[], state: MockState) {
+  const sub = `${args[1] ?? ""} ${args[2] ?? ""}`;
+  if (args[1] === "list") {
+    return ok(`NAME  TYPE\n${state.existing.map((n) => `${n}  generic`).join("\n")}\n`);
+  }
+  if (sub === "profile export") {
+    return { exitCode: state.profilePresent ? 0 : 1, stdout: "", stderr: "" };
+  }
+  if (sub === "profile import") state.profilePresent = true;
+  if (args[1] === "create") state.existing.push(args[args.indexOf("--name") + 1]);
+  return ok();
+}
+
 describe("_ensureProviderForTests", () => {
-  function makeShell(state: { existing: string[]; profilePresent?: boolean }) {
+  function makeShell(state: MockState) {
     const calls: string[][] = [];
     return {
       calls,
       shell: async (args: string[]) => {
         calls.push(args);
-        if (args[0] === "provider" && args[1] === "list") {
-          return {
-            exitCode: 0,
-            stdout: `NAME  TYPE\n${state.existing.map((n) => `${n}  generic`).join("\n")}\n`,
-            stderr: "",
-          };
-        }
-        // profile export: existence probe (exit 0 = present, nonzero = absent).
-        if (args[1] === "profile" && args[2] === "export") {
-          return { exitCode: state.profilePresent ? 0 : 1, stdout: "", stderr: "" };
-        }
-        // profile import registers the profile (mirrors the gateway's behavior:
-        // a SECOND import of the same id would error, so we only get here when absent).
-        if (args[1] === "profile" && args[2] === "import") state.profilePresent = true;
-        // create / update: pretend success and mutate state for create
-        if (args[1] === "create") state.existing.push(args[args.indexOf("--name") + 1]);
-        return { exitCode: 0, stdout: "", stderr: "" };
+        return fakeGateway(args, state);
       },
     };
   }
