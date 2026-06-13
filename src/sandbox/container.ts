@@ -166,7 +166,16 @@ export function openshellSandboxCreateAsync(args: OpenshellCreateArgs): Promise<
     const proc = Bun.spawn(argv, {
       cwd: cli.cwd,
       stdin: "ignore",
-      stdout: "inherit",
+      // This child is the persistent container tether (`… exec sleep infinity`)
+      // and lives for the whole session. It must NOT inherit openlock's stdout:
+      // a detached create (`openlock sandbox --no-attach`) exits via process.exit
+      // while the tether keeps running, and an inherited stdout fd would keep the
+      // caller's pipe open forever — hanging any scripted/CI capture
+      // (`SESSION=$(openlock sandbox --no-attach …)`), which is exactly the
+      // detached-create use case. Diagnostics still surface via the filtered
+      // stderr below and the process exit code. (stderr is "pipe"+drained, so it
+      // likewise doesn't hold the parent's fd.)
+      stdout: "ignore",
       stderr: "pipe",
     });
     void pipeFilteredStderr(proc.stderr);
