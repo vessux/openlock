@@ -2,7 +2,7 @@
 #
 # Usage:
 #   Terminal 1: just gateway-vm
-#   Terminal 2: just cli provider create --name anthropic --type claude --credential ANTHROPIC_API_KEY=sk-test-key
+#   Terminal 2: just cli provider create --name anthropic --type claude-oauth --credential ANTHROPIC_BEARER_TOKEN=sk-test-key
 #              just cli sandbox create --name wire-proof --provider anthropic \
 #                --policy policies/wire-proof-local.yaml -- /bin/bash
 #
@@ -40,5 +40,5 @@ network_policies:
           provider: anthropic
           strip_headers: [Authorization, x-api-key, Cookie]
           inject:
-            - { header: Authorization, from_credential: ANTHROPIC_BEARER_TOKEN }
-    allowed_secrets: [ANTHROPIC_BEARER_TOKEN, ANTHROPIC_AUTH_TOKEN]
+            - { header: Authorization, from_credential: ANTHROPIC_BEARER_TOKEN, value_prefix: "Bearer " }
+    allowed_secrets: [ANTHROPIC_BEARER_TOKEN]

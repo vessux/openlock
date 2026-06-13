@@ -7,6 +7,7 @@ export const flagSchema = {
   harness: { type: "string" },
   provider: { type: "string" },
   branch: { type: "string", short: "b" },
+  "no-attach": { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const satisfies ParseArgsOptionsConfig;
 
@@ -29,6 +30,7 @@ export function sandboxCmd(args: string[]): void {
       harness: values.harness,
       provider: values.provider,
       branch: values.branch,
+      noAttach: values["no-attach"] === true,
     }),
   );
 }

@@ -3,10 +3,23 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ProviderId } from "./providers/types";
 
+/** Gateway-side credential-refresh material captured HOST-side at login. Lets
+ * the gateway mint a fresh access token from the refresh token without a new
+ * interactive login. Never enters the sandbox. */
+export interface ProviderRefreshMaterial {
+  strategy: "oauth2_refresh_token";
+  token_url: string;
+  scopes: string[];
+  client_id: string;
+  refresh_token: string;
+  access_expires_at: string; // RFC3339, seeds gateway credential expiry
+}
+
 export interface ProviderRecord {
   type: string;
   credentials: Record<string, string>;
   created_at: string;
+  refresh?: ProviderRefreshMaterial;
 }
 
 export interface CredentialsFileV2 {
@@ -28,20 +41,16 @@ function isLegacyV1(obj: Record<string, unknown>): obj is { token: string; creat
   return typeof obj.token === "string" && obj.version === undefined;
 }
 
-function migrateV1(legacy: { token: string; created_at?: string }): CredentialsFileV2 {
-  return {
-    version: 2,
-    providers: {
-      anthropic: {
-        type: "claude",
-        credentials: {
-          ANTHROPIC_BEARER_TOKEN: `Bearer ${legacy.token}`,
-          ANTHROPIC_AUTH_TOKEN: legacy.token,
-        },
-        created_at: legacy.created_at ?? new Date().toISOString(),
-      },
-    },
-  };
+// The legacy V1 file held a single long-lived `setup-token` bearer (the old
+// API/inference auth mode). The anthropic provider is now OAuth-subscription:
+// it stores a RAW access token (the gateway adds "Bearer " via value_prefix)
+// plus refresh material that a V1 token simply does not have. Carrying the V1
+// token forward would produce a double-prefixed, unrefreshable, wrong-mode
+// credential — so we drop it and surface an empty file, prompting a fresh
+// `openlock login` through the new OAuth flow. We still bump the file to V2 on
+// disk so the stale single-token shape stops being re-parsed every read.
+function migrateV1(_legacy: { token: string; created_at?: string }): CredentialsFileV2 {
+  return emptyFile();
 }
 
 function writeAtomic(path: string, data: CredentialsFileV2): void {
