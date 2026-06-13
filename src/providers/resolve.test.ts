@@ -52,7 +52,7 @@ describe("resolveProvider precedence", () => {
   it("global config used when neither flag nor env set", () => {
     expect(
       resolveProvider({
-        harness: "opencode",
+        harness: "claude_code",
         cliFlag: undefined,
         env: {},
         readGlobalConfig: () => ({ defaultProvider: "anthropic" }),
@@ -71,6 +71,17 @@ describe("resolveProvider compatibility", () => {
         readGlobalConfig: noGlobal,
       }),
     ).toThrow(/not compatible/);
+  });
+
+  it("rejects anthropic for opencode with an actionable hint", () => {
+    expect(() =>
+      resolveProvider({
+        harness: "opencode",
+        cliFlag: "anthropic",
+        env: {},
+        readGlobalConfig: noGlobal,
+      }),
+    ).toThrow(/not compatible.*opencode.*(openrouter|OpenCode)/is);
   });
 });
 

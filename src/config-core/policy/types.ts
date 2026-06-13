@@ -1,6 +1,7 @@
 interface CredInjectHeader {
   header: string;
   from_credential: string;
+  value_prefix?: string;
 }
 
 interface CredInject {
