@@ -12,6 +12,7 @@ describe("COMMAND_FLAGS", () => {
       "reap",
       "shell",
       "exec",
+      "logs",
       "cred-refresh",
       "login",
       "logout",
@@ -41,6 +42,13 @@ describe("COMMAND_FLAGS", () => {
 
 describe("SESSION_COMMANDS", () => {
   it("lists exactly the picker-bearing commands", () => {
-    expect([...SESSION_COMMANDS].sort()).toEqual(["clean", "exec", "shell", "status", "stop"]);
+    expect([...SESSION_COMMANDS].sort()).toEqual([
+      "clean",
+      "exec",
+      "logs",
+      "shell",
+      "status",
+      "stop",
+    ]);
   });
 });

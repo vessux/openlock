@@ -25,6 +25,7 @@ Session lifecycle:
   reap               Stop idle sessions (no removal)
   shell [name]       Open bash inside the session container
   exec [name] -- ... Run a command inside the session container
+  logs [name]        Tail the in-sandbox proxy egress log (L7 allow/deny decisions)
 
 Other:
   cred-refresh       Start the credential refresh service
@@ -104,6 +105,9 @@ function main(): void {
       return;
     case "exec":
       import("./cli/exec").then(({ execCmd }) => execCmd(args.slice(1)).then(processExit));
+      return;
+    case "logs":
+      import("./cli/logs").then(({ logsCmd }) => logsCmd(args.slice(1)).then(processExit));
       return;
     case "cred-refresh":
       import("./cli/cred-refresh").then(({ credRefreshCmd }) => credRefreshCmd(args.slice(1)));
