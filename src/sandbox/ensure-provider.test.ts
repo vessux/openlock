@@ -45,7 +45,7 @@ describe("providerExistsInGateway", () => {
 });
 
 describe("_ensureProviderForTests", () => {
-  function makeShell(state: { existing: string[] }) {
+  function makeShell(state: { existing: string[]; profilePresent?: boolean }) {
     const calls: string[][] = [];
     return {
       calls,
@@ -58,6 +58,13 @@ describe("_ensureProviderForTests", () => {
             stderr: "",
           };
         }
+        // profile export: existence probe (exit 0 = present, nonzero = absent).
+        if (args[1] === "profile" && args[2] === "export") {
+          return { exitCode: state.profilePresent ? 0 : 1, stdout: "", stderr: "" };
+        }
+        // profile import registers the profile (mirrors the gateway's behavior:
+        // a SECOND import of the same id would error, so we only get here when absent).
+        if (args[1] === "profile" && args[2] === "import") state.profilePresent = true;
         // create / update: pretend success and mutate state for create
         if (args[1] === "create") state.existing.push(args[args.indexOf("--name") + 1]);
         return { exitCode: 0, stdout: "", stderr: "" };
@@ -166,14 +173,32 @@ describe("_ensureProviderForTests", () => {
 
     it("never clobbers when present: no create/update/refresh-configure", async () => {
       writeAnthropic();
-      const m = makeShell({ existing: ["anthropic"] });
+      const m = makeShell({ existing: ["anthropic"], profilePresent: true });
       await _ensureProviderForTests("anthropic", m.shell);
 
       expect(m.calls.find((c) => c[1] === "create")).toBeUndefined();
       expect(m.calls.find((c) => c[1] === "update")).toBeUndefined();
       expect(verb(m.calls, "refresh", "configure")).toBeUndefined();
-      // idempotent profile import still runs.
-      expect(verb(m.calls, "profile", "import")).toBeDefined();
+      // Profile already present → probed via export, NOT re-imported (import is
+      // not idempotent — re-importing an existing id errors).
+      expect(verb(m.calls, "profile", "export")).toBeDefined();
+      expect(verb(m.calls, "profile", "import")).toBeUndefined();
+    });
+
+    it("re-seeds without re-importing when the profile already exists (provider deleted, profile lingering)", async () => {
+      // Regression for the reattach/re-seed crash: a prior session left the
+      // `claude-oauth` profile registered; deleting the provider and re-running
+      // must seed create/update/configure WITHOUT re-importing the profile
+      // (which would error "already exists").
+      writeAnthropic();
+      const m = makeShell({ existing: [], profilePresent: true });
+      await _ensureProviderForTests("anthropic", m.shell);
+
+      expect(verb(m.calls, "profile", "export")).toBeDefined();
+      expect(verb(m.calls, "profile", "import")).toBeUndefined();
+      expect(m.calls.find((c) => c[1] === "create")).toBeDefined();
+      expect(m.calls.find((c) => c[1] === "update")).toBeDefined();
+      expect(verb(m.calls, "refresh", "configure")).toBeDefined();
     });
 
     it("throws on the seed path when refresh material lacks ANTHROPIC_BEARER_TOKEN", async () => {

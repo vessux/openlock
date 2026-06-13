@@ -5,7 +5,7 @@ import { PROVIDERS } from "../providers/registry";
 import type { ProviderId } from "../providers/types";
 import type { ProviderRecord } from "../tokens";
 import { readProvider } from "../tokens";
-import { buildClaudeOAuthProfileYaml } from "./claude-oauth-profile";
+import { buildClaudeOAuthProfileYaml, CLAUDE_OAUTH_PROFILE_ID } from "./claude-oauth-profile";
 import { getCliInvocation } from "./fork-binaries";
 
 interface ShellResult {
@@ -96,16 +96,24 @@ async function seedRefreshProvider(
     throw new Error(`seedRefreshProvider called for '${providerId}' without refresh material`);
   }
 
-  const dir = mkdtempSync(join(tmpdir(), "olk-prof-"));
-  try {
-    const profPath = join(dir, "claude-oauth.yaml");
-    writeFileSync(profPath, buildClaudeOAuthProfileYaml(refresh));
-    // `provider profile import` is idempotent, so we run it on every ensure
-    // regardless of whether the provider already exists. It awaits via mustOk,
-    // so it has fully completed before the finally removes the temp dir.
-    await mustOk(shell, ["provider", "profile", "import", "--file", profPath]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  // `provider profile import` is NOT idempotent — re-importing an existing
+  // profile id errors ("already exists"). Probe with `provider profile export`
+  // (exit 0 = present) and import ONLY when absent, so reattaches and re-seeds
+  // (provider deleted but the profile still registered) don't crash. Run on
+  // every ensure (not gated on the provider's existence) so a profile that was
+  // somehow lost is restored, while a present one is left untouched.
+  const profilePresent =
+    (await shell(["provider", "profile", "export", CLAUDE_OAUTH_PROFILE_ID])).exitCode === 0;
+  if (!profilePresent) {
+    const dir = mkdtempSync(join(tmpdir(), "olk-prof-"));
+    try {
+      const profPath = join(dir, `${CLAUDE_OAUTH_PROFILE_ID}.yaml`);
+      writeFileSync(profPath, buildClaudeOAuthProfileYaml(refresh));
+      // mustOk awaits, so import completes before the finally removes the dir.
+      await mustOk(shell, ["provider", "profile", "import", "--file", profPath]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   if (!exists) {

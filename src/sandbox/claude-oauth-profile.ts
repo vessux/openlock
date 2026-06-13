@@ -1,9 +1,14 @@
 import yaml from "js-yaml";
 import type { ProviderRefreshMaterial } from "../tokens";
 
+/** The custom openshell provider-profile id for the Claude OAuth subscription
+ * provider. Used as the profile's `id` and as the key for the existence probe
+ * (`provider profile export <id>`) that gates the non-idempotent import. */
+export const CLAUDE_OAUTH_PROFILE_ID = "claude-oauth";
+
 /**
  * Build the openshell runtime provider-profile YAML for the Claude OAuth
- * subscription provider. Importing this profile (idempotently) gives the
+ * subscription provider. Importing this profile (when absent) gives the
  * gateway the `token_url`, `scopes`, and `refresh_before_seconds` it needs to
  * mint fresh access tokens — these are NOT expressible as `provider refresh
  * configure` flags, so they must come from the profile.
@@ -14,7 +19,7 @@ import type { ProviderRefreshMaterial } from "../tokens";
  */
 export function buildClaudeOAuthProfileYaml(m: ProviderRefreshMaterial): string {
   return yaml.dump({
-    id: "claude-oauth",
+    id: CLAUDE_OAUTH_PROFILE_ID,
     display_name: "Claude (OAuth subscription)",
     category: "agent",
     inference_capable: true,
