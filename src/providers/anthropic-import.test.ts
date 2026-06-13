@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "bun:test";
-import { claudeKeychainService, parseClaudeOauthBlob } from "./anthropic-import";
+import {
+  claudeKeychainService,
+  type ImportDeps,
+  importFromClaudeCode,
+  parseClaudeOauthBlob,
+} from "./anthropic-import";
+import type { LoginIO } from "./types";
 
 describe("parseClaudeOauthBlob", () => {
   const valid = JSON.stringify({
@@ -77,5 +83,99 @@ describe("claudeKeychainService", () => {
     const decomposed = `/tmp/cafe${String.fromCodePoint(0x0301)}`;
     expect(precomposed).not.toBe(decomposed); // genuinely different inputs
     expect(claudeKeychainService(precomposed)).toBe(claudeKeychainService(decomposed));
+  });
+});
+
+function silentIO(): LoginIO {
+  return {
+    isTTY: true,
+    writeStdout() {},
+    writeStderr() {},
+    async readLine() {
+      return "";
+    },
+  };
+}
+
+const BLOB = JSON.stringify({
+  claudeAiOauth: { accessToken: "AT", refreshToken: "RT", expiresAt: 1893456000000 },
+});
+
+function baseDeps(over: Partial<ImportDeps> = {}): ImportDeps {
+  return {
+    platform: "linux",
+    hasClaude: () => true,
+    makeConfigDir: () => "/tmp/cfgX",
+    spawnLogin: async () => 0,
+    readFile: () => BLOB,
+    readKeychain: () => BLOB,
+    deleteKeychain: () => {},
+    removeDir: () => {},
+    ...over,
+  };
+}
+
+describe("importFromClaudeCode", () => {
+  it("on Linux reads .credentials.json from the throwaway dir", async () => {
+    let readPath = "";
+    const deps = baseDeps({
+      readFile: (p) => {
+        readPath = p;
+        return BLOB;
+      },
+    });
+    const r = await importFromClaudeCode(silentIO(), deps);
+    expect(r.credentials.ANTHROPIC_BEARER_TOKEN).toBe("AT");
+    expect(readPath).toBe("/tmp/cfgX/.credentials.json");
+  });
+
+  it("on macOS reads the computed keychain item and deletes it after", async () => {
+    let readService = "";
+    let deletedService = "";
+    const deps = baseDeps({
+      platform: "darwin",
+      makeConfigDir: () => "/tmp/cfgMac",
+      readKeychain: (s) => {
+        readService = s;
+        return BLOB;
+      },
+      deleteKeychain: (s) => {
+        deletedService = s;
+      },
+    });
+    const r = await importFromClaudeCode(silentIO(), deps);
+    expect(r.credentials.ANTHROPIC_BEARER_TOKEN).toBe("AT");
+    expect(readService).toBe(claudeKeychainService("/tmp/cfgMac"));
+    expect(deletedService).toBe(claudeKeychainService("/tmp/cfgMac"));
+  });
+
+  it("throws an actionable error when claude is not on PATH", async () => {
+    await expect(importFromClaudeCode(silentIO(), baseDeps({ hasClaude: () => false }))).rejects.toThrow(
+      /not found on PATH/,
+    );
+  });
+
+  it("throws when the login subprocess exits non-zero", async () => {
+    await expect(
+      importFromClaudeCode(silentIO(), baseDeps({ spawnLogin: async () => 1 })),
+    ).rejects.toThrow(/exited with code 1/);
+  });
+
+  it("throws when no credential was stored", async () => {
+    await expect(
+      importFromClaudeCode(silentIO(), baseDeps({ readFile: () => null })),
+    ).rejects.toThrow(/Could not read/);
+  });
+
+  it("always removes the throwaway dir, even on harvest failure", async () => {
+    let removed = false;
+    const deps = baseDeps({
+      readFile: () => null,
+      removeDir: () => {
+        removed = true;
+      },
+    });
+    await expect(importFromClaudeCode(silentIO(), deps)).rejects.toThrow();
+    expect(removed).toBe(true);
   });
 });

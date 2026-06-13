@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { LoginResult } from "./types";
+import { join } from "node:path";
+import type { LoginIO, LoginResult } from "./types";
 
 const CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 const CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -52,4 +53,66 @@ export function parseClaudeOauthBlob(raw: string): LoginResult {
 export function claudeKeychainService(dir: string): string {
   const suffix = createHash("sha256").update(dir.normalize("NFC")).digest("hex").slice(0, 8);
   return `Claude Code-credentials-${suffix}`;
+}
+
+/** Injected I/O for importFromClaudeCode so the orchestration is testable
+ * without spawning `claude` or touching a real Keychain. */
+export interface ImportDeps {
+  platform: NodeJS.Platform;
+  hasClaude(): boolean;
+  /** Make + return a fresh throwaway config dir path. */
+  makeConfigDir(): string;
+  /** Spawn `claude auth login --claudeai` with the throwaway config dir,
+   * inheriting the TTY. Resolves to the process exit code. */
+  spawnLogin(configDir: string): Promise<number>;
+  /** Read a credential file (Linux). null if absent/unreadable. */
+  readFile(path: string): string | null;
+  /** Read a Keychain item secret by service name (macOS). null if absent. */
+  readKeychain(service: string): string | null;
+  /** Delete a Keychain item by service name (macOS cleanup). Best-effort. */
+  deleteKeychain(service: string): void;
+  /** Remove the throwaway config dir. Best-effort. */
+  removeDir(dir: string): void;
+}
+
+/** Orchestrate an isolated Claude Code subscription login and harvest the token
+ * it stores. The real subscription token lands only in openlock's own
+ * credentials file (via the returned LoginResult); the throwaway CC store is
+ * erased. The user's own Claude Code credentials are never touched. */
+export async function importFromClaudeCode(io: LoginIO, deps: ImportDeps): Promise<LoginResult> {
+  if (!deps.hasClaude()) {
+    throw new Error(
+      "Claude Code CLI ('claude') not found on PATH. Install Claude Code (so `claude auth login` works), then retry `openlock login`.",
+    );
+  }
+  const configDir = deps.makeConfigDir();
+  const service = deps.platform === "darwin" ? claudeKeychainService(configDir) : null;
+  try {
+    io.writeStdout(
+      "Opening an isolated Claude Code subscription login. Complete the browser sign-in; your own Claude Code login is untouched.\n",
+    );
+    const code = await deps.spawnLogin(configDir);
+    if (code !== 0) {
+      throw new Error(`Claude Code login exited with code ${code}.`);
+    }
+    const raw =
+      deps.platform === "darwin"
+        ? deps.readKeychain(service as string)
+        : deps.readFile(join(configDir, ".credentials.json"));
+    if (!raw) {
+      throw new Error(
+        "Could not read the credential Claude Code stored after login. Did the subscription login complete?",
+      );
+    }
+    return parseClaudeOauthBlob(raw);
+  } finally {
+    if (deps.platform === "darwin" && service) {
+      try {
+        deps.deleteKeychain(service);
+      } catch {
+        // best-effort cleanup
+      }
+    }
+    deps.removeDir(configDir);
+  }
 }
