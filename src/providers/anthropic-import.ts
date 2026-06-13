@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { LoginResult } from "./types";
 
 const CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
@@ -40,4 +41,15 @@ export function parseClaudeOauthBlob(raw: string): LoginResult {
       access_expires_at: new Date(expiresAtMs).toISOString(),
     },
   };
+}
+
+/** The macOS Keychain service name Claude Code uses for its credential item
+ * when `CLAUDE_SECURESTORAGE_CONFIG_DIR` is set to `dir`. CC builds it as
+ * `Claude Code` + OAUTH_FILE_SUFFIX("" for a stock build) + "-credentials" +
+ * "-" + sha256(dir.normalize("NFC")).hex.slice(0,8). openlock sets that env to
+ * its own throwaway dir, so this is fully deterministic — we read exactly the
+ * one item CC just created, never the user's real credential. */
+export function claudeKeychainService(dir: string): string {
+  const suffix = createHash("sha256").update(dir.normalize("NFC")).digest("hex").slice(0, 8);
+  return `Claude Code-credentials-${suffix}`;
 }

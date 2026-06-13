@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "bun:test";
-import { parseClaudeOauthBlob } from "./anthropic-import";
+import { claudeKeychainService, parseClaudeOauthBlob } from "./anthropic-import";
 
 describe("parseClaudeOauthBlob", () => {
   const valid = JSON.stringify({
@@ -55,5 +56,26 @@ describe("parseClaudeOauthBlob", () => {
       "user:profile",
       "user:inference",
     ]);
+  });
+});
+
+describe("claudeKeychainService", () => {
+  it("matches CC's derivation: Claude Code-credentials-<sha256(NFC dir)[:8]>", () => {
+    const dir = "/tmp/openlock-cc-login-abc123";
+    const want = `Claude Code-credentials-${createHash("sha256")
+      .update(dir.normalize("NFC"))
+      .digest("hex")
+      .slice(0, 8)}`;
+    expect(claudeKeychainService(dir)).toBe(want);
+  });
+
+  it("NFC-normalizes the dir before hashing", () => {
+    // Precomposed e-acute (U+00E9) vs decomposed e + combining acute (U+0065 U+0301):
+    // distinct byte sequences sharing one NFC form -> identical service name.
+    // Built with fromCodePoint so the source stays pure-ASCII (no literal accents).
+    const precomposed = `/tmp/caf${String.fromCodePoint(0x00e9)}`;
+    const decomposed = `/tmp/cafe${String.fromCodePoint(0x0301)}`;
+    expect(precomposed).not.toBe(decomposed); // genuinely different inputs
+    expect(claudeKeychainService(precomposed)).toBe(claudeKeychainService(decomposed));
   });
 });
