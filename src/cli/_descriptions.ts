@@ -16,6 +16,7 @@ export const COMMAND_DESCRIPTIONS = {
   reap: "Stop idle sessions (no removal)",
   shell: "Open bash inside the session container",
   exec: "Run a command inside the session container",
+  logs: "Tail the in-sandbox proxy egress log (L7 allow/deny decisions)",
   "cred-refresh": "Start the credential refresh service",
   login: "Authenticate with the gateway",
   logout: "Remove stored provider credentials",

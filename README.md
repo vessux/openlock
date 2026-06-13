@@ -56,9 +56,10 @@ openlock validate /path/to/your/repo  # lint the manifest + policy
 openlock sandbox /path/to/your/repo   # launch (path defaults to cwd)
 ```
 
-`sandbox` requires an `.openlock/` (run `openlock init` first, or it errors). The first
-`sandbox` run prompts for `claude setup-token` if you have no credentials, runs `git init`
-if the path isn't a git repo yet, and (re)attaches the session.
+`sandbox` requires an `.openlock/` (run `openlock init` first, or it errors). If you have no
+credentials it runs `openlock login` (the Anthropic provider imports your Claude subscription
+token from an isolated `claude auth login`). The first run also `git init`s the path if it
+isn't a git repo yet, and (re)attaches the session.
 
 ## Usage
 

@@ -157,6 +157,52 @@ describe("validateSchema", () => {
     expect(errors.some((e) => e.message.includes("nope"))).toBe(true);
   });
 
+  test("accepts cred_inject header with value_prefix", () => {
+    const errors = validateSchema({
+      version: 1,
+      network_policies: {
+        test: {
+          endpoints: [
+            {
+              host: "api.anthropic.com",
+              cred_inject: {
+                provider: "anthropic",
+                strip_headers: ["Authorization"],
+                inject: [
+                  {
+                    header: "Authorization",
+                    from_credential: "ANTHROPIC_BEARER_TOKEN",
+                    value_prefix: "Bearer ",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(errors).toHaveLength(0);
+  });
+
+  test("rejects unknown field in cred_inject header (allowlist still enforced)", () => {
+    const errors = validateSchema({
+      version: 1,
+      network_policies: {
+        test: {
+          endpoints: [
+            {
+              host: "x.com",
+              cred_inject: {
+                inject: [{ header: "Authorization", from_credential: "X", value_suffix: "nope" }],
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(errors.some((e) => e.message.includes("value_suffix"))).toBe(true);
+  });
+
   test("rejects missing required fields in cred_inject header", () => {
     const errors = validateSchema({
       version: 1,

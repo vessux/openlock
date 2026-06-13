@@ -1,5 +1,76 @@
 import { describe, expect, it } from "bun:test";
-import { pickSessionHarness, userExplicitlyPickedHarness } from "./session";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  pickSessionHarness,
+  resolveRepoPolicy,
+  stageProviderSandboxFiles,
+  userExplicitlyPickedHarness,
+} from "./session";
+
+describe("resolveRepoPolicy", () => {
+  function projectWith(configBody: string): string {
+    const proj = mkdtempSync(join(tmpdir(), "rrp-"));
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), configBody);
+    writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+    writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
+    return proj;
+  }
+
+  it("carries the persisted harness from config.yaml", () => {
+    const proj = projectWith("harness: opencode\nmounts: []\n");
+    expect(resolveRepoPolicy(proj).harness).toBe("opencode");
+  });
+
+  it("leaves harness undefined when config.yaml omits it", () => {
+    const proj = projectWith("mounts: []\n");
+    expect(resolveRepoPolicy(proj).harness).toBeUndefined();
+  });
+
+  it("leaves harness undefined on the --policy override path (no .openlock read)", () => {
+    expect(resolveRepoPolicy("/nonexistent", "/tmp/some-policy.yaml").harness).toBeUndefined();
+  });
+});
+
+describe("stageProviderSandboxFiles", () => {
+  function freshStaging(): string {
+    const tmp = mkdtempSync(join(tmpdir(), "stage-"));
+    const staging = join(tmp, ".openlock");
+    mkdirSync(staging);
+    return staging;
+  }
+
+  it("writes a valid file to the prefix-stripped staging-relative location", () => {
+    const staging = freshStaging();
+    stageProviderSandboxFiles(staging, [
+      { sandboxPath: "/sandbox/.openlock/claude-config/.credentials.json", content: "{}" },
+    ]);
+    const dest = join(staging, "claude-config/.credentials.json");
+    expect(existsSync(dest)).toBe(true);
+    expect(readFileSync(dest, "utf-8")).toBe("{}");
+  });
+
+  it("rejects a '..' traversal path so a provider cannot escape the staging dir", () => {
+    const staging = freshStaging();
+    expect(() =>
+      stageProviderSandboxFiles(staging, [
+        { sandboxPath: "/sandbox/.openlock/../../etc/passwd", content: "pwned" },
+      ]),
+    ).toThrow(/must not contain '\.\.'/);
+    // Confirm nothing escaped: the traversal target was never written.
+    expect(existsSync(join(staging, "..", "..", "etc", "passwd"))).toBe(false);
+  });
+
+  it("delegates to stagingPathFor — rejects a path outside the /sandbox/.openlock/ prefix", () => {
+    const staging = freshStaging();
+    expect(() =>
+      stageProviderSandboxFiles(staging, [{ sandboxPath: "/etc/passwd", content: "x" }]),
+    ).toThrow(/under \/sandbox\/\.openlock\//);
+  });
+});
 
 describe("userExplicitlyPickedHarness", () => {
   it("returns false when neither cliFlag nor env is set", () => {

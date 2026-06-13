@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   dockerDaemonReachable,
   podmanMachineRunning,
@@ -9,8 +9,9 @@ import {
 } from "../doctor";
 import { readGlobalConfig } from "../global-config";
 import { login } from "../login";
+import { PROVIDERS } from "../providers/registry";
 import { resolveProvider } from "../providers/resolve";
-import type { ProviderId } from "../providers/types";
+import type { ProviderId, SandboxFile } from "../providers/types";
 import { type Runtime, resolveRuntime } from "../runtime";
 import { hasAnyProvider } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
@@ -47,6 +48,7 @@ import {
   type Mount,
   restageMount,
   stageMounts,
+  stagingPathFor,
   workdirMount,
 } from "./mounts";
 import { resolveOpenlockFolder } from "./openlock-folder";
@@ -68,6 +70,9 @@ export interface SandboxOpts {
   harness?: string;
   provider?: string;
   branch?: string;
+  /** Detached create: create/resolve the session but do NOT attach the harness,
+   * so a scripted/CI caller can drive it via `openlock exec`. */
+  noAttach?: boolean;
 }
 
 async function buildSandboxImage(openlockFolderPath: string): Promise<string> {
@@ -83,9 +88,13 @@ interface ResolvedRepo {
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
+  /** Harness persisted in the project's .openlock/config.yaml, if any. Feeds
+   * resolveHarness so `openlock init --harness X` carries into later `sandbox`
+   * runs. Absent on the --policy override path (no .openlock/ is read). */
+  harness?: Harness;
 }
 
-function resolveRepoPolicy(projectPath: string, policyOverride?: string): ResolvedRepo {
+export function resolveRepoPolicy(projectPath: string, policyOverride?: string): ResolvedRepo {
   if (policyOverride) {
     return {
       policy: resolve(policyOverride),
@@ -95,7 +104,14 @@ function resolveRepoPolicy(projectPath: string, policyOverride?: string): Resolv
     };
   }
   const folder = resolveOpenlockFolder(projectPath);
-  return { policy: folder.policyPath, mounts: folder.mounts, args: folder.args, env: folder.env };
+  const repo: ResolvedRepo = {
+    policy: folder.policyPath,
+    mounts: folder.mounts,
+    args: folder.args,
+    env: folder.env,
+  };
+  if (folder.harness !== undefined) repo.harness = folder.harness;
+  return repo;
 }
 
 interface NewSession {
@@ -104,6 +120,22 @@ interface NewSession {
   containerName: string;
   policy: string;
   image: string;
+}
+
+// Provider-supplied files (e.g. anthropic's dummy OAuth .credentials.json)
+// land under /sandbox/.openlock/. The staging dir IS the uploaded .openlock,
+// so we derive the staging-relative path via stagingPathFor — the SAME
+// hardened guard stageMounts uses (absolute + no '..' segments + prefix),
+// which prevents a provider writing outside .openlock (a bare prefix check
+// would let `/sandbox/.openlock/../../etc/foo` escape on write). Exported for
+// unit-testing the traversal rejection.
+export function stageProviderSandboxFiles(staging: string, files: readonly SandboxFile[]): void {
+  for (const f of files) {
+    const rel = stagingPathFor(f.sandboxPath);
+    const dest = join(staging, rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, f.content, { mode: 0o600 });
+  }
 }
 
 async function createSession(
@@ -146,6 +178,7 @@ async function createSession(
     }
 
     stageMounts(staging, mounts);
+    stageProviderSandboxFiles(staging, PROVIDERS[providerId].sandboxFiles(harness));
 
     const gitconfigPath = await prepareGitIdentity(staging);
     console.log(
@@ -163,6 +196,14 @@ async function createSession(
     const setupLines = [
       "cd /sandbox",
       "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
+      // Claude Code's CLAUDE_CONFIG_DIR must be writable by the sandbox user.
+      // The anthropic provider normally stages .credentials.json into
+      // .openlock/claude-config/ host-side (stageProviderSandboxFiles calls
+      // mkdirSync on the parent), so the dir exists before the container starts.
+      // This mkdir + chown runs unconditionally to: (a) normalize ownership to
+      // the sandbox user after host-side upload, and (b) cover harnesses or
+      // providers that stage no file there. `|| true` keeps it non-fatal.
+      "mkdir -p .openlock/claude-config && chown -R sandbox:sandbox .openlock/claude-config 2>/dev/null || true",
     ];
     for (const bm of bundleMounts) {
       const bundleName = `${basename(bm.source)}.bundle`;
@@ -622,6 +663,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const resolvedHarness = resolveHarness({
     cliFlag: opts.harness,
     env: process.env,
+    projectHarness: resolved.harness,
     readGlobal: readGlobalConfig,
   });
   const pick = pickSessionHarness({
@@ -655,6 +697,27 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     providerId,
     opts.branch,
   );
+
+  if (opts.noAttach === true) {
+    // Detached create: the persistent container is up (the sleep-infinity
+    // tether), so skip attaching the harness — a scripted/CI caller drives it
+    // via `openlock exec <name> -- <cmd>`. resolveOrCreateSession stamped this
+    // CLI's pid as attachedPid; reset the meta to never-attached so (a) the dead
+    // pid can't trigger a false "in use by pid" rejection on PID reuse, and
+    // (b) classifySession returns idle-recent (lastAttachedAt: null) so the
+    // detached session is NOT auto-reaped while it waits to be exec'd. Keep the
+    // gateway alive (>=1 session) and exit cleanly: the tether + gateway client
+    // otherwise keep the compiled-bun event loop from draining (see openlock-to9).
+    const meta = findSessionByName(sessionName);
+    if (meta) {
+      updateSessionMeta(sessionsDir(), meta.id, { attachedPid: null, lastAttachedAt: null });
+    }
+    console.log(`Session ${sessionName} created (detached, harness not attached).`);
+    console.log(`Run a command with:  openlock exec ${sessionName} -- <cmd>`);
+    handleGatewayShutdown(listAllSessions(sessionsDir()).length);
+    process.exit(0);
+  }
+
   const launch: LaunchOpts = {
     args: resolved.args,
     env: buildSandboxEnv({ providerId, harness, repoConfigEnv: resolved.env }),
@@ -663,5 +726,11 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
   handleGatewayShutdown(listAllSessions(sessionsDir()).length);
   await autoReapStaleSessions();
-  if (exitCode !== 0) process.exit(exitCode);
+  // Exit explicitly with the harness's code. The persistent-container tether
+  // (openshellSandboxCreateAsync's `openshell sandbox create … sleep infinity`
+  // child) and the gateway client are intentionally left running, so the
+  // compiled-bun event loop never drains and the CLI would otherwise hang here
+  // after the harness exits (it hung only on the compiled binary; `bun run`
+  // auto-exits, which masked it). See openlock-to9.
+  process.exit(exitCode);
 }

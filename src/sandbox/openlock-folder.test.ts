@@ -35,6 +35,22 @@ describe("resolveOpenlockFolder", () => {
     expect(r.policyPath).toContain("policy.yaml");
   });
 
+  it("surfaces the persisted harness from config.yaml", () => {
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), "harness: opencode\nmounts: []\n");
+    writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+    writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
+    expect(resolveOpenlockFolder(proj).harness).toBe("opencode");
+  });
+
+  it("leaves harness undefined when config.yaml omits it", () => {
+    const proj = tmpProject();
+    writeComplete(join(proj, ".openlock"));
+    expect(resolveOpenlockFolder(proj).harness).toBeUndefined();
+  });
+
   it("rejects a config.yaml with a leftover caps key", () => {
     const proj = tmpProject();
     const folder = join(proj, ".openlock");

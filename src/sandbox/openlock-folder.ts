@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import yaml from "js-yaml";
 import type { Mount } from "../config-core";
 import { type ManifestConfig, parseManifest } from "../config-core";
+import type { Harness } from "./harness";
 
 const FOLDER_NAME = ".openlock";
 const CONFIG_FILENAME = "config.yaml";
@@ -38,6 +39,8 @@ export interface ResolveResult {
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
+  /** Harness persisted in config.yaml, or undefined if the manifest omits it. */
+  harness?: Harness;
 }
 
 function folderPathFor(projectPath: string): string {
@@ -66,7 +69,14 @@ export function resolveOpenlockFolder(projectPath: string): ResolveResult {
   const state = inspectFolder(folder);
   if (state.configExists && state.policyExists && state.containerfileExists) {
     const cfg = readConfig(folder);
-    return { policyPath: policyPath(folder), mounts: cfg.mounts, args: cfg.args, env: cfg.env };
+    const result: ResolveResult = {
+      policyPath: policyPath(folder),
+      mounts: cfg.mounts,
+      args: cfg.args,
+      env: cfg.env,
+    };
+    if (cfg.harness !== undefined) result.harness = cfg.harness;
+    return result;
   }
   const missing = [
     state.configExists ? null : "config.yaml",

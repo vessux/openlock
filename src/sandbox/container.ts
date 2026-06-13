@@ -70,7 +70,12 @@ export interface BuildSandboxEnvArgs {
 
 export function buildSandboxEnv(args: BuildSandboxEnvArgs): Record<string, string> {
   const placeholders = PROVIDERS[args.providerId].sandboxEnvPlaceholders(args.harness);
-  return { ...placeholders, ...args.repoConfigEnv };
+  // Claude Code reads OAuth/config state (the staged .credentials.json) from
+  // CLAUDE_CONFIG_DIR. opencode doesn't use it. The dir is staged under
+  // /sandbox/.openlock/ and provisioned by createSession's bootstrap.
+  const harnessEnv: Record<string, string> =
+    args.harness === "claude_code" ? { CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config" } : {};
+  return { ...placeholders, ...harnessEnv, ...args.repoConfigEnv };
 }
 
 export async function execHarness(
@@ -155,15 +160,30 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
   ];
 }
 
+/**
+ * Stdio for a child that OUTLIVES the openlock CLI — the persistent sandbox
+ * tether (`… exec sleep infinity`).
+ *
+ * INVARIANT (openlock-sqw): a child that survives the CLI must NEVER set
+ * stdout/stderr to `"inherit"`. A detached create (`openlock sandbox
+ * --no-attach`) returns via `process.exit` while the tether keeps running; an
+ * inherited stdout fd would keep a piped/captured caller's stream open forever,
+ * hanging `SESSION=$(openlock sandbox --no-attach …)` and any CI capture. So
+ * stdout is discarded and stderr is `"pipe"` + drained (also not the parent's
+ * fd), surfaced filtered. The gateway daemon obeys the same rule a different
+ * way — `spawnDaemonToLog` redirects to a log fd and `unref`s. Any new
+ * long-lived `Bun.spawn` MUST follow one of these two patterns, never inherit.
+ */
+export const TETHER_STDIO = {
+  stdin: "ignore",
+  stdout: "ignore",
+  stderr: "pipe",
+} as const;
+
 export function openshellSandboxCreateAsync(args: OpenshellCreateArgs): Promise<OpenshellHandle> {
   return getCliInvocation().then((cli) => {
     const argv = [...cli.argv, ...buildOpenshellCreateArgv(args)];
-    const proc = Bun.spawn(argv, {
-      cwd: cli.cwd,
-      stdin: "ignore",
-      stdout: "inherit",
-      stderr: "pipe",
-    });
+    const proc = Bun.spawn(argv, { cwd: cli.cwd, ...TETHER_STDIO });
     void pipeFilteredStderr(proc.stderr);
     return {
       pid: proc.pid,

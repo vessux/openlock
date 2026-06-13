@@ -9,6 +9,7 @@ import { flagSchema as initFlags } from "./init";
 import { flagSchema as listFlags } from "./list";
 import { flagSchema as loginFlags } from "./login";
 import { flagSchema as logoutFlags } from "./logout";
+import { flagSchema as logsFlags } from "./logs";
 import { flagSchema as providersFlags } from "./providers";
 import { flagSchema as reapFlags } from "./reap";
 import { flagSchema as refsFlags } from "./refs";
@@ -32,6 +33,7 @@ export const COMMAND_FLAGS = {
   reap: reapFlags,
   shell: shellFlags,
   exec: execFlags,
+  logs: logsFlags,
   "cred-refresh": credRefreshFlags,
   login: loginFlags,
   logout: logoutFlags,
@@ -47,7 +49,7 @@ export const COMMAND_FLAGS = {
 
 export type CommandName = keyof typeof COMMAND_FLAGS;
 
-export const SESSION_COMMANDS = ["status", "stop", "clean", "shell", "exec"] as const;
+export const SESSION_COMMANDS = ["status", "stop", "clean", "shell", "exec", "logs"] as const;
 
 // Re-export descriptions from the cycle-safe source file so callers that
 // already import from _commands.ts can pick them up here too.
