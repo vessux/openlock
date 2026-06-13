@@ -24,4 +24,13 @@ describe("sandbox flagSchema (extended)", () => {
     });
     expect(values.provider).toBe("openrouter");
   });
+
+  it("accepts --no-attach as a boolean", () => {
+    const { values } = parseArgs({
+      args: ["--no-attach"],
+      options: flagSchema,
+      allowPositionals: true,
+    });
+    expect(values["no-attach"]).toBe(true);
+  });
 });

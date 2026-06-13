@@ -70,6 +70,9 @@ export interface SandboxOpts {
   harness?: string;
   provider?: string;
   branch?: string;
+  /** Detached create: create/resolve the session but do NOT attach the harness,
+   * so a scripted/CI caller can drive it via `openlock exec`. */
+  noAttach?: boolean;
 }
 
 async function buildSandboxImage(openlockFolderPath: string): Promise<string> {
