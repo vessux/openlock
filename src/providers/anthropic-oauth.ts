@@ -3,22 +3,26 @@ import { spawn } from "bun";
 import type { LoginIO } from "./types";
 
 // OAuth client constants. Per design decision D5 these live in source, not in
-// docs/fixtures/policies. The token endpoint is used here for the
-// authorization-code exchange and later (gateway-side) for refresh.
-// Values match the canonical Claude Code subscription OAuth flow — verified
-// against a live login (the `console.anthropic.com` callback + token host and
-// the 3-scope set are what client 9d1c250a is registered for; `platform.claude.com`
-// and extra scopes are rejected by the authorize endpoint).
+// docs/fixtures/policies. Values are extracted verbatim from the Claude Code CLI
+// bundle's config object (v2.1.176) — the authoritative source. The CLAUDE_AI
+// (subscription) flow authorizes at claude.com/cai; redirect + token live on
+// platform.claude.com (a single shared pair for both console and subscription
+// modes). Do NOT substitute claude.ai/oauth/authorize or console.anthropic.com —
+// those are a different mode / stale and are rejected for this client.
 const CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const CLAUDE_OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"; // max/subscription mode
-export const CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
+const CLAUDE_OAUTH_AUTHORIZE_URL = "https://claude.com/cai/oauth/authorize"; // CLAUDE_AI subscription mode
+export const CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 // HOSTED redirect: after consent the page displays a `code#state` string the
 // user pastes back. There is no localhost server — this is a fixed constant.
-const CLAUDE_OAUTH_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback";
+const CLAUDE_OAUTH_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback";
+// CLAUDE_AI_OAUTH_SCOPES from the bundle — the subscription scope set. Note this
+// omits `org:create_api_key` (that scope belongs to the console/API mode only).
 export const CLAUDE_OAUTH_SCOPES = [
-  "org:create_api_key",
   "user:profile",
   "user:inference",
+  "user:sessions:claude_code",
+  "user:mcp_servers",
+  "user:file_upload",
 ] as const;
 
 /** Real subscription access+refresh token pair captured HOST-side. Never enters

@@ -5,7 +5,7 @@ import { buildClaudeOAuthProfileYaml } from "./claude-oauth-profile";
 
 const material: ProviderRefreshMaterial = {
   strategy: "oauth2_refresh_token",
-  token_url: "https://console.anthropic.com/v1/oauth/token",
+  token_url: "https://platform.claude.com/v1/oauth/token",
   scopes: ["org:create_api_key", "user:profile", "user:inference"],
   client_id: "client-abc",
   refresh_token: "rt-secret",

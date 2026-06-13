@@ -9,7 +9,7 @@ import {
 } from "./anthropic-oauth";
 import type { LoginIO } from "./types";
 
-const REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback";
+const REDIRECT_URI = "https://platform.claude.com/oauth/code/callback";
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 /** A LoginIO whose readLine returns whatever `reply(printed)` computes from the
@@ -61,19 +61,21 @@ describe("buildPkce", () => {
 });
 
 describe("buildAuthorizeUrl", () => {
-  it("uses the canonical Claude Code OAuth scope set (verified against the live flow)", () => {
-    // The claude.ai subscription flow registers exactly these 3 scopes for this
-    // client; extra scopes are rejected by the authorize endpoint.
+  it("uses the Claude Code subscription scope set (extracted from the CC bundle)", () => {
+    // CLAUDE_AI_OAUTH_SCOPES from the Claude Code bundle — the subscription set.
+    // No org:create_api_key (console/API mode only).
     expect([...CLAUDE_OAUTH_SCOPES]).toEqual([
-      "org:create_api_key",
       "user:profile",
       "user:inference",
+      "user:sessions:claude_code",
+      "user:mcp_servers",
+      "user:file_upload",
     ]);
   });
 
   it("emits the expected PKCE / hosted-callback query params", () => {
     const url = new URL(buildAuthorizeUrl({ challenge: "CHALLENGE", state: "STATE" }));
-    expect(`${url.origin}${url.pathname}`).toBe("https://claude.ai/oauth/authorize");
+    expect(`${url.origin}${url.pathname}`).toBe("https://claude.com/cai/oauth/authorize");
     const p = url.searchParams;
     expect(p.get("response_type")).toBe("code");
     expect(p.get("client_id")).toBeTruthy();
@@ -108,7 +110,7 @@ describe("exchangeCode", () => {
     );
 
     expect(captured).toBeDefined();
-    expect(captured?.url).toBe("https://console.anthropic.com/v1/oauth/token");
+    expect(captured?.url).toBe("https://platform.claude.com/v1/oauth/token");
     const headers = new Headers(captured?.init.headers);
     expect(headers.get("content-type")).toContain("application/json");
     expect(headers.get("accept")).toContain("application/json");

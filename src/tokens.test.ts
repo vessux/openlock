@@ -93,7 +93,7 @@ describe("writeProvider/readProvider roundtrip", () => {
       created_at: "2026-06-12T00:00:00.000Z",
       refresh: {
         strategy: "oauth2_refresh_token" as const,
-        token_url: "https://console.anthropic.com/v1/oauth/token",
+        token_url: "https://platform.claude.com/v1/oauth/token",
         scopes: ["user:inference", "user:profile"],
         client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
         refresh_token: "sk-ant-ort01-roundtrip",
