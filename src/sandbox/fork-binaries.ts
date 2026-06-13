@@ -186,6 +186,12 @@ export interface CliInvocation {
 }
 
 export async function getCliInvocation(): Promise<CliInvocation> {
+  // Dev/test override: point at a specific openshell CLI binary (e.g. a
+  // from-source build) instead of the mise-resolved one. The mise dev install
+  // can lag the fork source (and on macOS dyld-fails without system z3), so
+  // exercising fork-side CLI behavior needs a current binary.
+  const override = process.env.OPENLOCK_OPENSHELL_BIN;
+  if (override) return { argv: [override], cwd: undefined };
   if (isDevMode()) {
     return { argv: ["mise", "exec", "--", "openshell"], cwd: forkDir() };
   }
