@@ -394,6 +394,18 @@ describe("buildOpenshellCreateArgv", () => {
     expect(argv).not.toContain("--volume");
   });
 
+  it("appends --log-level debug when debugEgress is set", () => {
+    const argv = buildOpenshellCreateArgv({ ...base, debugEgress: true });
+    const idx = argv.indexOf("--log-level");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv[idx + 1]).toBe("debug");
+  });
+
+  it("omits --log-level by default", () => {
+    const argv = buildOpenshellCreateArgv(base);
+    expect(argv).not.toContain("--log-level");
+  });
+
   it("passes providerId verbatim as --provider", () => {
     const argv = buildOpenshellCreateArgv({ ...base, providerId: "openrouter" });
     const idx = argv.indexOf("--provider");
