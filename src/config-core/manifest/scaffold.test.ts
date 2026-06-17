@@ -108,8 +108,11 @@ describe("scaffoldManifest", () => {
 
   it("opencode empty args scaffold contains OpenRouter model guidance", () => {
     const out = scaffoldManifest({ workdir: "bind", harness: "opencode" });
-    expect(out).toContain("openrouter/nvidia/nemotron-3-super:free");
+    // Assert on the durable guidance, not a specific free-tier slug — free
+    // models rotate on OpenRouter, so pinning one in the test rots too (openlock-1kt).
+    expect(out).toContain("https://openrouter.ai/models");
     expect(out).toContain("small_model");
+    expect(out).toContain("MUST support tool use");
     expect(out).not.toContain("claude-sonnet-4-6");
   });
 
@@ -117,10 +120,10 @@ describe("scaffoldManifest", () => {
     const out = scaffoldManifest({
       workdir: "bind",
       harness: "opencode",
-      args: ["--model", "openrouter/nvidia/nemotron-3-super:free"],
+      args: ["--model", "openrouter/nvidia/nemotron-3-super-120b-a12b:free"],
     });
     expect(out).toContain('- "--model"');
-    expect(out).toContain('- "openrouter/nvidia/nemotron-3-super:free"');
+    expect(out).toContain('- "openrouter/nvidia/nemotron-3-super-120b-a12b:free"');
     // no comment block when args are explicitly set
     expect(out).not.toContain("small_model");
   });

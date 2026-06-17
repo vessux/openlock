@@ -80,13 +80,15 @@ function renderArgs(args: string[], harness: Harness): string {
       return [
         "args: []",
         "  # opencode + OpenRouter: pin a tool-use-capable model your OpenRouter token allows.",
-        "  # Example (free tier):",
+        "  # Free models rotate often — pick a current free model from:",
+        "  #   https://openrouter.ai/models?max_price=0",
+        "  # Example (verify it's still listed above before relying on it):",
         "  # - --model",
-        "  # - openrouter/nvidia/nemotron-3-super:free",
+        "  # - openrouter/nvidia/nemotron-3-super-120b-a12b:free",
         "  # NOTE: --model sets the MAIN model only. opencode's title sub-agent uses `small_model`,",
         "  # which is config-only (not a CLI flag) and otherwise falls back to a PAID default",
         "  # (anthropic/claude-haiku-4.5) that errors on a free-only token. To set it, add an",
-        '  # opencode.json to your repo root, e.g.: { "small_model": "openrouter/nvidia/nemotron-3-super:free" }',
+        '  # opencode.json to your repo root, e.g.: { "small_model": "openrouter/nvidia/nemotron-3-super-120b-a12b:free" }',
         "  # The model MUST support tool use (opencode's build agent enables tools).",
       ].join("\n");
     }
