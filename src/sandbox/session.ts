@@ -73,6 +73,9 @@ export interface SandboxOpts {
   /** Detached create: create/resolve the session but do NOT attach the harness,
    * so a scripted/CI caller can drive it via `openlock exec`. */
   noAttach?: boolean;
+  /** Opt-in supervisor debug for L7 egress header capture (see container.ts).
+   * Applies only at container creation; ignored when reattaching an existing one. */
+  debugEgress?: boolean;
 }
 
 async function buildSandboxImage(openlockFolderPath: string): Promise<string> {
@@ -144,6 +147,7 @@ async function createSession(
   harness: Harness,
   providerId: ProviderId,
   branch: string | undefined,
+  debugEgress: boolean,
 ): Promise<NewSession> {
   const { policy, mounts } = resolved;
 
@@ -232,6 +236,7 @@ async function createSession(
         providerId,
         command: ["/bin/bash", "-c", setupCmd],
         volumeArgs: bindMountArgs(mounts),
+        debugEgress,
       });
 
       // Don't await handle.exited — it blocks until the container stops.
@@ -556,11 +561,19 @@ async function resolveOrCreateSession(
   harness: Harness,
   providerId: ProviderId,
   branch: string | undefined,
+  debugEgress: boolean,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
-    const created = await createSession(projectPath, resolved, harness, providerId, branch);
+    const created = await createSession(
+      projectPath,
+      resolved,
+      harness,
+      providerId,
+      branch,
+      debugEgress,
+    );
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
@@ -696,6 +709,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     harness,
     providerId,
     opts.branch,
+    opts.debugEgress === true,
   );
 
   if (opts.noAttach === true) {

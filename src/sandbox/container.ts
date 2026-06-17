@@ -130,6 +130,9 @@ export interface OpenshellCreateArgs {
   providerId: ProviderId;
   command: string[];
   volumeArgs?: readonly string[];
+  /** Opt-in: run the in-container supervisor at debug so the L7 egress
+   * request/response header lines surface via `openlock logs`. Off by default. */
+  debugEgress?: boolean;
 }
 
 export interface OpenshellHandle {
@@ -153,6 +156,7 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
     args.policy,
     "--provider",
     args.providerId,
+    ...(args.debugEgress === true ? ["--log-level", "debug"] : []),
     "--no-tty",
     ...(args.volumeArgs ?? []),
     "--",
