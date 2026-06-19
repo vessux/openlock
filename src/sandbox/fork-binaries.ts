@@ -84,11 +84,15 @@ async function buildFromSource(
   useZigbuild = false,
 ): Promise<string> {
   const fork = forkDir();
+  // The gateway (openshell-server) gained a prover dependency upstream, which
+  // pulls z3-sys. Build it with bundled-z3 so no system libz3 is required
+  // (mirrors the CLI release build). The supervisor needs no z3.
+  const features = crate === "openshell-server" ? ["--features", "bundled-z3"] : [];
   const argv = useZigbuild
-    ? ["cargo", "zigbuild", "-p", crate, "--target", target!, "--release"]
+    ? ["cargo", "zigbuild", "-p", crate, "--target", target!, "--release", ...features]
     : target
-      ? ["cargo", "build", "-p", crate, "--target", target, "--release"]
-      : ["cargo", "build", "-p", crate, "--release"];
+      ? ["cargo", "build", "-p", crate, "--target", target, "--release", ...features]
+      : ["cargo", "build", "-p", crate, "--release", ...features];
   console.log(`Building ${crate}${target ? ` (${target})` : ""}...`);
   const proc = Bun.spawn(argv, { cwd: fork, stdout: "inherit", stderr: "inherit" });
   if ((await proc.exited) !== 0) {
