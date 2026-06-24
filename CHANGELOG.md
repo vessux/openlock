@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.10.0
+
+### Changed
+
+- **openshell fork synced to upstream (fork v0.7.0): 133 commits absorbed.** The fork caught up to NVIDIA/OpenShell after a long gap (base 2026-05-26), absorbing upstream's split of the monolithic `openshell-sandbox` crate into separate `openshell-supervisor-network` (egress proxy, L7, OPA) and `openshell-supervisor-process` (landlock, netns, seccomp) crates. openlock's cred-inject + trust stack was re-homed into the network crate accordingly. No openlock CLI surface changed; sandbox creation, credential injection, and egress enforcement behave as before. Validated on macOS (podman-machine) and a native rootless-podman Linux box.
+- **Sandbox `stop` / resume now works on native Linux.** With upstream's Stop/Start RPC plumbing in place, `openlock stop <session>` followed by re-running `openlock sandbox` reliably resumes the container on native rootless podman. (A resume hang remains on the macOS podman-machine VM — tracked separately; it does not affect Linux hosts.)
+
+### Fixed
+
+- **The gateway builds with static-linked z3 (fork v0.7.0).** Upstream gave `openshell-server` a prover dependency that pulls `z3-sys`, so the gateway now links z3. Both the release build and openlock's dev-mode build-from-source compile it with `bundled-z3` (no runtime `libz3` dependency), matching the existing CLI build. Building the gateway from source on a fresh Linux box additionally requires `cmake` (GitHub CI runners and typical dev machines already have it).
+
 ## v0.9.2
 
 ### Fixed
