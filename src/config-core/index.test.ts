@@ -57,6 +57,62 @@ describe("lintFolder", () => {
     expect(issues.some((i) => i.file === "policy.yaml")).toBe(true);
   });
 
+  it("hard-errors when policy injects a credential no provider supplies (openlock-8ir)", () => {
+    writeFolder(
+      "args: []\n",
+      [
+        "version: 1",
+        "network_policies:",
+        "  gh:",
+        "    endpoints:",
+        "      - host: api.github.com",
+        "        port: 443",
+        "        protocol: rest",
+        "        rules: [{ allow: { method: GET, path: /** } }]",
+        "        cred_inject:",
+        "          inject:",
+        "            - header: Authorization",
+        "              from_credential: GITHUB_TOKEN",
+        "",
+      ].join("\n"),
+    );
+    const issues = lintFolder(root, { offline: true });
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "policy.yaml" && i.severity === "error" && i.message.includes("GITHUB_TOKEN"),
+      ),
+    ).toBe(true);
+  });
+
+  it("passes the cross-check when a declared credentials: bundle supplies the injected credential", () => {
+    writeFolder(
+      [
+        "credentials:",
+        "  - name: github",
+        "    values:",
+        "      GITHUB_TOKEN: { from_env: GITHUB_TOKEN }",
+        "",
+      ].join("\n"),
+      [
+        "version: 1",
+        "network_policies:",
+        "  gh:",
+        "    endpoints:",
+        "      - host: api.github.com",
+        "        port: 443",
+        "        protocol: rest",
+        "        rules: [{ allow: { method: GET, path: /** } }]",
+        "        cred_inject:",
+        "          inject:",
+        "            - header: Authorization",
+        "              from_credential: GITHUB_TOKEN",
+        "",
+      ].join("\n"),
+    );
+    expect(lintFolder(root, { offline: true })).toEqual([]);
+  });
+
   it("offline:true suppresses a missing-source filesystem issue", () => {
     writeFolder(
       "mounts:\n  - source: nope\n    target: /sandbox/.openlock/x\n    type: copy-once\n",

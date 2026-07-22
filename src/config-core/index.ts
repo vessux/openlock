@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import yaml from "js-yaml";
+import { checkCredentialsSupplied } from "./cross-check";
 import {
   CREDENTIAL_ENTRY_KEYS,
   CREDENTIAL_SOURCE_KEYS,
@@ -7,6 +9,7 @@ import {
   MANIFEST_KEYS,
   MOUNT_ENTRY_KEYS,
   MOUNT_TYPES,
+  parseManifest,
 } from "./manifest/index";
 import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
@@ -67,6 +70,25 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
       message: "policy.yaml not found",
       fix,
     });
+  }
+  // Cross-file: injected credentials must be supplied. Only when both files
+  // parsed cleanly (no schema errors already queued for them) — a
+  // structurally broken doc can't be meaningfully cross-checked.
+  const hasConfigErr = issues.some((i) => i.file === "config.yaml" && i.severity === "error");
+  const hasPolicyErr = issues.some((i) => i.file === "policy.yaml" && i.severity === "error");
+  if (!hasConfigErr && !hasPolicyErr && existsSync(configPath) && existsSync(policyPath)) {
+    try {
+      const manifest = parseManifest(readFileSync(configPath, "utf-8"), projectDir);
+      const policyDoc = (yaml.load(readFileSync(policyPath, "utf-8")) ?? {}) as Parameters<
+        typeof checkCredentialsSupplied
+      >[1];
+      issues.push(...checkCredentialsSupplied(manifest, policyDoc));
+    } catch {
+      // Already validated above (schema-clean); a failure here means a
+      // filesystem-only issue (e.g. offline:true suppressed a missing mount
+      // source that parseManifest's unconditional offline:false re-trips) —
+      // skip the cross-check rather than surface a confusing secondary error.
+    }
   }
   return issues;
 }
