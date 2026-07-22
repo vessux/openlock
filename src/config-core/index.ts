@@ -1,6 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintManifest, MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES } from "./manifest/index";
+import {
+  lintManifest,
+  MANIFEST_KEYS,
+  MOUNT_ENTRY_KEYS,
+  MOUNT_TYPES,
+  CREDENTIAL_ENTRY_KEYS,
+  CREDENTIAL_SOURCE_KEYS,
+} from "./manifest/index";
 import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
 
@@ -13,7 +20,14 @@ export { SANDBOX_OPENLOCK_PREFIX } from "./types";
  * (src/agent-reference-drift.test.ts). */
 export function knownConfigTokens(): string[] {
   return [
-    ...new Set<string>([...MANIFEST_KEYS, ...MOUNT_ENTRY_KEYS, ...MOUNT_TYPES, ...ALL_POLICY_KEYS]),
+    ...new Set<string>([
+      ...MANIFEST_KEYS,
+      ...MOUNT_ENTRY_KEYS,
+      ...MOUNT_TYPES,
+      ...CREDENTIAL_ENTRY_KEYS,
+      ...CREDENTIAL_SOURCE_KEYS,
+      ...ALL_POLICY_KEYS,
+    ]),
   ].sort();
 }
 
