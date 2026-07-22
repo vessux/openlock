@@ -20,8 +20,11 @@ export interface Mount {
   readOnly?: boolean;
 }
 
-/** A source spec for one credential value. v1 supports host-env references only. */
-export interface CredentialSource {
+/** A source spec for one credential value. v1 supports host-env references only.
+ * Not exported standalone: nothing outside this file needs to name it directly
+ * (consumers go through `CredentialBundle["values"]`); re-add `export` if a
+ * later unit needs to import it by name. */
+interface CredentialSource {
   from_env: string;
 }
 

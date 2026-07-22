@@ -107,7 +107,27 @@ function validateEnv(doc: Record<string, unknown>, issues: Issue[]): void {
   }
 }
 
-function validateCredentialEntry(raw: unknown, i: number, seen: Set<string>, issues: Issue[]): void {
+function validateCredentialSource(vp: string, src: unknown, issues: Issue[]): void {
+  if (!isPlainObject(src)) {
+    issues.push(err(vp, "credential source must be a mapping like { from_env: VAR }"));
+    return;
+  }
+  for (const k of Object.keys(src)) {
+    if (!CREDENTIAL_SOURCE_KEYS.has(k)) {
+      issues.push(err(`${vp}.${k}`, `unknown source key "${k}" (allowed: from_env)`));
+    }
+  }
+  if (typeof src.from_env !== "string" || src.from_env.length === 0) {
+    issues.push(err(`${vp}.from_env`, "'from_env' must be a non-empty string"));
+  }
+}
+
+function validateCredentialEntry(
+  raw: unknown,
+  i: number,
+  seen: Set<string>,
+  issues: Issue[],
+): void {
   const where = `credentials[${i}]`;
   if (!isPlainObject(raw)) {
     issues.push(err(where, "credential entry must be a mapping"));
@@ -115,7 +135,9 @@ function validateCredentialEntry(raw: unknown, i: number, seen: Set<string>, iss
   }
   for (const key of Object.keys(raw)) {
     if (!CREDENTIAL_ENTRY_KEYS.has(key)) {
-      issues.push(err(`${where}.${key}`, `unknown field "${key}"`, "remove it or fix the spelling"));
+      issues.push(
+        err(`${where}.${key}`, `unknown field "${key}"`, "remove it or fix the spelling"),
+      );
     }
   }
   if (typeof raw.name !== "string" || raw.name.length === 0) {
@@ -130,19 +152,7 @@ function validateCredentialEntry(raw: unknown, i: number, seen: Set<string>, iss
     return;
   }
   for (const [envKey, src] of Object.entries(raw.values)) {
-    const vp = `${where}.values.${envKey}`;
-    if (!isPlainObject(src)) {
-      issues.push(err(vp, "credential source must be a mapping like { from_env: VAR }"));
-      continue;
-    }
-    for (const k of Object.keys(src)) {
-      if (!CREDENTIAL_SOURCE_KEYS.has(k)) {
-        issues.push(err(`${vp}.${k}`, `unknown source key "${k}" (allowed: from_env)`));
-      }
-    }
-    if (typeof src.from_env !== "string" || src.from_env.length === 0) {
-      issues.push(err(`${vp}.from_env`, "'from_env' must be a non-empty string"));
-    }
+    validateCredentialSource(`${where}.values.${envKey}`, src, issues);
   }
 }
 

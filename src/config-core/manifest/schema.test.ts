@@ -1,4 +1,4 @@
-import { describe, expect, it, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { validateManifestSchema } from "./schema";
 
 describe("validateManifestSchema", () => {
@@ -84,24 +84,24 @@ describe("validateManifestSchema", () => {
 describe("credentials schema", () => {
   const ok = (doc: unknown) => validateManifestSchema(doc);
 
-  test("valid credentials bundle passes", () => {
+  it("valid credentials bundle passes", () => {
     const issues = ok({
       credentials: [{ name: "github", values: { GITHUB_TOKEN: { from_env: "GITHUB_TOKEN" } } }],
     });
     expect(issues).toEqual([]);
   });
 
-  test("credentials must be a list", () => {
+  it("credentials must be a list", () => {
     const issues = ok({ credentials: { name: "x" } });
     expect(issues.some((i) => i.path === "credentials")).toBe(true);
   });
 
-  test("missing name errors", () => {
+  it("missing name errors", () => {
     const issues = ok({ credentials: [{ values: { A: { from_env: "A" } } }] });
     expect(issues.some((i) => i.path === "credentials[0].name")).toBe(true);
   });
 
-  test("duplicate name errors", () => {
+  it("duplicate name errors", () => {
     const issues = ok({
       credentials: [
         { name: "dup", values: { A: { from_env: "A" } } },
@@ -109,25 +109,50 @@ describe("credentials schema", () => {
       ],
     });
     expect(issues.some((i) => i.message.includes("duplicate"))).toBe(true);
+    // The second (repeated) entry is the one flagged, not the first.
+    expect(issues.some((i) => i.path === "credentials[1].name")).toBe(true);
   });
 
-  test("empty values errors", () => {
+  it("empty values errors", () => {
     const issues = ok({ credentials: [{ name: "x", values: {} }] });
     expect(issues.some((i) => i.path === "credentials[0].values")).toBe(true);
   });
 
-  test("unknown source key errors (e.g. stray type)", () => {
-    const issues = ok({ credentials: [{ name: "x", type: "generic", values: { A: { from_env: "A" } } }] });
+  it("unknown source key errors (e.g. stray type)", () => {
+    const issues = ok({
+      credentials: [{ name: "x", type: "generic", values: { A: { from_env: "A" } } }],
+    });
     expect(issues.some((i) => i.path === "credentials[0].type")).toBe(true);
   });
 
-  test("non-string from_env errors", () => {
+  it("non-string from_env errors", () => {
     const issues = ok({ credentials: [{ name: "x", values: { A: { from_env: 5 } } }] });
     expect(issues.some((i) => i.path === "credentials[0].values.A.from_env")).toBe(true);
   });
 
-  test("unknown source-spec key errors", () => {
+  it("unknown source-spec key errors", () => {
     const issues = ok({ credentials: [{ name: "x", values: { A: { stored: true } } }] });
     expect(issues.some((i) => i.path === "credentials[0].values.A.stored")).toBe(true);
+  });
+
+  it("credential entry that is not a mapping errors", () => {
+    const issues = ok({ credentials: ["foo"] });
+    expect(issues.some((i) => i.path === "credentials[0]")).toBe(true);
+    expect(issues.some((i) => i.message.includes("must be a mapping"))).toBe(true);
+  });
+
+  it("per-source non-mapping errors", () => {
+    const issues = ok({ credentials: [{ name: "x", values: { A: 5 } }] });
+    expect(issues.some((i) => i.path === "credentials[0].values.A")).toBe(true);
+  });
+
+  it("multiple valid entries pass", () => {
+    const issues = ok({
+      credentials: [
+        { name: "github", values: { GITHUB_TOKEN: { from_env: "GITHUB_TOKEN" } } },
+        { name: "npm", values: { NPM_TOKEN: { from_env: "NPM_TOKEN" } } },
+      ],
+    });
+    expect(issues).toEqual([]);
   });
 });

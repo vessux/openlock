@@ -1,12 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  CREDENTIAL_ENTRY_KEYS,
+  CREDENTIAL_SOURCE_KEYS,
   lintManifest,
   MANIFEST_KEYS,
   MOUNT_ENTRY_KEYS,
   MOUNT_TYPES,
-  CREDENTIAL_ENTRY_KEYS,
-  CREDENTIAL_SOURCE_KEYS,
 } from "./manifest/index";
 import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
