@@ -52,7 +52,7 @@ async function realOpenshell(args: string[]): Promise<ShellResult> {
 // separated token equals the provider id, after stripping ANSI escapes.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI ESC requires the 0x1b control byte.
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
-export function providerExistsInGateway(listStdout: string, providerId: ProviderId): boolean {
+export function providerExistsInGateway(listStdout: string, providerId: string): boolean {
   return listStdout
     .replace(ANSI_RE, "")
     .split(/\r?\n/)
@@ -231,9 +231,7 @@ export async function _ensureGenericProviderForTests(
   if (list.exitCode !== 0) {
     throw new Error(`Failed to query gateway providers: ${list.stderr || list.stdout}`);
   }
-  // providerExistsInGateway is typed for ProviderId; the match is a plain
-  // first-token string compare, so cast the generic name through.
-  const exists = providerExistsInGateway(list.stdout, name as never);
+  const exists = providerExistsInGateway(list.stdout, name);
   const credArgs = Object.entries(values).flatMap(([k, v]) => ["--credential", `${k}=${v}`]);
   const args = exists
     ? ["provider", "update", name, ...credArgs]
