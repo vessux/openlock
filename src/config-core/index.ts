@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import yaml from "js-yaml";
-import { checkCredentialsSupplied } from "./cross-check";
+import { checkCredentialNameCollisions, checkCredentialsSupplied } from "./cross-check";
 import {
   CREDENTIAL_ENTRY_KEYS,
   CREDENTIAL_SOURCE_KEYS,
@@ -31,6 +31,21 @@ export function knownConfigTokens(): string[] {
       ...ALL_POLICY_KEYS,
     ]),
   ].sort();
+}
+
+/** Load just the `credentials:` list from config.yaml via a plain YAML parse.
+ * Deliberately does NOT go through `parseManifest`: that also resolves+checks
+ * mount sources on disk (severity:"filesystem") and THROWS on the first such
+ * issue, which would silently drop cross-file credential checks on an
+ * everyday filesystem misconfig unrelated to credentials (openlock-8ir).
+ * Callers only use this once the caller's own schema-clean guard already
+ * proves the file parses as YAML without throwing (a syntax error would have
+ * been caught by `lintManifest` and queued as severity:"error"). */
+function loadDeclaredCredentials(
+  configPath: string,
+): { name: string; values: Record<string, unknown> }[] {
+  const doc = (yaml.load(readFileSync(configPath, "utf-8")) ?? {}) as { credentials?: unknown };
+  return Array.isArray(doc.credentials) ? doc.credentials : [];
 }
 
 /** Validate the whole .openlock/ folder (manifest + policy). Collect-all,
@@ -70,25 +85,25 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
       fix,
     });
   }
-  // Cross-file: injected credentials must be supplied. Only when both files
-  // have no severity:"error" issues already queued for them — a structurally
-  // broken doc can't be meaningfully cross-checked. Deliberately does NOT go
-  // through parseManifest: that also resolves+checks mount sources on disk
-  // (severity:"filesystem", which does not gate this block) and THROWS on the
-  // first such issue, which would silently drop the cross-check on an
-  // everyday filesystem misconfig unrelated to credentials (openlock-8ir). A
-  // plain yaml.load of each file is enough — checkCredentialsSupplied only
-  // reads manifest.credentials, and the schema-clean guard above already
-  // proves both files parse as YAML without throwing (a syntax error would
-  // have been caught by lintManifest/lintPolicy and queued as
-  // severity:"error").
   const hasConfigErr = issues.some((i) => i.file === "config.yaml" && i.severity === "error");
   const hasPolicyErr = issues.some((i) => i.file === "policy.yaml" && i.severity === "error");
+  // Config-only: a credentials[].name colliding with a built-in provider id.
+  // Runs whenever config.yaml exists and is itself schema-clean — independent
+  // of policy.yaml's state, since this is not a cross-file concern and must
+  // surface even when policy.yaml has unrelated issues.
+  if (!hasConfigErr && existsSync(configPath)) {
+    const credentials = loadDeclaredCredentials(configPath);
+    issues.push(
+      ...checkCredentialNameCollisions({
+        credentials,
+      } as Parameters<typeof checkCredentialNameCollisions>[0]),
+    );
+  }
+  // Cross-file: injected credentials must be supplied. Only when both files
+  // have no severity:"error" issues already queued for them — a structurally
+  // broken doc can't be meaningfully cross-checked.
   if (!hasConfigErr && !hasPolicyErr && existsSync(configPath) && existsSync(policyPath)) {
-    const manifestDoc = (yaml.load(readFileSync(configPath, "utf-8")) ?? {}) as {
-      credentials?: unknown;
-    };
-    const credentials = Array.isArray(manifestDoc.credentials) ? manifestDoc.credentials : [];
+    const credentials = loadDeclaredCredentials(configPath);
     const policyDoc = (yaml.load(readFileSync(policyPath, "utf-8")) ?? {}) as Parameters<
       typeof checkCredentialsSupplied
     >[1];

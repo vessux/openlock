@@ -44,3 +44,10 @@ The gateway injects `Authorization: Bearer <token>` into requests to
 `api.github.com` from `/usr/bin/gh` only — every other binary is denied the
 secret (per-binary scoping). If the env var is unset at run-time, `openlock
 sandbox` errors before creating the sandbox.
+
+**Caveat:** providers are attached to a sandbox only when its session is first
+created. If you add a new `credentials:` entry to a project that already has a
+running session, re-running `openlock sandbox` re-provisions the credential in
+the gateway but does not attach the new provider to that existing sandbox —
+recreate the session (`openlock clean <name>` then `openlock sandbox`) so the
+new provider gets attached.

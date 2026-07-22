@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkCredentialsSupplied } from "./cross-check";
+import { checkCredentialNameCollisions, checkCredentialsSupplied } from "./cross-check";
 
 const policyInjecting = (cred: string) => ({
   version: 1,
@@ -103,5 +103,27 @@ describe("checkCredentialsSupplied", () => {
 
   test("returns [] when policy has no network_policies at all", () => {
     expect(checkCredentialsSupplied({ credentials: [] }, {})).toEqual([]);
+  });
+});
+
+describe("checkCredentialNameCollisions", () => {
+  test("errors when a bundle name collides with a registered provider id", () => {
+    const issues = checkCredentialNameCollisions({
+      credentials: [{ name: "anthropic", values: { X: { from_env: "X" } } }],
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      file: "config.yaml",
+      severity: "error",
+      path: "credentials[0].name",
+    });
+    expect(issues[0]?.message).toContain("anthropic");
+  });
+
+  test("passes for a normally-named bundle", () => {
+    const issues = checkCredentialNameCollisions({
+      credentials: [{ name: "github", values: { GITHUB_TOKEN: { from_env: "GITHUB_TOKEN" } } }],
+    });
+    expect(issues).toEqual([]);
   });
 });

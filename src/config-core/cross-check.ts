@@ -71,3 +71,26 @@ export function checkCredentialsSupplied(manifest: ManifestLike, policy: PolicyL
   }
   return issues;
 }
+
+/** A `credentials[].name` that collides with a registered primary provider id
+ * (e.g. naming a bundle `anthropic`) is a hard error: `ensureGenericProvider`
+ * would see the primary provider already exists in the gateway and run
+ * `provider update <name> --credential …` against it — mutating the primary
+ * provider's gateway record — and `buildOpenshellCreateArgv` would emit
+ * `--provider <name>` twice. Config-only problem; independent of policy.yaml
+ * state. */
+export function checkCredentialNameCollisions(manifest: ManifestLike): Issue[] {
+  const issues: Issue[] = [];
+  (manifest.credentials ?? []).forEach((bundle, i) => {
+    if ((PROVIDER_IDS as readonly string[]).includes(bundle.name)) {
+      issues.push({
+        file: "config.yaml",
+        severity: "error",
+        path: `credentials[${i}].name`,
+        message: `credential bundle name "${bundle.name}" collides with a built-in provider — choose a different name`,
+        fix: `rename this credentials[] entry to something other than: ${PROVIDER_IDS.join(", ")}`,
+      });
+    }
+  });
+  return issues;
+}

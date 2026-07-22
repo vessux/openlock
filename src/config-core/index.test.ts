@@ -113,6 +113,45 @@ describe("lintFolder", () => {
     expect(lintFolder(root, { offline: true })).toEqual([]);
   });
 
+  it("hard-errors when a credentials[] bundle name collides with a built-in provider (openlock-8ir)", () => {
+    writeFolder(
+      ["credentials:", "  - name: anthropic", "    values:", "      X: { from_env: X }", ""].join(
+        "\n",
+      ),
+      "version: 1\n",
+    );
+    const issues = lintFolder(root, { offline: false });
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "config.yaml" &&
+          i.severity === "error" &&
+          i.path === "credentials[0].name" &&
+          i.message.includes("anthropic"),
+      ),
+    ).toBe(true);
+  });
+
+  it("surfaces the name-collision error even when policy.yaml has an unrelated issue (independence)", () => {
+    writeFolder(
+      ["credentials:", "  - name: openrouter", "    values:", "      X: { from_env: X }", ""].join(
+        "\n",
+      ),
+      "filesystem_policy: {}\n",
+    );
+    const issues = lintFolder(root, { offline: false });
+    expect(issues.some((i) => i.file === "policy.yaml" && i.severity === "error")).toBe(true);
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "config.yaml" &&
+          i.severity === "error" &&
+          i.path === "credentials[0].name" &&
+          i.message.includes("openrouter"),
+      ),
+    ).toBe(true);
+  });
+
   it("surfaces an unsupplied-credential error even when config.yaml has an unrelated filesystem issue (openlock-8ir regression)", () => {
     // config.yaml has a mounts: entry whose source doesn't exist on disk
     // (severity:"filesystem", non-blocking for the cross-check guard) AND
