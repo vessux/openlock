@@ -242,7 +242,11 @@ describe("ensureGenericProvider", () => {
     const shell = async (args: string[]) => {
       calls.push(args);
       if (args[0] === "provider" && args[1] === "list") {
-        return { exitCode: 0, stdout: exists ? "NAME TYPE\ngithub generic 1 0\n" : "NAME TYPE\n", stderr: "" };
+        return {
+          exitCode: 0,
+          stdout: exists ? "NAME TYPE\ngithub generic 1 0\n" : "NAME TYPE\n",
+          stderr: "",
+        };
       }
       return { exitCode: 0, stdout: "", stderr: "" };
     };
@@ -254,7 +258,14 @@ describe("ensureGenericProvider", () => {
     await _ensureGenericProviderForTests("github", { GITHUB_TOKEN: "ghp_x" }, shell);
     const create = calls.find((c) => c[0] === "provider" && c[1] === "create");
     expect(create).toEqual([
-      "provider", "create", "--name", "github", "--type", "generic", "--credential", "GITHUB_TOKEN=ghp_x",
+      "provider",
+      "create",
+      "--name",
+      "github",
+      "--type",
+      "generic",
+      "--credential",
+      "GITHUB_TOKEN=ghp_x",
     ]);
   });
 

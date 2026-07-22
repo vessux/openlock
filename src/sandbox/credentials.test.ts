@@ -18,6 +18,8 @@ describe("resolveCredentialValues", () => {
   });
 
   test("throws when a var is set but empty", () => {
-    expect(() => resolveCredentialValues(bundle, { GH_PAT: "ghp_x", EXTRA_VAR: "" })).toThrow(/EXTRA_VAR/);
+    expect(() => resolveCredentialValues(bundle, { GH_PAT: "ghp_x", EXTRA_VAR: "" })).toThrow(
+      /EXTRA_VAR/,
+    );
   });
 });
