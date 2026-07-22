@@ -113,6 +113,40 @@ describe("lintFolder", () => {
     expect(lintFolder(root, { offline: true })).toEqual([]);
   });
 
+  it("surfaces an unsupplied-credential error even when config.yaml has an unrelated filesystem issue (openlock-8ir regression)", () => {
+    // config.yaml has a mounts: entry whose source doesn't exist on disk
+    // (severity:"filesystem", non-blocking for the cross-check guard) AND
+    // policy.yaml injects a credential nothing supplies. Before the fix,
+    // parseManifest's mount-source check threw inside the cross-check's
+    // try/catch and silently dropped the GITHUB_TOKEN error along with it.
+    writeFolder(
+      "mounts:\n  - source: nope\n    target: /sandbox/.openlock/x\n    type: copy-once\n",
+      [
+        "version: 1",
+        "network_policies:",
+        "  gh:",
+        "    endpoints:",
+        "      - host: api.github.com",
+        "        port: 443",
+        "        protocol: rest",
+        "        rules: [{ allow: { method: GET, path: /** } }]",
+        "        cred_inject:",
+        "          inject:",
+        "            - header: Authorization",
+        "              from_credential: GITHUB_TOKEN",
+        "",
+      ].join("\n"),
+    );
+    const issues = lintFolder(root, { offline: false });
+    expect(issues.some((i) => i.file === "config.yaml" && i.severity === "filesystem")).toBe(true);
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "policy.yaml" && i.severity === "error" && i.message.includes("GITHUB_TOKEN"),
+      ),
+    ).toBe(true);
+  });
+
   it("offline:true suppresses a missing-source filesystem issue", () => {
     writeFolder(
       "mounts:\n  - source: nope\n    target: /sandbox/.openlock/x\n    type: copy-once\n",

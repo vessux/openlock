@@ -9,7 +9,6 @@ import {
   MANIFEST_KEYS,
   MOUNT_ENTRY_KEYS,
   MOUNT_TYPES,
-  parseManifest,
 } from "./manifest/index";
 import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
@@ -72,23 +71,33 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
     });
   }
   // Cross-file: injected credentials must be supplied. Only when both files
-  // parsed cleanly (no schema errors already queued for them) — a
-  // structurally broken doc can't be meaningfully cross-checked.
+  // have no severity:"error" issues already queued for them — a structurally
+  // broken doc can't be meaningfully cross-checked. Deliberately does NOT go
+  // through parseManifest: that also resolves+checks mount sources on disk
+  // (severity:"filesystem", which does not gate this block) and THROWS on the
+  // first such issue, which would silently drop the cross-check on an
+  // everyday filesystem misconfig unrelated to credentials (openlock-8ir). A
+  // plain yaml.load of each file is enough — checkCredentialsSupplied only
+  // reads manifest.credentials, and the schema-clean guard above already
+  // proves both files parse as YAML without throwing (a syntax error would
+  // have been caught by lintManifest/lintPolicy and queued as
+  // severity:"error").
   const hasConfigErr = issues.some((i) => i.file === "config.yaml" && i.severity === "error");
   const hasPolicyErr = issues.some((i) => i.file === "policy.yaml" && i.severity === "error");
   if (!hasConfigErr && !hasPolicyErr && existsSync(configPath) && existsSync(policyPath)) {
-    try {
-      const manifest = parseManifest(readFileSync(configPath, "utf-8"), projectDir);
-      const policyDoc = (yaml.load(readFileSync(policyPath, "utf-8")) ?? {}) as Parameters<
-        typeof checkCredentialsSupplied
-      >[1];
-      issues.push(...checkCredentialsSupplied(manifest, policyDoc));
-    } catch {
-      // Already validated above (schema-clean); a failure here means a
-      // filesystem-only issue (e.g. offline:true suppressed a missing mount
-      // source that parseManifest's unconditional offline:false re-trips) —
-      // skip the cross-check rather than surface a confusing secondary error.
-    }
+    const manifestDoc = (yaml.load(readFileSync(configPath, "utf-8")) ?? {}) as {
+      credentials?: unknown;
+    };
+    const credentials = Array.isArray(manifestDoc.credentials) ? manifestDoc.credentials : [];
+    const policyDoc = (yaml.load(readFileSync(policyPath, "utf-8")) ?? {}) as Parameters<
+      typeof checkCredentialsSupplied
+    >[1];
+    issues.push(
+      ...checkCredentialsSupplied(
+        { credentials } as Parameters<typeof checkCredentialsSupplied>[0],
+        policyDoc,
+      ),
+    );
   }
   return issues;
 }
