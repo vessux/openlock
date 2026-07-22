@@ -4,7 +4,7 @@ import { resolveSource, validateManifestFilesystem } from "./filesystem";
 import { validateManifestSchema } from "./schema";
 import { validateManifestSemantics } from "./semantic";
 
-export { MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES } from "./schema";
+export { MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES, CREDENTIAL_ENTRY_KEYS, CREDENTIAL_SOURCE_KEYS } from "./schema";
 
 interface ParsedDoc {
   doc: unknown;
@@ -69,7 +69,10 @@ export function parseManifest(raw: unknown, projectRoot: string): ManifestConfig
   });
   const args = Array.isArray(obj.args) ? (obj.args as string[]) : [];
   const env = (obj.env ?? {}) as Record<string, string>;
-  const config: ManifestConfig = { mounts, args, env };
+  const credentials = Array.isArray(obj.credentials)
+    ? (obj.credentials as import("../types").CredentialBundle[])
+    : [];
+  const config: ManifestConfig = { mounts, args, env, credentials };
   // Validated by lintManifest above, so this is a known harness or absent.
   if (typeof obj.harness === "string") config.harness = obj.harness as ManifestConfig["harness"];
   return config;

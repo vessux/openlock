@@ -1,7 +1,7 @@
 import { HARNESSES } from "../../sandbox/harness";
 import type { Issue, MountType } from "../types";
 
-export const MANIFEST_KEYS = new Set(["harness", "mounts", "args", "env"]);
+export const MANIFEST_KEYS = new Set(["harness", "mounts", "args", "env", "credentials"]);
 export const MOUNT_ENTRY_KEYS = new Set(["source", "target", "type", "readOnly"]);
 export const MOUNT_TYPES: readonly MountType[] = [
   "copy-once",
@@ -9,6 +9,8 @@ export const MOUNT_TYPES: readonly MountType[] = [
   "bind",
   "git-bundle",
 ];
+export const CREDENTIAL_ENTRY_KEYS = new Set(["name", "values"]);
+export const CREDENTIAL_SOURCE_KEYS = new Set(["from_env"]);
 
 function err(path: string, message: string, fix?: string): Issue {
   return fix === undefined
@@ -105,6 +107,57 @@ function validateEnv(doc: Record<string, unknown>, issues: Issue[]): void {
   }
 }
 
+function validateCredentialEntry(raw: unknown, i: number, seen: Set<string>, issues: Issue[]): void {
+  const where = `credentials[${i}]`;
+  if (!isPlainObject(raw)) {
+    issues.push(err(where, "credential entry must be a mapping"));
+    return;
+  }
+  for (const key of Object.keys(raw)) {
+    if (!CREDENTIAL_ENTRY_KEYS.has(key)) {
+      issues.push(err(`${where}.${key}`, `unknown field "${key}"`, "remove it or fix the spelling"));
+    }
+  }
+  if (typeof raw.name !== "string" || raw.name.length === 0) {
+    issues.push(err(`${where}.name`, "'name' must be a non-empty string"));
+  } else if (seen.has(raw.name)) {
+    issues.push(err(`${where}.name`, `duplicate credential name "${raw.name}"`));
+  } else {
+    seen.add(raw.name);
+  }
+  if (!isPlainObject(raw.values) || Object.keys(raw.values).length === 0) {
+    issues.push(err(`${where}.values`, "'values' must be a non-empty mapping"));
+    return;
+  }
+  for (const [envKey, src] of Object.entries(raw.values)) {
+    const vp = `${where}.values.${envKey}`;
+    if (!isPlainObject(src)) {
+      issues.push(err(vp, "credential source must be a mapping like { from_env: VAR }"));
+      continue;
+    }
+    for (const k of Object.keys(src)) {
+      if (!CREDENTIAL_SOURCE_KEYS.has(k)) {
+        issues.push(err(`${vp}.${k}`, `unknown source key "${k}" (allowed: from_env)`));
+      }
+    }
+    if (typeof src.from_env !== "string" || src.from_env.length === 0) {
+      issues.push(err(`${vp}.from_env`, "'from_env' must be a non-empty string"));
+    }
+  }
+}
+
+function validateCredentials(doc: Record<string, unknown>, issues: Issue[]): void {
+  if (doc.credentials === undefined || doc.credentials === null) return;
+  if (!Array.isArray(doc.credentials)) {
+    issues.push(err("credentials", "'credentials' must be a list"));
+    return;
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < doc.credentials.length; i++) {
+    validateCredentialEntry(doc.credentials[i], i, seen, issues);
+  }
+}
+
 export function validateManifestSchema(doc: unknown): Issue[] {
   const issues: Issue[] = [];
   if (!isPlainObject(doc)) {
@@ -126,5 +179,6 @@ export function validateManifestSchema(doc: unknown): Issue[] {
   validateMounts(doc, issues);
   validateArgs(doc, issues);
   validateEnv(doc, issues);
+  validateCredentials(doc, issues);
   return issues;
 }

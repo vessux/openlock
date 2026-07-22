@@ -73,7 +73,7 @@ describe("parseManifest", () => {
   });
 
   it("defaults to empty arrays/object for an empty manifest", () => {
-    expect(parseManifest({}, root)).toEqual({ mounts: [], args: [], env: {} });
+    expect(parseManifest({}, root)).toEqual({ mounts: [], args: [], env: {}, credentials: [] });
   });
 
   it("extracts a valid harness key", () => {
@@ -110,7 +110,7 @@ describe("parseManifest", () => {
 
   it("builds config from a YAML string input", () => {
     const cfg = parseManifest("args:\n  - --x\nenv:\n  A: '1'\n", root);
-    expect(cfg).toEqual({ mounts: [], args: ["--x"], env: { A: "1" } });
+    expect(cfg).toEqual({ mounts: [], args: ["--x"], env: { A: "1" }, credentials: [] });
   });
 });
 

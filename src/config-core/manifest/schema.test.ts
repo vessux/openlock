@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import { validateManifestSchema } from "./schema";
 
 describe("validateManifestSchema", () => {
@@ -78,5 +78,56 @@ describe("validateManifestSchema", () => {
 
   it("rejects a non-string harness", () => {
     expect(validateManifestSchema({ harness: 1 })[0]?.path).toBe("harness");
+  });
+});
+
+describe("credentials schema", () => {
+  const ok = (doc: unknown) => validateManifestSchema(doc);
+
+  test("valid credentials bundle passes", () => {
+    const issues = ok({
+      credentials: [{ name: "github", values: { GITHUB_TOKEN: { from_env: "GITHUB_TOKEN" } } }],
+    });
+    expect(issues).toEqual([]);
+  });
+
+  test("credentials must be a list", () => {
+    const issues = ok({ credentials: { name: "x" } });
+    expect(issues.some((i) => i.path === "credentials")).toBe(true);
+  });
+
+  test("missing name errors", () => {
+    const issues = ok({ credentials: [{ values: { A: { from_env: "A" } } }] });
+    expect(issues.some((i) => i.path === "credentials[0].name")).toBe(true);
+  });
+
+  test("duplicate name errors", () => {
+    const issues = ok({
+      credentials: [
+        { name: "dup", values: { A: { from_env: "A" } } },
+        { name: "dup", values: { B: { from_env: "B" } } },
+      ],
+    });
+    expect(issues.some((i) => i.message.includes("duplicate"))).toBe(true);
+  });
+
+  test("empty values errors", () => {
+    const issues = ok({ credentials: [{ name: "x", values: {} }] });
+    expect(issues.some((i) => i.path === "credentials[0].values")).toBe(true);
+  });
+
+  test("unknown source key errors (e.g. stray type)", () => {
+    const issues = ok({ credentials: [{ name: "x", type: "generic", values: { A: { from_env: "A" } } }] });
+    expect(issues.some((i) => i.path === "credentials[0].type")).toBe(true);
+  });
+
+  test("non-string from_env errors", () => {
+    const issues = ok({ credentials: [{ name: "x", values: { A: { from_env: 5 } } }] });
+    expect(issues.some((i) => i.path === "credentials[0].values.A.from_env")).toBe(true);
+  });
+
+  test("unknown source-spec key errors", () => {
+    const issues = ok({ credentials: [{ name: "x", values: { A: { stored: true } } }] });
+    expect(issues.some((i) => i.path === "credentials[0].values.A.stored")).toBe(true);
   });
 });
