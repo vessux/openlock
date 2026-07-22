@@ -12,7 +12,7 @@ import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
 
 export { parseManifest } from "./manifest/index";
-export type { ConfigFile, Issue, ManifestConfig, Mount, Severity } from "./types";
+export type { ConfigFile, CredentialBundle, Issue, ManifestConfig, Mount, Severity } from "./types";
 export { SANDBOX_OPENLOCK_PREFIX } from "./types";
 
 /** Every schema key/enum the config validators recognize, de-duplicated and
