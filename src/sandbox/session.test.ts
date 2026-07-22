@@ -33,6 +33,18 @@ describe("resolveRepoPolicy", () => {
   it("leaves harness undefined on the --policy override path (no .openlock read)", () => {
     expect(resolveRepoPolicy("/nonexistent", "/tmp/some-policy.yaml").harness).toBeUndefined();
   });
+
+  it("carries credentials from the folder; empty on --policy override", () => {
+    const proj = projectWith(
+      "mounts: []\ncredentials:\n  - name: github\n    values:\n      GITHUB_TOKEN: { from_env: GITHUB_TOKEN }\n",
+    );
+    expect(resolveRepoPolicy(proj).credentials).toEqual([
+      { name: "github", values: { GITHUB_TOKEN: { from_env: "GITHUB_TOKEN" } } },
+    ]);
+
+    const overridden = resolveRepoPolicy("/whatever", "/tmp/some-policy.yaml");
+    expect(overridden.credentials).toEqual([]);
+  });
 });
 
 describe("stageProviderSandboxFiles", () => {

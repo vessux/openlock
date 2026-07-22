@@ -51,6 +51,22 @@ describe("resolveOpenlockFolder", () => {
     expect(resolveOpenlockFolder(proj).harness).toBeUndefined();
   });
 
+  it("surfaces declared credentials", () => {
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(
+      join(folder, "config.yaml"),
+      "credentials:\n  - name: github\n    values:\n      GITHUB_TOKEN: { from_env: GITHUB_TOKEN }\n",
+    );
+    writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+    writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
+    const res = resolveOpenlockFolder(proj);
+    expect(res.credentials).toEqual([
+      { name: "github", values: { GITHUB_TOKEN: { from_env: "GITHUB_TOKEN" } } },
+    ]);
+  });
+
   it("rejects a config.yaml with a leftover caps key", () => {
     const proj = tmpProject();
     const folder = join(proj, ".openlock");

@@ -214,11 +214,11 @@ export async function _ensureProviderForTests(providerId: ProviderId, shell: She
 
 /** Provision a generic secondary-credential provider (create-or-update) from a
  * resolved {credKey: value} bundle. Type is always `generic`. Never surfaces the
- * credential VALUE in errors — only the provider name + openshell stderr.
- * Not yet called outside tests (session.ts wiring is a later unit, openlock-8ir);
- * re-add `export` when that lands. */
-// biome-ignore lint/correctness/noUnusedVariables: wired into session.ts by a later unit (openlock-8ir); kept unexported so knip doesn't flag a dead export in the meantime.
-async function ensureGenericProvider(name: string, values: Record<string, string>): Promise<void> {
+ * credential VALUE in errors — only the provider name + openshell stderr. */
+export async function ensureGenericProvider(
+  name: string,
+  values: Record<string, string>,
+): Promise<void> {
   await _ensureGenericProviderForTests(name, values, realOpenshell);
 }
 
