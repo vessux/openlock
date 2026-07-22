@@ -130,6 +130,10 @@ export interface OpenshellCreateArgs {
   providerId: ProviderId;
   command: string[];
   volumeArgs?: readonly string[];
+  /** Extra gateway provider names attached to this sandbox in addition to the
+   * primary. Each becomes an additional `--provider <name>`; the gateway merges
+   * their credentials so policy cred_inject can resolve them. openlock-8ir. */
+  attachProviders?: readonly string[];
   /** Opt-in: run the in-container supervisor at debug so the L7 egress
    * request/response header lines surface via `openlock logs`. Off by default. */
   debugEgress?: boolean;
@@ -156,6 +160,7 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
     args.policy,
     "--provider",
     args.providerId,
+    ...(args.attachProviders ?? []).flatMap((name) => ["--provider", name]),
     ...(args.debugEgress === true ? ["--log-level", "debug"] : []),
     "--no-tty",
     ...(args.volumeArgs ?? []),
