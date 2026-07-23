@@ -226,6 +226,63 @@ async function pipeFilteredStderr(stream: ReadableStream<Uint8Array>): Promise<v
   }
 }
 
+const DEFAULT_FAILURE_LOG_LINES = 50;
+
+// `openshell logs <name>` (top-level, NOT `sandbox logs`) is gateway-mediated:
+// it reads from the gateway's in-memory log buffer, which the in-container
+// supervisor fills via a best-effort push (log_push) as it runs. Unlike
+// `openshell sandbox exec`, this works even after the container has exited —
+// there's no requirement that the sandbox be Running — so it's the right tool
+// to pull whatever the supervisor managed to report (e.g. "Policy fetch
+// failed") before it died. Push depends on the same gateway connectivity the
+// supervisor needs for policy fetch, so if the container never reached the
+// gateway at all, this can legitimately come back empty (see GH #75 / bd
+// openlock-7er piece 1 — that's the doctor check's job, not this one's).
+export function buildSandboxLogsArgv(
+  cliPrefix: readonly string[],
+  name: string,
+  opts: { lines?: number } = {},
+): string[] {
+  const lines = opts.lines ?? DEFAULT_FAILURE_LOG_LINES;
+  return [...cliPrefix, "logs", name, "-n", String(lines)];
+}
+
+async function fetchSandboxFailureLogs(
+  name: string,
+  lines = DEFAULT_FAILURE_LOG_LINES,
+): Promise<string> {
+  const cli = await getCliInvocation();
+  const argv = buildSandboxLogsArgv(cli.argv, name, { lines });
+  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "pipe", stderr: "ignore" });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  return out.trim();
+}
+
+// Pure so it's unit-testable without spawning `openshell logs`.
+export function formatSandboxExitedError(name: string, logs: string): string {
+  if (logs.length === 0) {
+    return (
+      `sandbox "${name}" exited during provisioning, and the gateway received no supervisor ` +
+      "logs before it did (this usually means the container never reached the gateway over " +
+      "the network — run `openlock doctor`; see GH #75). Check the container runtime's own " +
+      `logs (e.g. \`podman logs openshell-sandbox-${name}\`) for the underlying error.`
+    );
+  }
+  return `sandbox "${name}" exited during provisioning. Last supervisor logs:\n${logs}`;
+}
+
+// Fails fast with the real cause once the container is confirmed dead
+// (Failed/Exited/Stopped/missing), instead of letting callers burn their full
+// poll timeout only to report a generic "not ready"/"not visible" message.
+// No-ops (returns normally) while the sandbox is merely still provisioning.
+export async function assertSandboxNotExited(name: string): Promise<void> {
+  const state = await getSandboxState(name);
+  if (state !== "exited" && state !== "missing") return;
+  const logs = await fetchSandboxFailureLogs(name);
+  throw new Error(formatSandboxExitedError(name, logs));
+}
+
 // Wait until the openshell-sandbox supervisor reports the sandbox in Ready
 // phase. `openshell sandbox exec` returns "sandbox not ready" / "sandbox not
 // found" until the supervisor finishes provisioning, so probe with a no-op
@@ -243,6 +300,7 @@ export async function waitForSandboxReady(name: string, timeoutMs = 60_000): Pro
       stderr: "ignore",
     });
     if ((await proc.exited) === 0) return;
+    await assertSandboxNotExited(name);
     await Bun.sleep(500);
   }
   throw new Error(`sandbox ${name} did not reach Ready state within ${timeoutMs}ms`);

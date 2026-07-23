@@ -17,6 +17,7 @@ import { type Runtime, resolveRuntime } from "../runtime";
 import { hasAnyProvider } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import {
+  assertSandboxNotExited,
   buildOpenshellExecArgv,
   buildSandboxEnv,
   deleteSandbox,
@@ -315,6 +316,10 @@ async function waitForStagingUploaded(
   while (Date.now() < deadline) {
     const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
     if ((await proc.exited) === 0) return;
+    // Fail fast with the real cause if the container has already died (e.g.
+    // supervisor policy-fetch failure) instead of spending the rest of this
+    // timeout only to fall through to the misleading warning below.
+    await assertSandboxNotExited(containerName);
     await Bun.sleep(200);
   }
   console.warn(
