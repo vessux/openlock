@@ -32,7 +32,7 @@ const PKI_DIR = join(STATE_DIR, "pki");
 const JWT_SIGNING_KEY = join(PKI_DIR, "jwt", "signing.pem");
 const JWT_PUBLIC_KEY = join(PKI_DIR, "jwt", "public.pem");
 const JWT_KID = join(PKI_DIR, "jwt", "kid");
-const GATEWAY_PORT = 18081;
+export const GATEWAY_PORT = 18081;
 // Historical name from the podman-only era; now drives podman OR docker per
 // `--drivers` resolution. Kept stable so existing on-disk state under
 // `~/.config/openshell/gateways/podman-dev/` stays valid. Revisit at v1.0.
