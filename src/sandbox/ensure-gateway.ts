@@ -4,6 +4,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -18,6 +19,10 @@ import { pidAlive } from "./proc";
 const STATE_DIR = join(process.env.HOME || homedir(), ".local", "state", "openlock");
 const PID_FILE = join(STATE_DIR, "gateway.pid");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
+// gateway.log is appended to forever across gateway restarts (openlock-lai:
+// observed at 100MB, unrotated). Rotate at (re)start time — the only moment
+// openlock touches the file — keeping exactly one backup generation.
+const GATEWAY_LOG_MAX_BYTES = 10 * 1024 * 1024;
 const CONFIG_FILE = join(STATE_DIR, "gateway-config.toml");
 // Sandbox-JWT signing material. Since upstream #1404 the sandbox supervisor
 // requires a gateway-minted JWT to fetch its policy — without one it exits
@@ -211,6 +216,26 @@ async function resolvePodmanSocket(): Promise<string> {
   return out.trim();
 }
 
+// Rotate `logPath` to `logPath.1` (overwriting any prior `.1`) if it exists
+// and has grown to `maxBytes` or larger. One backup generation only — not
+// N. No-ops when the file doesn't exist (first run) or is under threshold.
+// Rotation failures never block gateway startup: at most a warning is
+// logged and the (possibly oversized) file is left as-is for `openSync`'s
+// append to continue against.
+export function rotateLogIfLarge(logPath: string, maxBytes: number): void {
+  try {
+    if (!existsSync(logPath)) return;
+    if (statSync(logPath).size < maxBytes) return;
+    renameSync(logPath, `${logPath}.1`);
+  } catch (err) {
+    console.warn(
+      `Warning: failed to rotate gateway log at ${logPath}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
 export function spawnDaemonToLog(args: string[], cwd: string, logPath: string): { pid: number } {
   const logFd = openSync(logPath, "a");
   try {
@@ -283,6 +308,7 @@ export async function startGateway(): Promise<void> {
     ...(process.platform === "linux" ? ["--bind-address", "0.0.0.0"] : []),
   ];
 
+  rotateLogIfLarge(LOG_FILE, GATEWAY_LOG_MAX_BYTES);
   const { pid: gwPid } = spawnDaemonToLog(args, STATE_DIR, LOG_FILE);
 
   writeFileSync(PID_FILE, String(gwPid));
