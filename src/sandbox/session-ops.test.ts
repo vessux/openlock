@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { buildIdleNudge, type ClassifiedSession } from "./session-ops";
 import type { Classification, SessionWithState } from "./reap";
+import { buildIdleNudge, type ClassifiedSession } from "./session-ops";
 
 const NOW = new Date("2026-05-07T12:00:00Z").getTime();
 
