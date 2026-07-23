@@ -56,7 +56,8 @@ import {
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
-import { reapIdleStaleSessions } from "./session-ops";
+import { reapIdleMs } from "./reap";
+import { buildIdleNudge, classifyAll, reapIdleStaleSessions } from "./session-ops";
 import {
   findSessionsByPath,
   listAllSessions,
@@ -432,7 +433,16 @@ async function attachHarnessAndSync(
   return exitCode;
 }
 
-async function autoReapStaleSessions(): Promise<void> {
+/** On session end: if reaping is off (default), print an advisory nudge about
+ * other idle sandboxes; otherwise reap idle-stale sessions and log what stopped.
+ * Replaces the old silent global reap (openlock-rdh / GH #76). */
+async function autoReapOrNudge(currentSessionName: string): Promise<void> {
+  if (reapIdleMs() === null) {
+    const rows = await classifyAll();
+    const msg = buildIdleNudge(rows, currentSessionName, Date.now());
+    if (msg) console.log(`\n${msg}`);
+    return;
+  }
   const { reaped, durationMs } = await reapIdleStaleSessions();
   if (reaped.length === 0) return;
   console.log(`\nauto-reaped ${reaped.length} idle session(s) (${durationMs}ms)`);
@@ -748,6 +758,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     }
     console.log(`Session ${sessionName} created (detached, harness not attached).`);
     console.log(`Run a command with:  openlock exec ${sessionName} -- <cmd>`);
+    await autoReapOrNudge(sessionName);
     handleGatewayShutdown(listAllSessions(sessionsDir()).length);
     process.exit(0);
   }
@@ -759,7 +770,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   };
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
   handleGatewayShutdown(listAllSessions(sessionsDir()).length);
-  await autoReapStaleSessions();
+  await autoReapOrNudge(sessionName);
   // Exit explicitly with the harness's code. The persistent-container tether
   // (openshellSandboxCreateAsync's `openshell sandbox create … sleep infinity`
   // child) and the gateway client are intentionally left running, so the

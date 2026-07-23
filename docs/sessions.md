@@ -29,7 +29,9 @@ openlock clean --all
 openlock clean --stale       # remove exited + missing sessions
 openlock clean <name> --copy ./out   # extract /sandbox/repo before teardown
 
-# stop idle-stale sessions (no removal; default 30 min idle, OPENLOCK_REAP_IDLE_MS)
+# stop idle-stale sessions (no removal). Auto-reap is OFF by default: set
+# `reap_idle: 30m` (or 2h/1d) in ~/.config/openlock/config.yaml to enable it,
+# or OPENLOCK_REAP_IDLE_MS to override per-run. `openlock reap` always runs on demand.
 openlock reap
 
 # attach a bash shell to the container

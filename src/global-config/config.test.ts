@@ -112,3 +112,34 @@ describe("readGlobalConfigFrom", () => {
     expect(() => readGlobalConfigFrom(path)).toThrow(/default_harness/);
   });
 });
+
+describe("reap_idle", () => {
+  it("accepts off", () => {
+    expect(validateAndShape({ reap_idle: "off" }, "test").reapIdle).toBe("off");
+  });
+  it("accepts OFF case-insensitively", () => {
+    expect(validateAndShape({ reap_idle: "OFF" }, "test").reapIdle).toBe("off");
+  });
+  it("accepts boolean false as off (defensive)", () => {
+    expect(validateAndShape({ reap_idle: false }, "test").reapIdle).toBe("off");
+  });
+  it("parses 30m to milliseconds", () => {
+    expect(validateAndShape({ reap_idle: "30m" }, "test").reapIdle).toBe(30 * 60 * 1000);
+  });
+  it("parses 2h to milliseconds", () => {
+    expect(validateAndShape({ reap_idle: "2h" }, "test").reapIdle).toBe(2 * 60 * 60 * 1000);
+  });
+  it("parses 1d to milliseconds", () => {
+    expect(validateAndShape({ reap_idle: "1d" }, "test").reapIdle).toBe(24 * 60 * 60 * 1000);
+  });
+  it("rejects on/true", () => {
+    expect(() => validateAndShape({ reap_idle: "on" }, "test")).toThrow(/reap_idle/);
+    expect(() => validateAndShape({ reap_idle: true }, "test")).toThrow(/reap_idle/);
+  });
+  it("rejects bare integer (must use a duration)", () => {
+    expect(() => validateAndShape({ reap_idle: 1800000 }, "test")).toThrow(/reap_idle/);
+  });
+  it("rejects garbage duration", () => {
+    expect(() => validateAndShape({ reap_idle: "30x" }, "test")).toThrow(/reap_idle/);
+  });
+});

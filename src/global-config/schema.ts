@@ -7,9 +7,15 @@ export interface GlobalConfig {
   defaultHarness?: Harness;
   defaultProvider?: ProviderId;
   defaultRuntime?: Runtime;
+  reapIdle?: number | "off";
 }
 
-const ALLOWED_KEYS = new Set(["default_harness", "default_provider", "default_runtime"]);
+const ALLOWED_KEYS = new Set([
+  "default_harness",
+  "default_provider",
+  "default_runtime",
+  "reap_idle",
+]);
 
 function parseDefaultHarness(v: unknown, source: string): Harness {
   if (typeof v !== "string") {
@@ -50,6 +56,37 @@ function parseDefaultRuntime(v: unknown, source: string): Runtime {
   return v as Runtime;
 }
 
+const REAP_DURATION_RE = /^(\d+)(ms|s|m|h|d)$/;
+const REAP_UNIT_MS: Record<string, number> = {
+  ms: 1,
+  s: 1000,
+  m: 60 * 1000,
+  h: 60 * 60 * 1000,
+  d: 24 * 60 * 60 * 1000,
+};
+
+function parseReapIdle(v: unknown, source: string): number | "off" {
+  // js-yaml (YAML 1.2) parses `off` as the string "off"; accept boolean
+  // false too so a YAML 1.1 schema (or a quoted false) still means "off".
+  if (v === false) return "off";
+  if (typeof v !== "string") {
+    throw new Error(
+      `${source}: reap_idle must be "off" or a duration like "30m", "2h", "1d" ` +
+        `(got ${JSON.stringify(v)})`,
+    );
+  }
+  const t = v.trim().toLowerCase();
+  if (t === "off") return "off";
+  const m = REAP_DURATION_RE.exec(t);
+  if (!m) {
+    throw new Error(
+      `${source}: reap_idle ${JSON.stringify(v)} is not "off" or a duration ` +
+        `like "30m", "2h", "1d"`,
+    );
+  }
+  return parseInt(m[1]!, 10) * REAP_UNIT_MS[m[2]!]!;
+}
+
 export function validateAndShape(raw: unknown, source: string): GlobalConfig {
   if (raw === null || raw === undefined) return {};
   if (typeof raw !== "object" || Array.isArray(raw)) {
@@ -72,6 +109,9 @@ export function validateAndShape(raw: unknown, source: string): GlobalConfig {
   }
   if ("default_runtime" in obj) {
     out.defaultRuntime = parseDefaultRuntime(obj.default_runtime, source);
+  }
+  if ("reap_idle" in obj) {
+    out.reapIdle = parseReapIdle(obj.reap_idle, source);
   }
   return out;
 }
