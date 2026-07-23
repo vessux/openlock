@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { classifySession, resolveReapIdleMs, type SessionWithState } from "./reap";
+import {
+  classifySession,
+  heartbeatIntervalMs,
+  resolveReapIdleMs,
+  type SessionWithState,
+} from "./reap";
 
 const NOW = new Date("2026-05-07T12:00:00Z").getTime();
 const THIRTY_MIN = 30 * 60 * 1000;
@@ -108,5 +113,25 @@ describe("resolveReapIdleMs", () => {
   });
   it("unrecognized env falls through to config", () => {
     expect(resolveReapIdleMs({ env: "garbage", config: THIRTY_MIN })).toBe(THIRTY_MIN);
+  });
+});
+
+describe("heartbeatIntervalMs", () => {
+  it("is half the idle window when that's under the 60s cap", () => {
+    expect(heartbeatIntervalMs(60_000)).toBe(30_000);
+  });
+
+  it("caps at 60s for a large idle window", () => {
+    expect(heartbeatIntervalMs(THIRTY_MIN)).toBe(60_000);
+  });
+
+  it("floors at 1s so a tiny idle window doesn't produce an absurd interval", () => {
+    expect(heartbeatIntervalMs(1000)).toBe(1000);
+    expect(heartbeatIntervalMs(100)).toBe(1000);
+    expect(heartbeatIntervalMs(0)).toBe(1000);
+  });
+
+  it("exactly at the 60s cap boundary", () => {
+    expect(heartbeatIntervalMs(120_000)).toBe(60_000);
   });
 });

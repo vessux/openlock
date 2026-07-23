@@ -9,7 +9,7 @@ import {
 } from "./container";
 import { getCliInvocation } from "./fork-binaries";
 import { formatDuration } from "./format";
-import { pruneSandboxRefs } from "./git-sync";
+import { pruneSandboxRefs, syncWorkspaceBundle } from "./git-sync";
 import { pidAlive } from "./proc";
 import { type Classification, classifySession, reapIdleMs, type SessionWithState } from "./reap";
 import { listAllSessions, removeSessionDir, type SessionMeta, sessionsDir } from "./session-store";
@@ -78,20 +78,52 @@ export function buildIdleNudge(
   ].join("\n");
 }
 
-export async function reapIdleStaleSessions(): Promise<{
+export interface ReapDeps {
+  /** Defaults to classifyAll. Overridable for unit-testing reap ordering
+   * without touching real containers. */
+  classify?: () => Promise<ClassifiedSession[]>;
+  /** Best-effort git-bundle drain run BEFORE stop for each idle-stale
+   * session. Defaults to syncWorkspaceBundle. */
+  drain?: (
+    containerName: string,
+    sessionName: string,
+    hostRepoSource: string,
+    targetDir: string,
+  ) => Promise<void>;
+  /** Defaults to stopSandbox. */
+  stop?: (name: string) => Promise<void>;
+}
+
+export async function reapIdleStaleSessions(deps: ReapDeps = {}): Promise<{
   reaped: string[];
   durationMs: number;
 }> {
-  const rows = await classifyAll();
+  const classify = deps.classify ?? classifyAll;
+  const drain = deps.drain ?? syncWorkspaceBundle;
+  const stop = deps.stop ?? stopSandbox;
+
+  const rows = await classify();
   const targets = rows.filter((r) => r.classification === "idle-stale");
   if (targets.length === 0) return { reaped: [], durationMs: 0 };
+  console.log(
+    `reaping ${targets.length} idle session(s): ${targets.map((r) => r.meta.name).join(", ")}`,
+  );
   const start = Date.now();
   await Promise.all(
-    targets.map((r) =>
-      stopSandbox(r.meta.name).catch((e: unknown) =>
+    targets.map(async (r) => {
+      // Drain is best-effort: the container is still running at this point
+      // (idle-stale implies running), which is required for git bundle
+      // create to work in-container. A failed/blocked drain must never
+      // prevent the reap itself.
+      try {
+        await drain(r.meta.name, r.meta.name, r.meta.repoPath, "/sandbox/repo");
+      } catch (e) {
+        console.warn(`drain ${r.meta.name}: ${(e as Error).message}`);
+      }
+      await stop(r.meta.name).catch((e: unknown) =>
         console.error(`stop ${r.meta.name}: ${(e as Error).message}`),
-      ),
-    ),
+      );
+    }),
   );
   return { reaped: targets.map((r) => r.meta.name), durationMs: Date.now() - start };
 }

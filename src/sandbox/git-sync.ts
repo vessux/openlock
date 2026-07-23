@@ -1,4 +1,7 @@
-import { buildOpenshellExecArgv } from "./container";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildOpenshellExecArgv, downloadFromSandbox } from "./container";
 import { getCliInvocation } from "./fork-binaries";
 
 interface SandboxExecResult {
@@ -192,6 +195,80 @@ export async function promoteActiveBranch(
     return { outcome: "created", target, oid: newOid };
   }
   return { outcome: "diverged", target, oid: newOid };
+}
+
+/**
+ * Sync-back CORE for a git-bundle workdir mount: read the sandbox's active
+ * branch, prune stale namespaced refs from a prior session with this name,
+ * regenerate the bundle inside the container, copy it out, fetch it into
+ * `refs/sandbox/<sessionName>/*`, and auto-promote onto `openlock/<sessionName>`.
+ *
+ * Namespaced-ref based, so it is safe to call even when the session's
+ * workdir mount is NOT actually a git-bundle clone (e.g. a bind mount) —
+ * it just fetches/promotes nothing new in that case. Requires the
+ * container to still be running (the bundle is regenerated in-container).
+ *
+ * Extracted from session.ts's syncBackToHost so reapIdleStaleSessions can
+ * drain a session's git work before stopping it, without syncBackToHost's
+ * mount-type branching (bind vs git-bundle vs none) — the reap path only
+ * ever wants "best-effort git-bundle sync, or silently do nothing useful".
+ */
+export async function syncWorkspaceBundle(
+  containerName: string,
+  sessionName: string,
+  hostRepoSource: string,
+  targetDir: string,
+): Promise<void> {
+  // Read the active branch while the container is still running.
+  // null = detached HEAD; auto-promote will skip silently.
+  const activeBranch = await readSandboxActiveBranch(containerName, targetDir);
+
+  // Pre-prune: defensive against stale refs from prior sessions reusing
+  // this name. The bundle is the source of truth for current refs.
+  // Note: if both copy-out paths below fail ("No commits to sync."),
+  // prior namespaced refs are already gone. Reachability of any prior
+  // tip is preserved via refs/heads/openlock/<session> when auto-promote
+  // ran on a previous sync; otherwise the next successful sync recovers.
+  await pruneSandboxRefs(hostRepoSource, sessionName);
+
+  const tmp = mkdtempSync(join(tmpdir(), "openlock-syncback-"));
+  try {
+    const outBundle = join(tmp, "out.bundle");
+    // Always regenerate the bundle inside the container before copying it
+    // out. Prior implementations preferred a stale /sandbox/out.bundle if
+    // one existed, which broke re-attach: a second sync would resurface
+    // refs from the first sync only. Run as `sandbox` (openshell default)
+    // with cwd targetDir so git can open the repo (root trips
+    // safe.directory) and write /sandbox/out.bundle (owned by sandbox).
+    const cli = await getCliInvocation();
+    const regenArgv = buildOpenshellExecArgv(
+      cli.argv,
+      containerName,
+      ["git", "bundle", "create", "/sandbox/out.bundle", "--all"],
+      { workdir: targetDir, tty: "off" },
+    );
+    const regen = Bun.spawn(regenArgv, {
+      cwd: cli.cwd,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const regenCode = await regen.exited;
+    if (regenCode !== 0) {
+      console.warn("No commits to sync.");
+      return;
+    }
+    const ok = await downloadFromSandbox(containerName, "/sandbox/out.bundle", outBundle);
+    if (!ok) {
+      console.warn("No commits to sync.");
+      return;
+    }
+    await fetchBundle(hostRepoSource, outBundle, sessionName);
+
+    const promote = await promoteActiveBranch(hostRepoSource, sessionName, activeBranch);
+    console.log(formatSyncBackLog(sessionName, activeBranch, promote));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 export function formatSyncBackLog(
