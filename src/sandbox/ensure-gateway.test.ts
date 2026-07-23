@@ -1,8 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readGatewayRssKb, renderGatewayConfigToml, spawnDaemonToLog } from "./ensure-gateway";
+import {
+  readGatewayRssKb,
+  renderGatewayConfigToml,
+  rotateLogIfLarge,
+  spawnDaemonToLog,
+} from "./ensure-gateway";
 import { pidAlive } from "./proc";
 
 describe("renderGatewayConfigToml", () => {
@@ -112,6 +117,61 @@ describe("spawnDaemonToLog", () => {
       const contents = readFileSync(log, "utf-8");
       expect(contents).toContain("first");
       expect(contents).toContain("second");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("rotateLogIfLarge", () => {
+  it("rotates a file at or over the threshold to .1, freeing the original path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rotate-log-"));
+    const log = join(dir, "gateway.log");
+    try {
+      writeFileSync(log, "x".repeat(1024));
+      rotateLogIfLarge(log, 1024);
+      expect(existsSync(log)).toBe(false);
+      expect(readFileSync(`${log}.1`, "utf-8")).toBe("x".repeat(1024));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a file under the threshold untouched", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rotate-log-"));
+    const log = join(dir, "gateway.log");
+    try {
+      writeFileSync(log, "small");
+      rotateLogIfLarge(log, 1024);
+      expect(existsSync(log)).toBe(true);
+      expect(existsSync(`${log}.1`)).toBe(false);
+      expect(readFileSync(log, "utf-8")).toBe("small");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("no-ops when the file doesn't exist (first run)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rotate-log-"));
+    const log = join(dir, "gateway.log");
+    try {
+      expect(() => rotateLogIfLarge(log, 1024)).not.toThrow();
+      expect(existsSync(log)).toBe(false);
+      expect(existsSync(`${log}.1`)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("overwrites an existing .1 backup, keeping only one generation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rotate-log-"));
+    const log = join(dir, "gateway.log");
+    try {
+      writeFileSync(`${log}.1`, "stale backup");
+      writeFileSync(log, "x".repeat(2048));
+      rotateLogIfLarge(log, 1024);
+      expect(existsSync(log)).toBe(false);
+      expect(readFileSync(`${log}.1`, "utf-8")).toBe("x".repeat(2048));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
