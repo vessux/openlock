@@ -37,6 +37,15 @@ export function reapIdleMs(): number | null {
   });
 }
 
+/** Interval for the lastAttachedAt heartbeat while a harness is attached:
+ * half the idle window, capped at 60s so a huge idle window doesn't write to
+ * disk too infrequently, floored at 1s so a tiny idle window doesn't produce
+ * a 0/absurd interval. Pure — caller decides whether to run it at all
+ * (only when reaping is on, i.e. idleMs !== null). */
+export function heartbeatIntervalMs(idleMs: number): number {
+  return Math.max(1000, Math.min(Math.floor(idleMs / 2), 60_000));
+}
+
 export type Classification = "attached" | "idle-recent" | "idle-stale" | "exited" | "missing";
 
 export interface SessionWithState extends SessionMeta {

@@ -20,7 +20,6 @@ import {
   buildOpenshellExecArgv,
   buildSandboxEnv,
   deleteSandbox,
-  downloadFromSandbox,
   execHarness,
   getSandboxState,
   openshellSandboxCreateAsync,
@@ -33,14 +32,7 @@ import { ensureGenericProvider, ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
 import { getCliInvocation } from "./fork-binaries";
 import { prepareGitIdentity } from "./git-identity";
-import {
-  createBundle,
-  fetchBundle,
-  formatSyncBackLog,
-  promoteActiveBranch,
-  pruneSandboxRefs,
-  readSandboxActiveBranch,
-} from "./git-sync";
+import { createBundle, syncWorkspaceBundle } from "./git-sync";
 import { type Harness, resolveHarness } from "./harness";
 import { friendlyNameFromId, newSessionId } from "./identity";
 import { ensureSandbox } from "./image-build";
@@ -56,7 +48,7 @@ import {
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
-import { reapIdleMs } from "./reap";
+import { heartbeatIntervalMs, reapIdleMs } from "./reap";
 import { buildIdleNudge, classifyAll, reapIdleStaleSessions } from "./session-ops";
 import {
   findSessionsByPath,
@@ -350,56 +342,7 @@ async function syncBackToHost(
     // working tree, not a copy.
     throw new Error(`syncBackToHost: unexpected workdir mount type ${wd.type}`);
   }
-  // Read the active branch while the container is still running.
-  // null = detached HEAD; auto-promote will skip silently.
-  const activeBranch = await readSandboxActiveBranch(containerName, wd.target);
-
-  // Pre-prune: defensive against stale refs from prior sessions reusing
-  // this name. The bundle is the source of truth for current refs.
-  // Note: if both copy-out paths below fail ("No commits to sync."),
-  // prior namespaced refs are already gone. Reachability of any prior
-  // tip is preserved via refs/heads/openlock/<session> when auto-promote
-  // ran on a previous sync; otherwise the next successful sync recovers.
-  await pruneSandboxRefs(wd.source, sessionName);
-
-  const tmp = mkdtempSync(join(tmpdir(), "openlock-syncback-"));
-  try {
-    const outBundle = join(tmp, "out.bundle");
-    // Always regenerate the bundle inside the container before copying it
-    // out. Prior implementations preferred a stale /sandbox/out.bundle if
-    // one existed, which broke re-attach: a second sync would resurface
-    // refs from the first sync only. Run as `sandbox` (openshell default)
-    // with cwd wd.target so git can open the repo (root trips
-    // safe.directory) and write /sandbox/out.bundle (owned by sandbox).
-    const cli = await getCliInvocation();
-    const regenArgv = buildOpenshellExecArgv(
-      cli.argv,
-      containerName,
-      ["git", "bundle", "create", "/sandbox/out.bundle", "--all"],
-      { workdir: wd.target, tty: "off" },
-    );
-    const regen = Bun.spawn(regenArgv, {
-      cwd: cli.cwd,
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    const regenCode = await regen.exited;
-    if (regenCode !== 0) {
-      console.warn("No commits to sync.");
-      return;
-    }
-    const ok = await downloadFromSandbox(containerName, "/sandbox/out.bundle", outBundle);
-    if (!ok) {
-      console.warn("No commits to sync.");
-      return;
-    }
-    await fetchBundle(wd.source, outBundle, sessionName);
-
-    const promote = await promoteActiveBranch(wd.source, sessionName, activeBranch);
-    console.log(formatSyncBackLog(sessionName, activeBranch, promote));
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+  await syncWorkspaceBundle(containerName, sessionName, wd.source, wd.target);
 }
 
 function findSessionByName(name: string): SessionMeta | null {
@@ -415,13 +358,45 @@ interface LaunchOpts {
   harness: Harness;
 }
 
+// While the harness is attached, lastAttachedAt is otherwise only stamped at
+// attach/reattach/harness-exit. If the CLI process is killed mid-session,
+// attachedPid's pidAlive flips false and the session is judged by that stale
+// timestamp — possibly landing on idle-stale (and getting reaped) instantly
+// even though the container was actively in use. Refresh it periodically
+// while attached so a killed CLI still gets the full idle grace window.
+// Only runs when reaping is on (idleMs !== null) — no point writing to disk
+// every interval when nothing will ever act on it.
+function startAttachHeartbeat(sessionName: string): ReturnType<typeof setInterval> | undefined {
+  const idleMs = reapIdleMs();
+  if (idleMs === null) return undefined;
+  return setInterval(() => {
+    try {
+      const meta = findSessionByName(sessionName);
+      if (meta) {
+        updateSessionMeta(sessionsDir(), meta.id, { lastAttachedAt: new Date().toISOString() });
+      }
+    } catch (e) {
+      // A swallowed/logged heartbeat error must never crash the session.
+      console.error(
+        `heartbeat update failed for ${sessionName}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }, heartbeatIntervalMs(idleMs));
+}
+
 async function attachHarnessAndSync(
   containerName: string,
   sessionName: string,
   launch: LaunchOpts,
   mounts: readonly Mount[],
 ): Promise<number> {
-  const exitCode = await execHarness(launch.harness, sessionName, launch.args, launch.env);
+  const heartbeat = startAttachHeartbeat(sessionName);
+  let exitCode: number;
+  try {
+    exitCode = await execHarness(launch.harness, sessionName, launch.args, launch.env);
+  } finally {
+    if (heartbeat !== undefined) clearInterval(heartbeat);
+  }
   await syncBackToHost(containerName, sessionName, mounts);
   const meta = findSessionByName(sessionName);
   if (meta) {
