@@ -8,9 +8,10 @@ import {
   stopSandbox,
 } from "./container";
 import { getCliInvocation } from "./fork-binaries";
+import { formatDuration } from "./format";
 import { pruneSandboxRefs } from "./git-sync";
 import { pidAlive } from "./proc";
-import { type Classification, classifySession, type SessionWithState } from "./reap";
+import { type Classification, classifySession, reapIdleMs, type SessionWithState } from "./reap";
 import { listAllSessions, removeSessionDir, type SessionMeta, sessionsDir } from "./session-store";
 
 export async function loadSessionByName(name: string): Promise<SessionMeta | null> {
@@ -38,11 +39,43 @@ export interface ClassifiedSession {
 export async function classifyAll(): Promise<ClassifiedSession[]> {
   const out: ClassifiedSession[] = [];
   const now = Date.now();
+  const idleMs = reapIdleMs();
   for (const m of listAllSessions(sessionsDir())) {
     const state = await enrichSession(m);
-    out.push({ meta: m, classification: classifySession(state, now), state });
+    out.push({ meta: m, classification: classifySession(state, now, idleMs), state });
   }
   return out;
+}
+
+/** Build the session-end advisory listing OTHER running-unattached sandboxes.
+ * Returns null when there are none. No container/podman calls — pure over the
+ * already-classified rows. */
+export function buildIdleNudge(
+  rows: ClassifiedSession[],
+  currentName: string,
+  nowMs: number,
+): string | null {
+  const idle = rows.filter(
+    (r) =>
+      (r.classification === "idle-recent" || r.classification === "idle-stale") &&
+      r.meta.name !== currentName,
+  );
+  if (idle.length === 0) return null;
+  const pad = Math.max(...idle.map((r) => r.meta.name.length));
+  const lines = idle.map((r) => {
+    const basis = r.meta.lastAttachedAt ?? r.meta.createdAt;
+    const age = formatDuration(nowMs - new Date(basis).getTime());
+    return `  ${r.meta.name.padEnd(pad)}   idle ${age}`;
+  });
+  const head =
+    idle.length === 1
+      ? "Note: 1 other idle sandbox is running:"
+      : `Note: ${idle.length} other idle sandboxes are running:`;
+  return [
+    head,
+    ...lines,
+    "Stop or remove them with `openlock stop <name>` or `openlock clean <name>`.",
+  ].join("\n");
 }
 
 export async function reapIdleStaleSessions(): Promise<{
@@ -120,6 +153,6 @@ export async function statusSession(name: string): Promise<{
   const m = await loadSessionByName(name);
   if (!m) throw new Error(`no such session: ${name}`);
   const state = await enrichSession(m);
-  const classification = classifySession(state, Date.now());
+  const classification = classifySession(state, Date.now(), reapIdleMs());
   return { meta: m, state, classification };
 }
