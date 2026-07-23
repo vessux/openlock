@@ -12,6 +12,8 @@ openlock supports **podman** (default, rootless) and **docker** as container run
 - `default_runtime: docker|podman` in `~/.config/openlock/config.yaml` (persistent)
 - The first-run wizard prompts when neither is set and autodetect is ambiguous.
 
+**Idle sandbox reaping.** `reap_idle` in `~/.config/openlock/config.yaml` controls whether idle (running but unattached) sandboxes are auto-stopped at the end of an `openlock sandbox` session. It defaults to `off` — idle sandboxes are never stopped behind your back, and instead a session-end note lists them so you can `openlock stop`/`clean` them yourself. Set a duration (`30m`, `2h`, `1d`) to auto-stop sandboxes left unattached that long; `OPENLOCK_REAP_IDLE_MS` (integer ms, or `off`) overrides it per-run.
+
 ### Threat model deltas
 
 The sandbox's in-container controls (Landlock, seccomp, namespace isolation, supervisor netns enforcement) are **identical** across runtimes. The differences live at the host trust boundary:
