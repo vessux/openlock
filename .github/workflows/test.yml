@@ -59,14 +59,16 @@ jobs:
 
       - run: bun install
 
-      - name: Install podman 5.x (heredoc-aware)
+      - name: Install podman (5.x+, heredoc-aware)
         if: matrix.runtime == 'podman'
         # ubuntu-24.04 ships podman 4.9.3 which mis-parses the shell-heredoc
         # `RUN cat > /sandbox/.claude.json <<'JSON'` block in containers/
-        # core.Containerfile. Mac (5.8.2) and Lima (5.4.2) build fine. Pull
-        # podman 5.x .deb from the alvistack OBS project (canonical source
-        # for current-version containers stack on noble). See bd
-        # openlock-sjr.
+        # core.Containerfile. Mac (5.8.2) and Lima (5.4.2) build fine. Pull the
+        # current podman .deb from the alvistack OBS project (canonical source
+        # for the current containers stack on noble). NOTE: this is a ROLLING
+        # source — it now serves podman 6.x, not 5.x; the "Extend rootless
+        # subuid/subgid range" step below compensates for a podman-6.x rootless
+        # storage-default change. See bd openlock-sjr.
         run: |
           # Remove ubuntu-shipped podman + buildah and the golang-* helper
           # packages that own files (/etc/containers/policy.json,
@@ -121,6 +123,16 @@ jobs:
           # would resolve to root). Pipe + tee handles that cleanly.
           echo "$USER:100000:1100000" | sudo tee /etc/subuid > /dev/null
           echo "$USER:100000:1100000" | sudo tee /etc/subgid > /dev/null
+          # Pin rootless storage to the user's XDG paths. The alvistack repo now
+          # serves podman 6.x, whose shipped /etc/containers/storage.conf sets
+          # graphroot=/var/lib/containers/storage (rootful) and — unlike 5.x — no
+          # longer auto-overrides it to the per-user path in rootless mode. So
+          # `podman system migrate` as `runner` would mkdir the rootful path and
+          # fail EPERM. An explicit user storage.conf restores the rootless
+          # graphroot and is robust to further alvistack drift. See bd openlock-sjr.
+          mkdir -p "$HOME/.config/containers"
+          printf '[storage]\ndriver = "overlay"\ngraphroot = "%s/.local/share/containers/storage"\nrunroot = "/run/user/%s/containers"\n' \
+            "$HOME" "$(id -u)" > "$HOME/.config/containers/storage.conf"
           podman system migrate
           # Surface effective config in the log so future drift is obvious.
           getent passwd "$USER" | cut -d: -f1,3
