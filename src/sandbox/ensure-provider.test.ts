@@ -1,9 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeProvider } from "../tokens";
-import { _ensureProviderForTests, providerExistsInGateway } from "./ensure-provider";
+import {
+  _ensureGenericProviderForTests,
+  _ensureProviderForTests,
+  providerExistsInGateway,
+} from "./ensure-provider";
 
 let dir: string;
 let originalHome: string | undefined;
@@ -229,5 +233,60 @@ describe("_ensureProviderForTests", () => {
       // create must NOT have run with an undefined credential.
       expect(m.calls.find((c) => c[1] === "create")).toBeUndefined();
     });
+  });
+});
+
+describe("ensureGenericProvider", () => {
+  function fakeShell(exists: boolean) {
+    const calls: string[][] = [];
+    const shell = async (args: string[]) => {
+      calls.push(args);
+      if (args[0] === "provider" && args[1] === "list") {
+        return {
+          exitCode: 0,
+          stdout: exists ? "NAME TYPE\ngithub generic 1 0\n" : "NAME TYPE\n",
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    return { shell, calls };
+  }
+
+  test("creates a generic provider when absent", async () => {
+    const { shell, calls } = fakeShell(false);
+    await _ensureGenericProviderForTests("github", { GITHUB_TOKEN: "ghp_x" }, shell);
+    const create = calls.find((c) => c[0] === "provider" && c[1] === "create");
+    expect(create).toEqual([
+      "provider",
+      "create",
+      "--name",
+      "github",
+      "--type",
+      "generic",
+      "--credential",
+      "GITHUB_TOKEN=ghp_x",
+    ]);
+  });
+
+  test("updates when already present", async () => {
+    const { shell, calls } = fakeShell(true);
+    await _ensureGenericProviderForTests("github", { GITHUB_TOKEN: "ghp_x" }, shell);
+    const update = calls.find((c) => c[0] === "provider" && c[1] === "update");
+    expect(update).toEqual(["provider", "update", "github", "--credential", "GITHUB_TOKEN=ghp_x"]);
+    expect(calls.some((c) => c[1] === "create")).toBe(false);
+  });
+
+  test("error stderr does not include the credential value", async () => {
+    const shell = async (args: string[]) => {
+      if (args[1] === "list") return { exitCode: 0, stdout: "NAME\n", stderr: "" };
+      return { exitCode: 1, stdout: "", stderr: "boom" };
+    };
+    await expect(
+      _ensureGenericProviderForTests("github", { GITHUB_TOKEN: "ghp_SECRET" }, shell),
+    ).rejects.toThrow(/github/);
+    await expect(
+      _ensureGenericProviderForTests("github", { GITHUB_TOKEN: "ghp_SECRET" }, shell),
+    ).rejects.not.toThrow(/ghp_SECRET/);
   });
 });

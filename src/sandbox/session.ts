@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import type { CredentialBundle } from "../config-core";
 import {
   dockerDaemonReachable,
   podmanMachineRunning,
@@ -26,8 +27,9 @@ import {
   startSandbox,
   waitForSandboxReady,
 } from "./container";
+import { resolveCredentialValues } from "./credentials";
 import { startGateway, stopGateway } from "./ensure-gateway";
-import { ensureProvider } from "./ensure-provider";
+import { ensureGenericProvider, ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
 import { getCliInvocation } from "./fork-binaries";
 import { prepareGitIdentity } from "./git-identity";
@@ -91,6 +93,7 @@ interface ResolvedRepo {
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
+  credentials: CredentialBundle[];
   /** Harness persisted in the project's .openlock/config.yaml, if any. Feeds
    * resolveHarness so `openlock init --harness X` carries into later `sandbox`
    * runs. Absent on the --policy override path (no .openlock/ is read). */
@@ -104,6 +107,7 @@ export function resolveRepoPolicy(projectPath: string, policyOverride?: string):
       mounts: [],
       args: [],
       env: {},
+      credentials: [],
     };
   }
   const folder = resolveOpenlockFolder(projectPath);
@@ -112,6 +116,7 @@ export function resolveRepoPolicy(projectPath: string, policyOverride?: string):
     mounts: folder.mounts,
     args: folder.args,
     env: folder.env,
+    credentials: folder.credentials,
   };
   if (folder.harness !== undefined) repo.harness = folder.harness;
   return repo;
@@ -153,6 +158,13 @@ async function createSession(
 
   await startGateway();
   await ensureProvider(providerId);
+
+  const attachProviders: string[] = [];
+  for (const bundle of resolved.credentials) {
+    const values = resolveCredentialValues(bundle, process.env);
+    await ensureGenericProvider(bundle.name, values);
+    attachProviders.push(bundle.name);
+  }
 
   const imageTag = await buildSandboxImage(join(projectPath, ".openlock"));
   console.log(`Policy: ${policy}`);
@@ -237,6 +249,7 @@ async function createSession(
         command: ["/bin/bash", "-c", setupCmd],
         volumeArgs: bindMountArgs(mounts),
         debugEgress,
+        attachProviders,
       });
 
       // Don't await handle.exited — it blocks until the container stops.
@@ -519,6 +532,7 @@ async function reattachSession(
   m: SessionMeta,
   mounts: readonly Mount[],
   providerId: ProviderId,
+  credentials: readonly CredentialBundle[],
 ): Promise<ResolvedSession> {
   const containerName = m.name;
   const state = await getSandboxState(containerName);
@@ -539,6 +553,12 @@ async function reattachSession(
   }
   await startGateway();
   await ensureProvider(providerId);
+  // Re-provision (not re-attach — the sandbox's --provider set is fixed at
+  // create) each declared bundle, since the gateway may have restarted since
+  // this session was created and lost its provider records.
+  for (const bundle of credentials) {
+    await ensureGenericProvider(bundle.name, resolveCredentialValues(bundle, process.env));
+  }
   if (state === "exited") {
     await startSandbox(containerName);
   }
@@ -580,7 +600,7 @@ async function resolveOrCreateSession(
     });
     return { containerName: created.containerName, sessionName: created.name };
   }
-  return reattachSession(matches[0]!, resolved.mounts, providerId);
+  return reattachSession(matches[0]!, resolved.mounts, providerId, resolved.credentials);
 }
 
 /**

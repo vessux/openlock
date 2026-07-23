@@ -52,7 +52,7 @@ async function realOpenshell(args: string[]): Promise<ShellResult> {
 // separated token equals the provider id, after stripping ANSI escapes.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI ESC requires the 0x1b control byte.
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
-export function providerExistsInGateway(listStdout: string, providerId: ProviderId): boolean {
+export function providerExistsInGateway(listStdout: string, providerId: string): boolean {
   return listStdout
     .replace(ANSI_RE, "")
     .split(/\r?\n/)
@@ -210,4 +210,37 @@ export async function _ensureProviderForTests(providerId: ProviderId, shell: She
   }
 
   warnOnTypeDrift(providerId, record);
+}
+
+/** Provision a generic secondary-credential provider (create-or-update) from a
+ * resolved {credKey: value} bundle. Type is always `generic`. Never surfaces the
+ * credential VALUE in errors — only the provider name + openshell stderr. */
+export async function ensureGenericProvider(
+  name: string,
+  values: Record<string, string>,
+): Promise<void> {
+  await _ensureGenericProviderForTests(name, values, realOpenshell);
+}
+
+export async function _ensureGenericProviderForTests(
+  name: string,
+  values: Record<string, string>,
+  shell: Shell,
+): Promise<void> {
+  const list = await shell(["provider", "list"]);
+  if (list.exitCode !== 0) {
+    throw new Error(`Failed to query gateway providers: ${list.stderr || list.stdout}`);
+  }
+  const exists = providerExistsInGateway(list.stdout, name);
+  const credArgs = Object.entries(values).flatMap(([k, v]) => ["--credential", `${k}=${v}`]);
+  const args = exists
+    ? ["provider", "update", name, ...credArgs]
+    : ["provider", "create", "--name", name, "--type", "generic", ...credArgs];
+  const result = await shell(args);
+  if (result.exitCode !== 0) {
+    // Deliberately omit `args` (carries the credential value) from the message.
+    throw new Error(
+      `Failed to ${exists ? "update" : "create"} credential provider '${name}' in gateway: ${result.stderr}`,
+    );
+  }
 }

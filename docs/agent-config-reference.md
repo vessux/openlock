@@ -4,13 +4,14 @@ Audience: an AI agent configuring openlock in a user's project. This is the comp
 
 ## `.openlock/config.yaml` (manifest)
 
-Top-level keys (exactly these; unknown keys are rejected): `mounts`, `args`, `env`.
+Top-level keys (exactly these; unknown keys are rejected): `mounts`, `args`, `env`, `credentials`.
 
 - `mounts[]` — each entry: `source`, `target`, `type`, optional `readOnly` (valid on `type: bind` only).
   - `type` is one of: `copy-once`, `copy-refresh`, `bind`, `git-bundle`.
   - `copy-once` / `copy-refresh` targets must be under `/sandbox/.openlock/`.
 - `args[]` — extra argv appended to the in-container agent launch.
 - `env{}` — extra environment variables on the agent process.
+- `credentials[]` — secondary tool-credentials injected at egress (e.g. a GitHub PAT for `api.github.com`). Each entry: `name` (the gateway provider name attached to the sandbox) and `values` (a mapping of credential-env-key → source). The only source form is `{ from_env: VAR }` — the value is read from the host environment at `openlock sandbox` time, provisioned into the gateway, and injected per `policy.yaml` `cred_inject`. The value is never committed and never enters the sandbox env. The gateway provider type is always `generic`. Pair each entry with a `cred_inject` + `allowed_secrets` block in `policy.yaml` (see below); `openlock validate` errors if a `cred_inject.from_credential` is not supplied by a declared `credentials:` entry (or the primary provider).
 
 (There is no `caps` field — it is a rejected legacy key.)
 

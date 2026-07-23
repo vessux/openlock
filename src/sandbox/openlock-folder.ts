@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import yaml from "js-yaml";
-import type { Mount } from "../config-core";
+import type { CredentialBundle, Mount } from "../config-core";
 import { type ManifestConfig, parseManifest } from "../config-core";
 import type { Harness } from "./harness";
 
@@ -39,6 +39,7 @@ export interface ResolveResult {
   mounts: Mount[];
   args: string[];
   env: Record<string, string>;
+  credentials: CredentialBundle[];
   /** Harness persisted in config.yaml, or undefined if the manifest omits it. */
   harness?: Harness;
 }
@@ -74,6 +75,7 @@ export function resolveOpenlockFolder(projectPath: string): ResolveResult {
       mounts: cfg.mounts,
       args: cfg.args,
       env: cfg.env,
+      credentials: cfg.credentials,
     };
     if (cfg.harness !== undefined) result.harness = cfg.harness;
     return result;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import {
   buildHarnessExecArgv,
   buildOpenshellCreateArgv,
@@ -426,5 +426,35 @@ describe("buildOpenshellCreateArgv", () => {
       "--volume",
       "/cache:/home/sandbox/.cache:ro",
     ]);
+  });
+
+  test("buildOpenshellCreateArgv appends one --provider per attached bundle after the primary", () => {
+    const argv = buildOpenshellCreateArgv({
+      sessionName: "s",
+      imageTag: "img",
+      uploadDir: "/tmp/u",
+      policy: "/p.yaml",
+      providerId: "anthropic",
+      command: ["/bin/true"],
+      attachProviders: ["github", "internal"],
+    });
+    const providerFlags: string[] = [];
+    for (const [i, tok] of argv.entries()) {
+      if (tok === "--provider") providerFlags.push(argv[i + 1]!);
+    }
+    expect(providerFlags).toEqual(["anthropic", "github", "internal"]);
+  });
+
+  test("buildOpenshellCreateArgv with no attachProviders emits only the primary", () => {
+    const argv = buildOpenshellCreateArgv({
+      sessionName: "s",
+      imageTag: "img",
+      uploadDir: "/tmp/u",
+      policy: "/p.yaml",
+      providerId: "anthropic",
+      command: ["/bin/true"],
+    });
+    const count = argv.filter((t) => t === "--provider").length;
+    expect(count).toBe(1);
   });
 });

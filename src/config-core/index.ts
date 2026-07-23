@@ -1,11 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintManifest, MANIFEST_KEYS, MOUNT_ENTRY_KEYS, MOUNT_TYPES } from "./manifest/index";
+import yaml from "js-yaml";
+import { checkCredentialNameCollisions, checkCredentialsSupplied } from "./cross-check";
+import {
+  CREDENTIAL_ENTRY_KEYS,
+  CREDENTIAL_SOURCE_KEYS,
+  lintManifest,
+  MANIFEST_KEYS,
+  MOUNT_ENTRY_KEYS,
+  MOUNT_TYPES,
+} from "./manifest/index";
 import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
 
 export { parseManifest } from "./manifest/index";
-export type { ConfigFile, Issue, ManifestConfig, Mount, Severity } from "./types";
+export type { ConfigFile, CredentialBundle, Issue, ManifestConfig, Mount, Severity } from "./types";
 export { SANDBOX_OPENLOCK_PREFIX } from "./types";
 
 /** Every schema key/enum the config validators recognize, de-duplicated and
@@ -13,8 +22,30 @@ export { SANDBOX_OPENLOCK_PREFIX } from "./types";
  * (src/agent-reference-drift.test.ts). */
 export function knownConfigTokens(): string[] {
   return [
-    ...new Set<string>([...MANIFEST_KEYS, ...MOUNT_ENTRY_KEYS, ...MOUNT_TYPES, ...ALL_POLICY_KEYS]),
+    ...new Set<string>([
+      ...MANIFEST_KEYS,
+      ...MOUNT_ENTRY_KEYS,
+      ...MOUNT_TYPES,
+      ...CREDENTIAL_ENTRY_KEYS,
+      ...CREDENTIAL_SOURCE_KEYS,
+      ...ALL_POLICY_KEYS,
+    ]),
   ].sort();
+}
+
+/** Load just the `credentials:` list from config.yaml via a plain YAML parse.
+ * Deliberately does NOT go through `parseManifest`: that also resolves+checks
+ * mount sources on disk (severity:"filesystem") and THROWS on the first such
+ * issue, which would silently drop cross-file credential checks on an
+ * everyday filesystem misconfig unrelated to credentials (openlock-8ir).
+ * Callers only use this once the caller's own schema-clean guard already
+ * proves the file parses as YAML without throwing (a syntax error would have
+ * been caught by `lintManifest` and queued as severity:"error"). */
+function loadDeclaredCredentials(
+  configPath: string,
+): { name: string; values: Record<string, unknown> }[] {
+  const doc = (yaml.load(readFileSync(configPath, "utf-8")) ?? {}) as { credentials?: unknown };
+  return Array.isArray(doc.credentials) ? doc.credentials : [];
 }
 
 /** Validate the whole .openlock/ folder (manifest + policy). Collect-all,
@@ -53,6 +84,35 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
       message: "policy.yaml not found",
       fix,
     });
+  }
+  const hasConfigErr = issues.some((i) => i.file === "config.yaml" && i.severity === "error");
+  const hasPolicyErr = issues.some((i) => i.file === "policy.yaml" && i.severity === "error");
+  // Config-only: a credentials[].name colliding with a built-in provider id.
+  // Runs whenever config.yaml exists and is itself schema-clean — independent
+  // of policy.yaml's state, since this is not a cross-file concern and must
+  // surface even when policy.yaml has unrelated issues.
+  if (!hasConfigErr && existsSync(configPath)) {
+    const credentials = loadDeclaredCredentials(configPath);
+    issues.push(
+      ...checkCredentialNameCollisions({
+        credentials,
+      } as Parameters<typeof checkCredentialNameCollisions>[0]),
+    );
+  }
+  // Cross-file: injected credentials must be supplied. Only when both files
+  // have no severity:"error" issues already queued for them — a structurally
+  // broken doc can't be meaningfully cross-checked.
+  if (!hasConfigErr && !hasPolicyErr && existsSync(configPath) && existsSync(policyPath)) {
+    const credentials = loadDeclaredCredentials(configPath);
+    const policyDoc = (yaml.load(readFileSync(policyPath, "utf-8")) ?? {}) as Parameters<
+      typeof checkCredentialsSupplied
+    >[1];
+    issues.push(
+      ...checkCredentialsSupplied(
+        { credentials } as Parameters<typeof checkCredentialsSupplied>[0],
+        policyDoc,
+      ),
+    );
   }
   return issues;
 }

@@ -22,3 +22,8 @@ The sandbox's in-container controls (Landlock, seccomp, namespace isolation, sup
 - **Mac (both runtimes)**: containers run inside a VM (Podman Machine or Docker Desktop's LinuxKit VM). The VM is the trust boundary; host exposure requires VM escape.
 
 We recommend **rootless podman** for sensitive work. Docker is supported for compatibility with existing developer setups; use rootless docker or userns-remap if your threat model requires it.
+
+- Secondary credentials (`credentials:` in `config.yaml`) are read from the host
+  environment host-side, pushed to the gateway, and injected at egress — the same
+  boundary as the primary provider credential. The token never enters the sandbox
+  and is never persisted by openlock (host env is re-read on each create).
