@@ -67,4 +67,12 @@ describe("renderIssues with config.local.yaml", () => {
     const lines = renderIssues([], ["config.yaml", "policy.yaml"]);
     expect(lines.some((l) => l.includes("config.local.yaml"))).toBe(false);
   });
+
+  it("summaryLine counts config.local.yaml issues when in the order", () => {
+    const issues: Issue[] = [
+      { file: "config.local.yaml", severity: "error", path: "bogus", message: "unknown key" },
+    ];
+    const s = summaryLine(issues, ["config.yaml", "config.local.yaml", "policy.yaml"]);
+    expect(s).toContain("config.local.yaml: 1 issue");
+  });
 });

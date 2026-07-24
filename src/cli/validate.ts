@@ -69,7 +69,7 @@ export function validateCmd(args: string[]): void {
     const gi = existsSync(giPath) ? readFileSync(giPath, "utf-8") : null;
     if (!gitignoreCoversLocalConfig(gi)) {
       console.log(
-        "  note: config.local.yaml is not covered by .openlock/.gitignore — add `config.local.yaml` so personal overrides aren't committed.",
+        "note: config.local.yaml is not covered by .openlock/.gitignore — add `config.local.yaml` so personal overrides aren't committed.",
       );
     }
   }
