@@ -3,7 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { lintFolder } from "../config-core";
-import { type FolderState, flagSchema, planInit, renderInitFiles, runInit } from "./init";
+import {
+  ensureLine,
+  type FolderState,
+  flagSchema,
+  planInit,
+  renderConfigLocalExample,
+  renderInitFiles,
+  runInit,
+} from "./init";
 
 const S = (c: boolean, p: boolean, cf: boolean): FolderState => ({
   config: c,
@@ -155,5 +163,29 @@ describe("runInit guided (TTY)", () => {
     const cfg = readFileSync(join(proj, ".openlock", "config.yaml"), "utf-8");
     // git-bundle is the ACTIVE (uncommented, 4-space-indented) workdir type
     expect(cfg).toMatch(/\n {4}type: git-bundle/);
+  });
+});
+
+describe("config.local scaffolding helpers", () => {
+  it("renderConfigLocalExample is a commented template mentioning the keys", () => {
+    const s = renderConfigLocalExample();
+    expect(s).toContain("config.local.yaml");
+    expect(s).toContain("mounts");
+    expect(s).toContain("args");
+    expect(s.split("\n").every((l) => l === "" || l.startsWith("#"))).toBe(true);
+  });
+
+  it("ensureLine adds the line when missing", () => {
+    expect(ensureLine(null, "config.local.yaml")).toBe("config.local.yaml\n");
+    expect(ensureLine("node_modules\n", "config.local.yaml")).toBe(
+      "node_modules\nconfig.local.yaml\n",
+    );
+  });
+
+  it("ensureLine is idempotent when the line is already present", () => {
+    expect(ensureLine("config.local.yaml\n", "config.local.yaml")).toBe("config.local.yaml\n");
+    expect(ensureLine("a\nconfig.local.yaml\nb\n", "config.local.yaml")).toBe(
+      "a\nconfig.local.yaml\nb\n",
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { ParseArgsOptionsConfig } from "node:util";
@@ -94,6 +94,44 @@ function writeFiles(folder: string, files: Record<FileKind, string>, which: File
   for (const kind of which) {
     writeFileSync(join(folder, kind), files[kind], "utf-8");
   }
+}
+
+export function renderConfigLocalExample(): string {
+  return [
+    "# .openlock/config.local.yaml — your personal, gitignored overrides.",
+    "# Copy this file to config.local.yaml and edit. It overlays config.yaml:",
+    "#   harness: local replaces the shared value",
+    "#   env:     merged per key (your value wins)",
+    "#   mounts / args / credentials: appended after the shared list",
+    "#",
+    "# Example:",
+    "# args: [--model, opus]",
+    "# mounts:",
+    "#   - source: ~/.cache/mytool",
+    "#     target: /sandbox/.openlock/mytool",
+    "#     type: copy-once",
+    "# env:",
+    "#   MY_LOCAL_FLAG: '1'",
+    "",
+  ].join("\n");
+}
+
+export function ensureLine(existing: string | null, line: string): string {
+  const present = (existing ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .includes(line);
+  if (present) return existing ?? `${line}\n`;
+  const trimmed = (existing ?? "").replace(/\n+$/, "");
+  return `${trimmed ? `${trimmed}\n` : ""}${line}\n`;
+}
+
+function writeLocalScaffolding(folder: string): void {
+  const examplePath = join(folder, "config.local.yaml.example");
+  if (!existsSync(examplePath)) writeFileSync(examplePath, renderConfigLocalExample(), "utf-8");
+  const giPath = join(folder, ".gitignore");
+  const existing = existsSync(giPath) ? readFileSync(giPath, "utf-8") : null;
+  writeFileSync(giPath, ensureLine(existing, "config.local.yaml"), "utf-8");
 }
 
 function inspectInitFolder(folder: string): FolderState {
@@ -195,6 +233,7 @@ export async function runInit(args: RunInitArgs): Promise<number> {
 
   if (mode.kind === "fresh" || mode.kind === "regenerate") {
     writeFiles(folder, files, ["config.yaml", "policy.yaml", "Containerfile"]);
+    writeLocalScaffolding(folder);
     if (mode.kind === "regenerate") {
       args.io.write(
         "Regenerated from defaults (--force) — any prior hand-edits were overwritten.\n",
@@ -209,6 +248,7 @@ export async function runInit(args: RunInitArgs): Promise<number> {
 
   // gapfill
   writeFiles(folder, files, mode.write);
+  writeLocalScaffolding(folder);
   args.io.write(`Wrote ${mode.write.join(", ")} (defaults). Kept ${mode.keep.join(", ")}.\n`);
   args.io.write("Edit the regenerated file(s) as needed, then `openlock sandbox`.\n");
   return 0;
