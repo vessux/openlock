@@ -3,8 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
+  buildGatewayReachabilityCheck,
+  buildReachabilityProbeArgv,
   buildRuntimeChecks,
   buildSubuidCheck,
+  classifyReachabilityProbeExit,
+  evaluateGatewayReachability,
   installHint,
   renderDoctorResults,
   runDoctorChecks,
@@ -291,6 +295,154 @@ describe("rootless podman subuid check", () => {
     const checks = buildSubuidCheck(true, false, () => BAD_SUBUID, false);
     expect(checks).toHaveLength(1);
     expect(checks[0].name).toBe("rootless podman subuid range");
+  });
+});
+
+describe("classifyReachabilityProbeExit", () => {
+  it("classifies exit 0 as reachable", () => {
+    expect(classifyReachabilityProbeExit(0)).toBe("reachable");
+  });
+  it("classifies exit 1 as unreachable", () => {
+    expect(classifyReachabilityProbeExit(1)).toBe("unreachable");
+  });
+  it("classifies podman-level failure codes (125/126/127) as inconclusive", () => {
+    expect(classifyReachabilityProbeExit(125)).toBe("inconclusive");
+    expect(classifyReachabilityProbeExit(126)).toBe("inconclusive");
+    expect(classifyReachabilityProbeExit(127)).toBe("inconclusive");
+  });
+  it("classifies our own timeout-kill sentinel (124) as inconclusive", () => {
+    expect(classifyReachabilityProbeExit(124)).toBe("inconclusive");
+  });
+});
+
+describe("buildReachabilityProbeArgv", () => {
+  it("emits a `podman run --rm --network openshell --pull missing ...` probe on the given port", () => {
+    const argv = buildReachabilityProbeArgv(18081);
+    expect(argv).toEqual([
+      "podman",
+      "run",
+      "--rm",
+      "--network",
+      "openshell",
+      "--pull",
+      "missing",
+      "docker.io/library/busybox:latest",
+      "sh",
+      "-c",
+      "nc -z -w 2 host.containers.internal 18081",
+    ]);
+  });
+});
+
+describe("buildGatewayReachabilityCheck (GH #75 / bd openlock-7er piece 1)", () => {
+  const okProbe = async () => ({ ok: true });
+
+  it("is absent when podman is not the runtime (docker no-ops cleanly)", () => {
+    expect(buildGatewayReachabilityCheck(false, true, 18081, false, okProbe)).toEqual([]);
+  });
+
+  it("is absent when no gateway is running (nothing to test, and keeps CI/test runs spawn-free)", () => {
+    expect(buildGatewayReachabilityCheck(true, false, 18081, false, okProbe)).toEqual([]);
+  });
+
+  it("is present when podman is the runtime and a gateway is running", () => {
+    const checks = buildGatewayReachabilityCheck(true, true, 18081, false, okProbe);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]?.name).toContain("openshell network");
+  });
+
+  it("threads the port and autoReload flag through to the injected probe", async () => {
+    let seen: [number, boolean] | undefined;
+    const spyProbe = async (port: number, autoReload: boolean) => {
+      seen = [port, autoReload];
+      return { ok: true };
+    };
+    const checks = buildGatewayReachabilityCheck(true, true, 18081, true, spyProbe);
+    await checks[0]?.test();
+    expect(seen).toEqual([18081, true]);
+  });
+});
+
+describe("evaluateGatewayReachability (pure decision tree, GH #75 piece 1)", () => {
+  const PORT = 18081;
+
+  function io(overrides: { networkExists?: boolean; probeExits?: number[]; reloadOk?: boolean }): {
+    networkExists: () => Promise<boolean>;
+    runProbe: () => Promise<number>;
+    runReload: () => Promise<boolean>;
+  } {
+    const exits = [...(overrides.probeExits ?? [0])];
+    return {
+      networkExists: async () => overrides.networkExists ?? true,
+      runProbe: async () => exits.shift() ?? 0,
+      runReload: async () => overrides.reloadOk ?? true,
+    };
+  }
+
+  it("passes (ok, no detail) when the openshell network doesn't exist yet", async () => {
+    const out = await evaluateGatewayReachability(PORT, false, io({ networkExists: false }));
+    expect(out.ok).toBe(true);
+    expect(out.detail).toContain("not found yet");
+    expect(out.fix).toBeUndefined();
+  });
+
+  it("passes cleanly when the gateway is reachable", async () => {
+    const out = await evaluateGatewayReachability(PORT, false, io({ probeExits: [0] }));
+    expect(out).toEqual({ ok: true });
+  });
+
+  it("passes with a note when the probe is inconclusive (doesn't misdiagnose it as unreachable)", async () => {
+    const out = await evaluateGatewayReachability(PORT, false, io({ probeExits: [125] }));
+    expect(out.ok).toBe(true);
+    expect(out.detail).toContain("inconclusive");
+  });
+
+  it("DEFAULT (suggest-only): fails with the `podman network reload --all` fix, does not auto-run it", async () => {
+    let reloadCalled = false;
+    const deps = io({ probeExits: [1] });
+    const out = await evaluateGatewayReachability(PORT, false, {
+      ...deps,
+      runReload: async () => {
+        reloadCalled = true;
+        return true;
+      },
+    });
+    expect(out.ok).toBe(false);
+    expect(out.fix).toBe("podman network reload --all");
+    expect(out.detail).toContain("GH #75");
+    expect(reloadCalled).toBe(false);
+  });
+
+  it("auto-reload ENABLED: unreachable -> reload runs -> recovers -> passes with a note", async () => {
+    const out = await evaluateGatewayReachability(
+      PORT,
+      true,
+      io({ probeExits: [1, 0], reloadOk: true }),
+    );
+    expect(out.ok).toBe(true);
+    expect(out.detail).toContain("auto-ran");
+    expect(out.detail).toContain("network_auto_reload");
+  });
+
+  it("auto-reload ENABLED: unreachable -> reload runs -> still unreachable -> fails", async () => {
+    const out = await evaluateGatewayReachability(
+      PORT,
+      true,
+      io({ probeExits: [1, 1], reloadOk: true }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.detail).toContain("still unreachable");
+    expect(out.fix).toContain("manually");
+  });
+
+  it("auto-reload ENABLED: unreachable -> the reload command itself fails -> fails", async () => {
+    const out = await evaluateGatewayReachability(
+      PORT,
+      true,
+      io({ probeExits: [1], reloadOk: false }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.detail).toContain("itself failed");
   });
 });
 

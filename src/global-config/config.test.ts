@@ -143,3 +143,20 @@ describe("reap_idle", () => {
     expect(() => validateAndShape({ reap_idle: "30x" }, "test")).toThrow(/reap_idle/);
   });
 });
+
+describe("network_auto_reload (GH #75 / bd openlock-7er piece 1)", () => {
+  it("is undefined when omitted (default suggest-only)", () => {
+    expect(validateAndShape({}, "test").networkAutoReload).toBeUndefined();
+  });
+  it("accepts true", () => {
+    expect(validateAndShape({ network_auto_reload: true }, "test").networkAutoReload).toBe(true);
+  });
+  it("accepts false", () => {
+    expect(validateAndShape({ network_auto_reload: false }, "test").networkAutoReload).toBe(false);
+  });
+  it("rejects a non-boolean value", () => {
+    expect(() => validateAndShape({ network_auto_reload: "yes" }, "test")).toThrow(
+      /network_auto_reload/,
+    );
+  });
+});

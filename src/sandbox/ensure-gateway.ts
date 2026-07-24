@@ -32,7 +32,7 @@ const PKI_DIR = join(STATE_DIR, "pki");
 const JWT_SIGNING_KEY = join(PKI_DIR, "jwt", "signing.pem");
 const JWT_PUBLIC_KEY = join(PKI_DIR, "jwt", "public.pem");
 const JWT_KID = join(PKI_DIR, "jwt", "kid");
-const GATEWAY_PORT = 18081;
+export const GATEWAY_PORT = 18081;
 // Historical name from the podman-only era; now drives podman OR docker per
 // `--drivers` resolution. Kept stable so existing on-disk state under
 // `~/.config/openshell/gateways/podman-dev/` stays valid. Revisit at v1.0.
@@ -327,12 +327,114 @@ export async function startGateway(): Promise<void> {
     try {
       await fetch(`http://localhost:${GATEWAY_PORT}/`, { signal: AbortSignal.timeout(1000) });
       console.log("Gateway ready.");
+      warnIfGatewayLoopbackOnly(GATEWAY_PORT, process.platform);
       return;
     } catch {}
   }
   console.error("Gateway did not become ready within 30s.");
   console.error(`Check log: ${LOG_FILE}`);
   process.exit(1);
+}
+
+// ============================================================================
+// GH #75 / bd openlock-7er piece 2: the loopback fetch above only proves the
+// gateway process is up and serving *somewhere* — binding to 0.0.0.0 always
+// also answers on 127.0.0.1, so it can't tell "correctly bound wide per our
+// own --bind-address 0.0.0.0 flag" apart from "silently fell back to
+// loopback-only" (e.g. a fork regression, a config-file override clobbering
+// the CLI flag). That distinction matters only on Linux: on macOS we never
+// pass --bind-address at all, because the podman machine VM bridges
+// container traffic back to the host's 127.0.0.1 itself, so loopback-only
+// there is correct, not a bug.
+//
+// This is deliberately NOT a substitute for piece 1's real container-network
+// probe (doctor.ts) — `host.containers.internal`'s target address is
+// netns-scoped (created per-network by rootless podman's port forwarding) and
+// isn't dialable from the host's own root netns independent of a sandbox
+// network existing, which may not be true yet at gateway-start time. This
+// only asserts the bind-address configuration itself took effect — necessary
+// but not sufficient for true container reachability.
+//
+// WARN-ONLY by design: this never blocks gateway startup (still declared
+// ready on the existing loopback-fetch success above) and stays silent on
+// anything short of a clear loopback-only finding — a false alarm here is
+// worse than the gap, since it runs on every gateway start.
+// ============================================================================
+
+export type ProcNetTcpBindClassification = "wide" | "loopback" | "inconclusive";
+
+const TCP_LISTEN_STATE = "0A";
+
+/** Local bind addresses (uppercase hex, procfs little-endian encoding) of
+ * LISTEN-state entries matching `port` in a /proc/net/tcp[6]-shaped table. */
+function listenLocalAddrHexes(raw: string, port: number): string[] {
+  const portHex = port.toString(16).toUpperCase().padStart(4, "0");
+  const hexes: string[] = [];
+  for (const line of raw.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    // sl local_address rem_address st ... — need at least through `st`.
+    if (fields.length < 4) continue;
+    const [addrHex, addrPortHex] = (fields[1] ?? "").split(":");
+    if (fields[3] !== TCP_LISTEN_STATE || addrPortHex !== portHex || !addrHex) continue;
+    hexes.push(addrHex.toUpperCase());
+  }
+  return hexes;
+}
+
+/** Pure: classifies the gateway's LISTEN bind for `port` from raw
+ * /proc/net/tcp (+ optional /proc/net/tcp6) content.
+ *
+ * - "wide": found an IPv4 0.0.0.0 (`00000000`) or IPv6 `::` (all-zero,
+ *   dual-stack) wildcard bind — container-reachable, no warning.
+ * - "loopback": found IPv4 127.0.0.1 (`0100007F`) and nothing wide anywhere,
+ *   and no unrecognized tcp6 entry muddying the water — the one case that
+ *   warrants a warning.
+ * - "inconclusive": entry absent, unexpected/unrecognized address, or an
+ *   ambiguous mix (e.g. IPv4 loopback alongside a tcp6 entry we don't
+ *   attempt to decode) — silence beats a false alarm here.
+ */
+export function classifyProcNetTcpBind(
+  procNetTcp: string,
+  port: number,
+  procNetTcp6 = "",
+): ProcNetTcpBindClassification {
+  const v4 = listenLocalAddrHexes(procNetTcp, port);
+  const v6 = listenLocalAddrHexes(procNetTcp6, port);
+
+  const v4Wildcard = v4.some((h) => h === "00000000");
+  const v6Wildcard = v6.some((h) => /^0+$/.test(h));
+  if (v4Wildcard || v6Wildcard) return "wide";
+
+  const v4Loopback = v4.some((h) => h === "0100007F");
+  // Any tcp6 entry we didn't just rule out as wildcard is unrecognized —
+  // don't guess at its reachability, stay silent rather than risk both a
+  // false positive and a false negative.
+  if (v4Loopback && v6.length === 0) return "loopback";
+
+  return "inconclusive";
+}
+
+function readProcFileSafe(path: string): string {
+  try {
+    return readFileSync(path, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+/** Linux-only, warn-only. Never throws, never affects gateway readiness. */
+export function warnIfGatewayLoopbackOnly(port: number, platform: NodeJS.Platform): void {
+  if (platform !== "linux") return;
+  const classification = classifyProcNetTcpBind(
+    readProcFileSafe("/proc/net/tcp"),
+    port,
+    readProcFileSafe("/proc/net/tcp6"),
+  );
+  if (classification !== "loopback") return;
+  console.warn(
+    `gateway bound to 127.0.0.1 only; Linux sandbox containers can't reach it — ` +
+      "expected --bind-address 0.0.0.0 (see GH #75)",
+  );
 }
 
 export function stopGateway(): void {

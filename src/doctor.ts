@@ -6,6 +6,7 @@ import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
 import { type BinaryProbes, RUNTIMES, type Runtime } from "./runtime";
+import { GATEWAY_PORT, gatewayStatus } from "./sandbox/ensure-gateway";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { SANDBOX_UID } from "./sandbox/seed-containerfile";
 import { rangeCoversUid } from "./sandbox/subuid";
@@ -87,6 +88,216 @@ export async function podmanSocketActive(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ============================================================================
+// GH #75 / bd openlock-7er piece 1: bridge-network sandbox containers reach
+// the gateway via `host.containers.internal` -> netavark DNAT. A host
+// firewalld/nftables reload (or podman network event) can flush those NAT
+// rules; containers then can't fetch policy from the gateway and exit 1. This
+// check reproduces that exact path (a real container on the sandbox network
+// probing the gateway port) rather than the loopback-only checks above, which
+// can't see it. Podman/netavark-specific — no-ops on docker (see below).
+// ============================================================================
+
+// Matches the fork's podman driver DEFAULT_NETWORK_NAME
+// (crates/openshell-driver-podman/src/config.rs) — sandbox containers attach
+// to this network. Not exported from the fork's TS surface, so mirrored here
+// like SANDBOX_UID above.
+const OPENSHELL_NETWORK_NAME = "openshell";
+// Tiny, universally-available image with a `nc` (busybox applet); `--pull
+// missing` below means no network hit at all once it's cached once.
+const REACHABILITY_PROBE_IMAGE = "docker.io/library/busybox:latest";
+const REACHABILITY_PROBE_TIMEOUT_MS = 15_000;
+// Podman's own operational failures (image pull failed, network unknown,
+// couldn't start the container at all) surface as 125/126/127 or our own
+// timeout-kill sentinel below — deliberately NOT reported as "unreachable"
+// since that would misdiagnose an unrelated problem (e.g. no registry access)
+// as the netavark-flush bug this check targets.
+const REACHABILITY_PROBE_TIMEOUT_SENTINEL = 124;
+
+export type ReachabilityClassification = "reachable" | "unreachable" | "inconclusive";
+
+/** Pure: maps the probe container's exit code to a classification. */
+export function classifyReachabilityProbeExit(code: number): ReachabilityClassification {
+  if (code === 0) return "reachable";
+  if (code === 1) return "unreachable";
+  return "inconclusive";
+}
+
+/** Pure: the exact `podman run` argv for the reachability probe container. */
+export function buildReachabilityProbeArgv(port: number): string[] {
+  return [
+    "podman",
+    "run",
+    "--rm",
+    "--network",
+    OPENSHELL_NETWORK_NAME,
+    "--pull",
+    "missing",
+    REACHABILITY_PROBE_IMAGE,
+    "sh",
+    "-c",
+    `nc -z -w 2 host.containers.internal ${port}`,
+  ];
+}
+
+interface GatewayReachabilityIo {
+  networkExists: () => Promise<boolean>;
+  runProbe: () => Promise<number>;
+  runReload: () => Promise<boolean>;
+}
+
+/** Pure decision tree over injected I/O — fully unit-testable without
+ * spawning anything real. Covers: network not yet created, reachable,
+ * inconclusive, unreachable+suggest-only (default), and unreachable+
+ * auto-reload (network_auto_reload) in all its outcomes. */
+export async function evaluateGatewayReachability(
+  port: number,
+  autoReloadEnabled: boolean,
+  io: GatewayReachabilityIo,
+): Promise<CheckOutcome> {
+  if (!(await io.networkExists())) {
+    return {
+      ok: true,
+      detail: `'${OPENSHELL_NETWORK_NAME}' podman network not found yet (no sandbox has run) — skipping`,
+    };
+  }
+
+  const first = classifyReachabilityProbeExit(await io.runProbe());
+  if (first === "reachable") return { ok: true };
+  if (first === "inconclusive") {
+    return { ok: true, detail: "reachability probe was inconclusive (couldn't run it); skipping" };
+  }
+
+  // first === "unreachable"
+  if (!autoReloadEnabled) {
+    return {
+      ok: false,
+      detail:
+        `a container on the '${OPENSHELL_NETWORK_NAME}' network could not reach the gateway ` +
+        `at host.containers.internal:${port} (a host firewall/network reload may have flushed ` +
+        "netavark's NAT rules — see GH #75)",
+      fix: "podman network reload --all",
+    };
+  }
+
+  const reloadOk = await io.runReload();
+  if (!reloadOk) {
+    return {
+      ok: false,
+      detail:
+        `gateway unreachable from the '${OPENSHELL_NETWORK_NAME}' network at ` +
+        `host.containers.internal:${port}; network_auto_reload is enabled but ` +
+        "`podman network reload --all` itself failed",
+      fix: "run `podman network reload --all` manually and inspect its output",
+    };
+  }
+
+  const after = classifyReachabilityProbeExit(await io.runProbe());
+  if (after === "reachable") {
+    return {
+      ok: true,
+      detail:
+        `gateway was unreachable from the '${OPENSHELL_NETWORK_NAME}' network; auto-ran ` +
+        "`podman network reload --all` (network_auto_reload) and it recovered",
+    };
+  }
+  return {
+    ok: false,
+    detail:
+      `gateway still unreachable from the '${OPENSHELL_NETWORK_NAME}' network at ` +
+      `host.containers.internal:${port} after auto-running \`podman network reload --all\``,
+    fix: "inspect podman network / firewall state manually (see GH #75)",
+  };
+}
+
+async function podmanNetworkExists(name: string): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["podman", "network", "exists", name], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function runReachabilityProbeContainer(port: number): Promise<number> {
+  try {
+    const proc = Bun.spawn(buildReachabilityProbeArgv(port), {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    let timedOut = false;
+    // A dangling `Bun.sleep(...).then(...)` left un-cancelled after the probe
+    // returns holds the event loop open in the compiled bun binary (the
+    // documented compiled-vs-interpreter footgun) — `openlock doctor` would
+    // hang up to REACHABILITY_PROBE_TIMEOUT_MS after it's otherwise done.
+    // `.unref()` + clearing the timer in `finally` (whichever settles first —
+    // normal exit or our own kill) ensures nothing dangles either way.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill();
+    }, REACHABILITY_PROBE_TIMEOUT_MS).unref();
+    try {
+      const code = await proc.exited;
+      return timedOut ? REACHABILITY_PROBE_TIMEOUT_SENTINEL : code;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return REACHABILITY_PROBE_TIMEOUT_SENTINEL;
+  }
+}
+
+async function runNetworkReloadAll(): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["podman", "network", "reload", "--all"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
+}
+
+export type GatewayReachabilityProbe = (
+  port: number,
+  autoReloadEnabled: boolean,
+) => Promise<CheckOutcome>;
+
+async function defaultGatewayReachabilityProbe(
+  port: number,
+  autoReloadEnabled: boolean,
+): Promise<CheckOutcome> {
+  return evaluateGatewayReachability(port, autoReloadEnabled, {
+    networkExists: () => podmanNetworkExists(OPENSHELL_NETWORK_NAME),
+    runProbe: () => runReachabilityProbeContainer(port),
+    runReload: () => runNetworkReloadAll(),
+  });
+}
+
+/** Only meaningful when podman is in play AND a gateway is actually running —
+ * gated eagerly (both are cheap sync/local checks) so the check is simply
+ * absent otherwise, matching buildSubuidCheck's convention. This also keeps
+ * it a no-op in test/CI runs, which don't start a real gateway. */
+export function buildGatewayReachabilityCheck(
+  hasPodman: boolean,
+  gatewayRunning: boolean,
+  gatewayPort: number,
+  autoReloadEnabled: boolean,
+  probe: GatewayReachabilityProbe = defaultGatewayReachabilityProbe,
+): Check[] {
+  if (!hasPodman || !gatewayRunning) return [];
+  return [
+    {
+      name: `sandbox → gateway reachability (${OPENSHELL_NETWORK_NAME} network)`,
+      test: () => probe(gatewayPort, autoReloadEnabled),
+    },
+  ];
 }
 
 export interface DoctorResult {
@@ -186,6 +397,17 @@ export function buildSubuidCheck(
   ];
 }
 
+// A malformed config.yaml is reported separately by the "global config" check
+// below; don't let it crash doctor here too — just fall back to the
+// suggest-only default (matches network_auto_reload's documented default).
+function readNetworkAutoReload(): boolean {
+  try {
+    return readGlobalConfig()?.networkAutoReload ?? false;
+  } catch {
+    return false;
+  }
+}
+
 export async function runDoctorChecks(
   runtime?: Runtime | null,
   readSubuid: () => string = defaultReadSubuid,
@@ -204,11 +426,18 @@ export async function runDoctorChecks(
   // Rootless podman (Linux only) requires the host's subuid range to cover
   // the in-image sandbox UID so `--userns=keep-id:uid=N` can map it.
   const subuidChecks = buildSubuidCheck(probes.podman, isMac, readSubuid, process.getuid?.() === 0);
+  const reachabilityChecks = buildGatewayReachabilityCheck(
+    probes.podman,
+    gatewayStatus().running,
+    GATEWAY_PORT,
+    readNetworkAutoReload(),
+  );
 
   const checks: Check[] = [
     { name: "git", test: async () => commandExists("git"), fix: installHint("git") },
     ...runtimeChecks,
     ...subuidChecks,
+    ...reachabilityChecks,
     ...(dev
       ? [
           {

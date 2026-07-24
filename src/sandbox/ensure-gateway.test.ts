@@ -3,10 +3,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  classifyProcNetTcpBind,
   readGatewayRssKb,
   renderGatewayConfigToml,
   rotateLogIfLarge,
   spawnDaemonToLog,
+  warnIfGatewayLoopbackOnly,
 } from "./ensure-gateway";
 import { pidAlive } from "./proc";
 
@@ -62,6 +64,89 @@ describe("renderGatewayConfigToml", () => {
     });
     expect(out).not.toContain("gateway_jwt");
     expect(out).not.toContain("allow_unauthenticated_users");
+  });
+});
+
+describe("classifyProcNetTcpBind (GH #75 / bd openlock-7er piece 2)", () => {
+  const PORT = 18081; // hex 46A1
+  const HEADER =
+    "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode";
+  // Real /proc/net/tcp[6] shape: local_address is IP:PORT in hex, little-endian
+  // per octet for IPv4; state 0A = TCP_LISTEN.
+  const V4_WILDCARD_LINE =
+    "   0: 00000000:46A1 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0";
+  const V4_LOOPBACK_LINE =
+    "   0: 0100007F:46A1 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0";
+  const V4_UNRELATED_PORT_LINE =
+    "   0: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0";
+  const V6_WILDCARD_LINE = `   0: ${"0".repeat(32)}:46A1 ${"0".repeat(32)}:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0`;
+  // An IPv6 address we deliberately don't attempt to decode (real ::1 loopback
+  // is not all-zero once byte-order-encoded) — exercises the "ambiguous, stay
+  // silent" path rather than us guessing at its reachability.
+  const V6_UNRECOGNIZED_LINE =
+    "   0: 0000000000000000FFFF00000100007F:46A1 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0";
+
+  it('classifies an IPv4 0.0.0.0 wildcard LISTEN as "wide"', () => {
+    expect(classifyProcNetTcpBind(`${HEADER}\n${V4_WILDCARD_LINE}\n`, PORT)).toBe("wide");
+  });
+
+  it('classifies an IPv4 127.0.0.1 LISTEN (no tcp6 entries) as "loopback"', () => {
+    expect(classifyProcNetTcpBind(`${HEADER}\n${V4_LOOPBACK_LINE}\n`, PORT)).toBe("loopback");
+  });
+
+  it('classifies an absent entry (port not listed) as "inconclusive"', () => {
+    expect(classifyProcNetTcpBind(`${HEADER}\n${V4_UNRELATED_PORT_LINE}\n`, PORT)).toBe(
+      "inconclusive",
+    );
+  });
+
+  it('classifies empty /proc/net/tcp content as "inconclusive"', () => {
+    expect(classifyProcNetTcpBind("", PORT)).toBe("inconclusive");
+  });
+
+  it('classifies a tcp6 :: (all-zero, dual-stack) wildcard LISTEN as "wide"', () => {
+    expect(classifyProcNetTcpBind("", PORT, `${HEADER}\n${V6_WILDCARD_LINE}\n`)).toBe("wide");
+  });
+
+  it('a tcp6 wildcard overrides an IPv4 loopback finding to "wide" (dual-stack is container-reachable)', () => {
+    const tcp = `${HEADER}\n${V4_LOOPBACK_LINE}\n`;
+    const tcp6 = `${HEADER}\n${V6_WILDCARD_LINE}\n`;
+    expect(classifyProcNetTcpBind(tcp, PORT, tcp6)).toBe("wide");
+  });
+
+  it('an IPv4 loopback finding alongside an unrecognized (non-wildcard) tcp6 entry stays "inconclusive" (no false alarm)', () => {
+    const tcp = `${HEADER}\n${V4_LOOPBACK_LINE}\n`;
+    const tcp6 = `${HEADER}\n${V6_UNRECOGNIZED_LINE}\n`;
+    expect(classifyProcNetTcpBind(tcp, PORT, tcp6)).toBe("inconclusive");
+  });
+});
+
+describe("warnIfGatewayLoopbackOnly (Linux-only, warn-only, never throws)", () => {
+  it("is a no-op on macOS regardless of local proc state (loopback-only is correct there)", () => {
+    const originalWarn = console.warn;
+    const calls: unknown[][] = [];
+    console.warn = (...args: unknown[]) => calls.push(args);
+    try {
+      expect(() => warnIfGatewayLoopbackOnly(18081, "darwin")).not.toThrow();
+      expect(calls).toHaveLength(0);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it("does not throw on Linux even when /proc/net/tcp is unreadable (stays silent)", () => {
+    const originalWarn = console.warn;
+    const calls: unknown[][] = [];
+    console.warn = (...args: unknown[]) => calls.push(args);
+    try {
+      // This test process's real /proc/net/tcp (Linux CI) won't have a LISTEN
+      // entry for this arbitrary port, and on non-Linux `readFileSync` throws
+      // and is swallowed — either way: no throw, no warning.
+      expect(() => warnIfGatewayLoopbackOnly(65535, "linux")).not.toThrow();
+      expect(calls).toHaveLength(0);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });
 

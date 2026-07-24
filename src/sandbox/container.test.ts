@@ -8,9 +8,11 @@ import {
   buildSandboxEnv,
   buildSandboxExecRootArgv,
   buildSandboxGetArgv,
+  buildSandboxLogsArgv,
   buildSandboxStartArgv,
   buildSandboxStopArgv,
   buildSandboxUploadArgv,
+  formatSandboxExitedError,
   parseSandboxGetPhase,
   TETHER_STDIO,
   wrapCmdWithEnv,
@@ -244,6 +246,50 @@ describe("parseSandboxGetPhase", () => {
   it("strips ANSI color codes around the Phase label and value", () => {
     const ansi = "\x1b[1m\x1b[36mSandbox:\x1b[39m\x1b[0m\n\n  \x1b[2mPhase:\x1b[0m Ready\n";
     expect(parseSandboxGetPhase(ansi)).toBe("running");
+  });
+});
+
+describe("buildSandboxLogsArgv", () => {
+  it("emits top-level `openshell logs <name> -n <lines>` (NOT `sandbox logs`)", () => {
+    expect(buildSandboxLogsArgv(["cli"], "sess")).toEqual(["cli", "logs", "sess", "-n", "50"]);
+  });
+
+  it("honors a custom line count", () => {
+    expect(buildSandboxLogsArgv(["cli"], "sess", { lines: 10 })).toEqual([
+      "cli",
+      "logs",
+      "sess",
+      "-n",
+      "10",
+    ]);
+  });
+
+  it("supports a multi-element cli prefix", () => {
+    expect(buildSandboxLogsArgv(["mise", "exec", "--", "openshell"], "sess")).toEqual([
+      "mise",
+      "exec",
+      "--",
+      "openshell",
+      "logs",
+      "sess",
+      "-n",
+      "50",
+    ]);
+  });
+});
+
+describe("formatSandboxExitedError (GH #75 piece 4 — surface real supervisor failure)", () => {
+  it("includes the fetched supervisor logs verbatim when present", () => {
+    const msg = formatSandboxExitedError("my-sess", "ERROR Policy fetch failed: transport error");
+    expect(msg).toContain('sandbox "my-sess" exited during provisioning');
+    expect(msg).toContain("ERROR Policy fetch failed: transport error");
+  });
+
+  it("falls back to a network-reachability hint when no logs were received", () => {
+    const msg = formatSandboxExitedError("my-sess", "");
+    expect(msg).toContain("no supervisor");
+    expect(msg).toContain("openlock doctor");
+    expect(msg).toContain("podman logs openshell-sandbox-my-sess");
   });
 });
 

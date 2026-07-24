@@ -8,6 +8,7 @@ export interface GlobalConfig {
   defaultProvider?: ProviderId;
   defaultRuntime?: Runtime;
   reapIdle?: number | "off";
+  networkAutoReload?: boolean;
 }
 
 const ALLOWED_KEYS = new Set([
@@ -15,6 +16,7 @@ const ALLOWED_KEYS = new Set([
   "default_provider",
   "default_runtime",
   "reap_idle",
+  "network_auto_reload",
 ]);
 
 function parseDefaultHarness(v: unknown, source: string): Harness {
@@ -87,6 +89,17 @@ function parseReapIdle(v: unknown, source: string): number | "off" {
   return parseInt(m[1]!, 10) * REAP_UNIT_MS[m[2]!]!;
 }
 
+// Opt-in (default off): when true, `openlock doctor` auto-runs `podman
+// network reload --all` on detected sandbox->gateway unreachability (GH #75)
+// instead of only suggesting it. Podman/netavark-specific; harmless-but-unused
+// on the docker runtime.
+function parseNetworkAutoReload(v: unknown, source: string): boolean {
+  if (typeof v !== "boolean") {
+    throw new Error(`${source}: network_auto_reload must be a boolean (true or false)`);
+  }
+  return v;
+}
+
 export function validateAndShape(raw: unknown, source: string): GlobalConfig {
   if (raw === null || raw === undefined) return {};
   if (typeof raw !== "object" || Array.isArray(raw)) {
@@ -112,6 +125,9 @@ export function validateAndShape(raw: unknown, source: string): GlobalConfig {
   }
   if ("reap_idle" in obj) {
     out.reapIdle = parseReapIdle(obj.reap_idle, source);
+  }
+  if ("network_auto_reload" in obj) {
+    out.networkAutoReload = parseNetworkAutoReload(obj.network_auto_reload, source);
   }
   return out;
 }
