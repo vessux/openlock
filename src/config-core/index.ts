@@ -49,6 +49,28 @@ export function loadDeclaredCredentials(
   return Array.isArray(doc.credentials) ? doc.credentials : [];
 }
 
+/** Credentials declared across config.yaml + config.local.yaml (base ++ local),
+ * used by validate cross-checks and by report's secret redaction. */
+export function loadDeclaredCredentialsMerged(
+  folder: string,
+): { name: string; values: Record<string, unknown> }[] {
+  const out: { name: string; values: Record<string, unknown> }[] = [];
+  const base = join(folder, "config.yaml");
+  if (existsSync(base)) out.push(...loadDeclaredCredentials(base));
+  const local = join(folder, "config.local.yaml");
+  if (existsSync(local)) out.push(...loadDeclaredCredentials(local));
+  return out;
+}
+
+/** True when a .gitignore body ignores config.local.yaml (bare or root-anchored). */
+export function gitignoreCoversLocalConfig(content: string | null): boolean {
+  if (content === null) return false;
+  return content
+    .split("\n")
+    .map((l) => l.trim())
+    .some((l) => l === "config.local.yaml" || l === "/config.local.yaml");
+}
+
 /** Validate the whole .openlock/ folder (manifest + policy). Collect-all,
  * never throws. Each issue is tagged with its source file. */
 export function lintFolder(projectDir: string, opts: { offline: boolean }): Issue[] {
@@ -74,6 +96,15 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
       fix,
     });
   }
+  const localConfigPath = join(folder, "config.local.yaml");
+  if (existsSync(localConfigPath)) {
+    issues.push(
+      ...lintManifest(readFileSync(localConfigPath, "utf-8"), projectDir, {
+        ...opts,
+        file: "config.local.yaml",
+      }),
+    );
+  }
   const policyPath = join(folder, "policy.yaml");
   if (existsSync(policyPath)) {
     issues.push(...lintPolicy(readFileSync(policyPath, "utf-8")));
@@ -86,14 +117,16 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
       fix,
     });
   }
-  const hasConfigErr = issues.some((i) => i.file === "config.yaml" && i.severity === "error");
+  const hasConfigErr = issues.some(
+    (i) => (i.file === "config.yaml" || i.file === "config.local.yaml") && i.severity === "error",
+  );
   const hasPolicyErr = issues.some((i) => i.file === "policy.yaml" && i.severity === "error");
   // Config-only: a credentials[].name colliding with a built-in provider id.
   // Runs whenever config.yaml exists and is itself schema-clean — independent
   // of policy.yaml's state, since this is not a cross-file concern and must
   // surface even when policy.yaml has unrelated issues.
   if (!hasConfigErr && existsSync(configPath)) {
-    const credentials = loadDeclaredCredentials(configPath);
+    const credentials = loadDeclaredCredentialsMerged(folder);
     issues.push(
       ...checkCredentialNameCollisions({
         credentials,
@@ -104,7 +137,7 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
   // have no severity:"error" issues already queued for them — a structurally
   // broken doc can't be meaningfully cross-checked.
   if (!hasConfigErr && !hasPolicyErr && existsSync(configPath) && existsSync(policyPath)) {
-    const credentials = loadDeclaredCredentials(configPath);
+    const credentials = loadDeclaredCredentialsMerged(folder);
     const policyDoc = (yaml.load(readFileSync(policyPath, "utf-8")) ?? {}) as Parameters<
       typeof checkCredentialsSupplied
     >[1];

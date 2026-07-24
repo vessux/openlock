@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { knownConfigTokens, lintFolder } from "./index";
+import {
+  gitignoreCoversLocalConfig,
+  knownConfigTokens,
+  lintFolder,
+  loadDeclaredCredentialsMerged,
+} from "./index";
 
 let root: string;
 beforeEach(() => {
@@ -223,5 +228,46 @@ describe("knownConfigTokens", () => {
   it("returns a de-duplicated, sorted list", () => {
     const tokens = knownConfigTokens();
     expect(tokens).toEqual([...new Set(tokens)].sort());
+  });
+});
+
+describe("config.local.yaml support", () => {
+  let dir: string;
+  function seed(files: Record<string, string>): void {
+    const folder = join(dir, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    for (const [n, b] of Object.entries(files)) writeFileSync(join(folder, n), b, "utf-8");
+  }
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "olcc-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("attributes a config.local.yaml schema error to that file", () => {
+    seed({
+      "config.yaml": "args: [--x]\n",
+      "config.local.yaml": "bogus_key: true\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(issues.some((i) => i.file === "config.local.yaml" && i.severity === "error")).toBe(true);
+  });
+
+  it("merges credentials from both files", () => {
+    seed({
+      "config.yaml": "credentials:\n  - name: a\n    values: {}\n",
+      "config.local.yaml": "credentials:\n  - name: b\n    values: {}\n",
+    });
+    const names = loadDeclaredCredentialsMerged(join(dir, ".openlock")).map((c) => c.name);
+    expect(names).toEqual(["a", "b"]);
+  });
+
+  it("detects whether .gitignore covers config.local.yaml", () => {
+    expect(gitignoreCoversLocalConfig(null)).toBe(false);
+    expect(gitignoreCoversLocalConfig("node_modules\n")).toBe(false);
+    expect(gitignoreCoversLocalConfig("node_modules\nconfig.local.yaml\n")).toBe(true);
+    expect(gitignoreCoversLocalConfig("/config.local.yaml")).toBe(true);
   });
 });

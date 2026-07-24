@@ -1,7 +1,7 @@
 import type { Harness } from "../sandbox/harness";
 
 export type Severity = "error" | "filesystem";
-export type ConfigFile = "config.yaml" | "policy.yaml";
+export type ConfigFile = "config.yaml" | "config.local.yaml" | "policy.yaml";
 
 export interface Issue {
   file: ConfigFile;

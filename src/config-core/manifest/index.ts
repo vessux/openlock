@@ -1,5 +1,12 @@
 import yaml from "js-yaml";
-import type { CredentialBundle, Issue, ManifestConfig, Mount, MountType } from "../types";
+import type {
+  ConfigFile,
+  CredentialBundle,
+  Issue,
+  ManifestConfig,
+  Mount,
+  MountType,
+} from "../types";
 import { resolveSource, validateManifestFilesystem } from "./filesystem";
 import { validateManifestSchema } from "./schema";
 import { validateManifestSemantics } from "./semantic";
@@ -42,16 +49,17 @@ function parseDoc(raw: unknown): ParsedDoc {
 export function lintManifest(
   raw: unknown,
   projectRoot: string,
-  opts: { offline: boolean },
+  opts: { offline: boolean; file?: ConfigFile },
 ): Issue[] {
+  const file: ConfigFile = opts.file ?? "config.yaml";
   const { doc, parseError } = parseDoc(raw);
-  if (parseError) return [parseError];
+  if (parseError) return [{ ...parseError, file }];
   const schema = validateManifestSchema(doc);
-  if (schema.length > 0) return schema;
+  if (schema.length > 0) return schema.map((i) => ({ ...i, file }));
   const obj = doc as Record<string, unknown>;
   const semantic = validateManifestSemantics(obj);
   const filesystem = opts.offline ? [] : validateManifestFilesystem(obj, projectRoot);
-  return [...semantic, ...filesystem];
+  return [...semantic, ...filesystem].map((i) => ({ ...i, file }));
 }
 
 /** Strict parse for the runtime launch path. Throws the first blocking issue
