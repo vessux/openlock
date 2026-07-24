@@ -18,7 +18,7 @@ describe("report()", () => {
     const sessionDir = join(stateDir, "sessions", "abc123");
     mkdirSync(sessionDir, { recursive: true });
     writeFileSync(
-      join(sessionDir, "state.json"),
+      join(sessionDir, "meta.json"),
       JSON.stringify({
         id: "abc123",
         name: "demo",

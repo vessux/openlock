@@ -193,4 +193,14 @@ function processExit(code: number): void {
   process.exit(code);
 }
 
+// Several command branches dispatch as a bare `import(...).then(cmd)` with no
+// `.catch()`, so a throw inside a handler (e.g. `ensureRepoIsGit`, a missing
+// provider) would otherwise surface as Bun's raw unhandled-rejection stack
+// dump. This net gives them the same friendly one-line error the try/catch
+// commands emit, and exits non-zero.
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error(`openlock: ${reason instanceof Error ? reason.message : String(reason)}`);
+  process.exit(1);
+});
+
 main();

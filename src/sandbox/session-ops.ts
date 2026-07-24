@@ -1,13 +1,6 @@
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  buildOpenshellExecArgv,
-  deleteSandbox,
-  downloadFromSandbox,
-  getSandboxState,
-  stopSandbox,
-} from "./container";
-import { getCliInvocation } from "./fork-binaries";
+import { deleteSandbox, downloadFromSandbox, getSandboxState, stopSandbox } from "./container";
 import { formatDuration } from "./format";
 import { pruneSandboxRefs, syncWorkspaceBundle } from "./git-sync";
 import { pidAlive } from "./proc";
@@ -148,19 +141,6 @@ export async function cleanSession(name: string, opts: CleanOpts = {}): Promise<
   if (opts.copyDir) {
     const dest = resolve(opts.copyDir);
     rmSync(dest, { recursive: true, force: true });
-    const cli = await getCliInvocation();
-    const regenArgv = buildOpenshellExecArgv(
-      cli.argv,
-      containerName,
-      ["git", "bundle", "create", "/sandbox/out.bundle", "--all"],
-      { workdir: "/sandbox/repo", tty: "off" },
-    );
-    const regen = Bun.spawn(regenArgv, {
-      cwd: cli.cwd,
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    await regen.exited;
     const ok = await downloadFromSandbox(containerName, "/sandbox/repo", dest);
     if (!ok) {
       console.warn(`failed to copy /sandbox/repo from ${containerName}; continuing teardown`);

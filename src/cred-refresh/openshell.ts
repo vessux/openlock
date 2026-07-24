@@ -21,11 +21,17 @@ export async function runProviderUpdate(
 ): Promise<{ ok: boolean; stderr: string }> {
   const args = [...cmd.prefix, "provider", "update", providerName];
 
+  // Pass credential values through the child's env, not argv: the fork resolves
+  // a bare `--credential KEY` from its own env, keeping the secret out of the
+  // world-readable /proc/<pid>/cmdline.
+  const credEnv: Record<string, string> = {};
   for (const [key, value] of Object.entries(credentials)) {
-    args.push("--credential", `${key}=${value}`);
+    args.push("--credential", key);
+    credEnv[key] = value;
   }
 
   const proc = Bun.spawn([cmd.bin, ...args], {
+    env: { ...process.env, ...credEnv },
     stdout: "pipe",
     stderr: "pipe",
   });
