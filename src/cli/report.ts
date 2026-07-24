@@ -30,7 +30,7 @@ interface SummaryVersions {
 
 interface SummarySession {
   id: string;
-  stateFile: string;
+  metaFile: string;
   metadata: unknown;
 }
 
@@ -235,11 +235,15 @@ function collectSessions(stateDir: string): SummarySession[] {
   }
   const out: SummarySession[] = [];
   for (const id of entries) {
-    const stateFile = join(sessionsDir, id, "state.json");
+    // Sessions are persisted as meta.json (see sandbox/session-store.ts:
+    // saveSession/loadSession both use "meta.json"). Reading "state.json" here
+    // silently ENOENT'd on every entry, so the bundle's sessions[] was always
+    // empty.
+    const metaFile = join(sessionsDir, id, "meta.json");
     try {
-      const raw = readFileSync(stateFile, "utf8");
+      const raw = readFileSync(metaFile, "utf8");
       const parsed = JSON.parse(raw);
-      out.push({ id, stateFile, metadata: stripSecretFields(parsed) });
+      out.push({ id, metaFile, metadata: stripSecretFields(parsed) });
     } catch {
       // Skip missing / unreadable / malformed entries.
     }

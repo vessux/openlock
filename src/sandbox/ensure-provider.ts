@@ -14,15 +14,19 @@ interface ShellResult {
   stderr: string;
 }
 
-type Shell = (args: string[]) => Promise<ShellResult>;
+type Shell = (args: string[], env?: Record<string, string>) => Promise<ShellResult>;
 
 // Throw-on-nonzero helper for the multi-step refresh-seeding sequence, where a
 // per-call custom message isn't worth it (the raw command + stderr is enough to
 // diagnose). The generic path keeps its own friendlier inline `Failed to
 // create/update provider` throw on purpose — do NOT unify that into mustOk.
 /** Run an openshell command, throwing (with stderr) on a non-zero exit. */
-async function mustOk(shell: Shell, args: string[]): Promise<ShellResult> {
-  const result = await shell(args);
+async function mustOk(
+  shell: Shell,
+  args: string[],
+  env?: Record<string, string>,
+): Promise<ShellResult> {
+  const result = await shell(args, env);
   if (result.exitCode !== 0) {
     throw new Error(
       `openshell ${args.join(" ")} failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
@@ -31,10 +35,14 @@ async function mustOk(shell: Shell, args: string[]): Promise<ShellResult> {
   return result;
 }
 
-async function realOpenshell(args: string[]): Promise<ShellResult> {
+async function realOpenshell(args: string[], env?: Record<string, string>): Promise<ShellResult> {
   const cli = await getCliInvocation();
   const proc = Bun.spawn([...cli.argv, ...args], {
     cwd: cli.cwd,
+    // Credential values are passed through the child's env (see
+    // credentialArgsAndEnv), not argv, so they never land in the
+    // world-readable /proc/<pid>/cmdline.
+    env: env ? { ...process.env, ...env } : undefined,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -42,6 +50,28 @@ async function realOpenshell(args: string[]): Promise<ShellResult> {
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
   return { exitCode, stdout, stderr };
+}
+
+/**
+ * Build `--credential KEY` args (no inline value) plus the env map the spawned
+ * openshell resolves them from. The fork reads a bare `--credential KEY` from
+ * `std::env::var(KEY)` (see parse_credential_pairs in openshell-cli), so passing
+ * secrets this way keeps them out of argv — process arguments are visible to any
+ * local user via `ps`/`/proc/<pid>/cmdline`, whereas `/proc/<pid>/environ` is
+ * readable only by the same uid. Credential keys are env-var names by
+ * construction (e.g. ANTHROPIC_BEARER_TOKEN, generic secondary-cred keys).
+ */
+function credentialArgsAndEnv(credentials: Record<string, string>): {
+  args: string[];
+  env: Record<string, string>;
+} {
+  const args: string[] = [];
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(credentials)) {
+    args.push("--credential", key);
+    env[key] = value;
+  }
+  return { args, env };
 }
 
 // `openshell provider list` prints a space-aligned table:
@@ -123,16 +153,14 @@ async function seedRefreshProvider(
         `Provider '${providerId}' record has refresh material but no ANTHROPIC_BEARER_TOKEN credential; re-run \`openlock login\`.`,
       );
     }
-    await mustOk(shell, [
-      "provider",
-      "create",
-      "--name",
-      providerId,
-      "--type",
-      record.type,
-      "--credential",
-      `ANTHROPIC_BEARER_TOKEN=${access}`,
-    ]);
+    const { args: createCredArgs, env: createCredEnv } = credentialArgsAndEnv({
+      ANTHROPIC_BEARER_TOKEN: access,
+    });
+    await mustOk(
+      shell,
+      ["provider", "create", "--name", providerId, "--type", record.type, ...createCredArgs],
+      createCredEnv,
+    );
     await mustOk(shell, [
       "provider",
       "update",
@@ -194,15 +222,12 @@ export async function _ensureProviderForTests(providerId: ProviderId, shell: She
     return;
   }
 
-  const credArgs = Object.entries(record.credentials).flatMap(([k, v]) => [
-    "--credential",
-    `${k}=${v}`,
-  ]);
+  const { args: credArgs, env: credEnv } = credentialArgsAndEnv(record.credentials);
   const args = exists
     ? ["provider", "update", providerId, ...credArgs]
     : ["provider", "create", "--name", providerId, "--type", record.type, ...credArgs];
 
-  const result = await shell(args);
+  const result = await shell(args, credEnv);
   if (result.exitCode !== 0) {
     throw new Error(
       `Failed to ${exists ? "update" : "create"} provider '${providerId}' in gateway: ${result.stderr}`,
@@ -232,11 +257,11 @@ export async function _ensureGenericProviderForTests(
     throw new Error(`Failed to query gateway providers: ${list.stderr || list.stdout}`);
   }
   const exists = providerExistsInGateway(list.stdout, name);
-  const credArgs = Object.entries(values).flatMap(([k, v]) => ["--credential", `${k}=${v}`]);
+  const { args: credArgs, env: credEnv } = credentialArgsAndEnv(values);
   const args = exists
     ? ["provider", "update", name, ...credArgs]
     : ["provider", "create", "--name", name, "--type", "generic", ...credArgs];
-  const result = await shell(args);
+  const result = await shell(args, credEnv);
   if (result.exitCode !== 0) {
     // Deliberately omit `args` (carries the credential value) from the message.
     throw new Error(

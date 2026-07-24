@@ -74,10 +74,13 @@ function fakeGateway(args: string[], state: MockState) {
 describe("_ensureProviderForTests", () => {
   function makeShell(state: MockState) {
     const calls: string[][] = [];
+    const envs: (Record<string, string> | undefined)[] = [];
     return {
       calls,
-      shell: async (args: string[]) => {
+      envs,
+      shell: async (args: string[], env?: Record<string, string>) => {
         calls.push(args);
+        envs.push(env);
         return fakeGateway(args, state);
       },
     };
@@ -96,7 +99,11 @@ describe("_ensureProviderForTests", () => {
     expect(m.calls[1]).toContain("--name");
     expect(m.calls[1]).toContain("openrouter");
     expect(m.calls[1]).toContain("--credential");
-    expect(m.calls[1]).toContain("OPENROUTER_BEARER_TOKEN=Bearer sk-or-v1-x");
+    // Credential passed as a bare KEY in argv; the value travels via env so it
+    // never lands in /proc/<pid>/cmdline.
+    expect(m.calls[1]).toContain("OPENROUTER_BEARER_TOKEN");
+    expect(m.calls[1]).not.toContain("OPENROUTER_BEARER_TOKEN=Bearer sk-or-v1-x");
+    expect(m.envs[1]?.OPENROUTER_BEARER_TOKEN).toBe("Bearer sk-or-v1-x");
   });
 
   it("updates an existing provider (no --type on update)", async () => {
@@ -158,10 +165,14 @@ describe("_ensureProviderForTests", () => {
       expect(idx(create as string[])).toBeLessThan(idx(update as string[]));
       expect(idx(update as string[])).toBeLessThan(idx(configure as string[]));
 
-      // create uses --type claude-oauth and the raw access token
+      // create uses --type claude-oauth and the raw access token (passed via
+      // env as a bare --credential KEY, not inline in argv).
       expect(create).toContain("--type");
       expect(create?.[create.indexOf("--type") + 1]).toBe("claude-oauth");
-      expect(create).toContain("ANTHROPIC_BEARER_TOKEN=raw-access-token");
+      expect(create).toContain("ANTHROPIC_BEARER_TOKEN");
+      expect(create).not.toContain("ANTHROPIC_BEARER_TOKEN=raw-access-token");
+      const createEnv = m.envs[m.calls.indexOf(create as string[])];
+      expect(createEnv?.ANTHROPIC_BEARER_TOKEN).toBe("raw-access-token");
 
       // update seeds credential expiry
       expect(update).toContain("--credential-expires-at");
@@ -239,8 +250,10 @@ describe("_ensureProviderForTests", () => {
 describe("ensureGenericProvider", () => {
   function fakeShell(exists: boolean) {
     const calls: string[][] = [];
-    const shell = async (args: string[]) => {
+    const envs: (Record<string, string> | undefined)[] = [];
+    const shell = async (args: string[], env?: Record<string, string>) => {
       calls.push(args);
+      envs.push(env);
       if (args[0] === "provider" && args[1] === "list") {
         return {
           exitCode: 0,
@@ -250,13 +263,14 @@ describe("ensureGenericProvider", () => {
       }
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-    return { shell, calls };
+    return { shell, calls, envs };
   }
 
   test("creates a generic provider when absent", async () => {
-    const { shell, calls } = fakeShell(false);
+    const { shell, calls, envs } = fakeShell(false);
     await _ensureGenericProviderForTests("github", { GITHUB_TOKEN: "ghp_x" }, shell);
     const create = calls.find((c) => c[0] === "provider" && c[1] === "create");
+    // Bare KEY in argv; secret value carried by env.
     expect(create).toEqual([
       "provider",
       "create",
@@ -265,15 +279,17 @@ describe("ensureGenericProvider", () => {
       "--type",
       "generic",
       "--credential",
-      "GITHUB_TOKEN=ghp_x",
+      "GITHUB_TOKEN",
     ]);
+    expect(envs[calls.indexOf(create as string[])]?.GITHUB_TOKEN).toBe("ghp_x");
   });
 
   test("updates when already present", async () => {
-    const { shell, calls } = fakeShell(true);
+    const { shell, calls, envs } = fakeShell(true);
     await _ensureGenericProviderForTests("github", { GITHUB_TOKEN: "ghp_x" }, shell);
     const update = calls.find((c) => c[0] === "provider" && c[1] === "update");
-    expect(update).toEqual(["provider", "update", "github", "--credential", "GITHUB_TOKEN=ghp_x"]);
+    expect(update).toEqual(["provider", "update", "github", "--credential", "GITHUB_TOKEN"]);
+    expect(envs[calls.indexOf(update as string[])]?.GITHUB_TOKEN).toBe("ghp_x");
     expect(calls.some((c) => c[1] === "create")).toBe(false);
   });
 
