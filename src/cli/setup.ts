@@ -122,6 +122,7 @@ export async function setupCmd(argv: string[]): Promise<number> {
     // resolveRuntime runs the runtime-wizard when ambiguous and persists itself;
     // runSetup also persists default_runtime for determinism.
     pickRuntime: () => resolveRuntime(),
-    loginForProvider: (id) => login({ providerFlag: id }),
+    // setup persists default_provider itself (below), so suppress login's own offer.
+    loginForProvider: (id) => login({ providerFlag: id, offerDefault: false }),
   });
 }
