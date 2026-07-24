@@ -77,7 +77,22 @@ describe("validateSemantics", () => {
         },
       }),
     );
-    expect(errors.some((e) => e.message.includes("TLD wildcard"))).toBe(true);
+    expect(errors.some((e) => e.message.includes("overly broad host wildcard"))).toBe(true);
+  });
+
+  test("rejects a bare '*' match-all host", () => {
+    for (const host of ["*", "**"]) {
+      const errors = validateSemantics(
+        minimal({
+          network_policies: {
+            test: {
+              endpoints: [{ host, port: 443 }],
+            },
+          },
+        }),
+      );
+      expect(errors.some((e) => e.message.includes("overly broad host wildcard"))).toBe(true);
+    }
   });
 
   test("accepts deeper wildcard host", () => {
@@ -140,7 +155,7 @@ describe("validateSemantics", () => {
     expect(errors).toHaveLength(0);
   });
 
-  test("skips cred check when allowed_secrets is empty", () => {
+  test("skips cred check when allowed_secrets is empty (optional narrowing filter)", () => {
     const errors = validateSemantics(
       minimal({
         network_policies: {

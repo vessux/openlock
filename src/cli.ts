@@ -141,7 +141,22 @@ function main(): void {
       import("./cli/gateway").then(({ gatewayCmd }) => gatewayCmd(args.slice(1)));
       return;
     case "doctor":
-      import("./doctor").then(({ doctor }) => doctor());
+      import("./doctor").then(async ({ doctor }) => {
+        const { parseArgs } = await import("node:util");
+        const { flagSchema } = await import("./cli/doctor");
+        const { values } = parseArgs({
+          args: args.slice(1),
+          options: flagSchema,
+          allowPositionals: false,
+        });
+        if (values.help) {
+          console.log(
+            "Usage: openlock doctor\n\nCheck system health and prerequisites (container runtime, git, gateway reachability).",
+          );
+          process.exit(0);
+        }
+        await doctor();
+      });
       return;
     case "update-images":
       import("./cli/update-images").then(({ updateImagesCmd }) => updateImagesCmd(args.slice(1)));

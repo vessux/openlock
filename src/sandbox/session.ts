@@ -140,6 +140,50 @@ export function stageProviderSandboxFiles(staging: string, files: readonly Sandb
   }
 }
 
+/** POSIX single-quote a value for safe embedding in a `bash -c` string. */
+function shq(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Build the `bash -c` setup script run as the sandbox container's initial
+ * command. Runs once at create and on every podman start (idempotent); the
+ * final `exec sleep infinity` keeps PID 1 alive so the container outlives the
+ * foreground command between attaches. /sandbox/repo itself is provisioned in
+ * the image (RUN mkdir) so it exists before openshell's PID 1 chdir.
+ *
+ * SECURITY: mount `target`/`source` values come from .openlock/config.yaml and
+ * are attacker-controllable via a cloned/shared repo. They are single-quoted
+ * (shq) so a crafted value like `/sandbox/.openlock/x$(...)` cannot inject
+ * shell commands at create time (manifest validation also rejects shell
+ * metacharacters in targets — this is the defense-in-depth second layer).
+ * Exported for regression testing.
+ */
+export function buildSetupCmd(bundleMounts: readonly Mount[], branch: string | undefined): string {
+  const setupLines = [
+    "cd /sandbox",
+    "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
+    // Claude Code's CLAUDE_CONFIG_DIR must be writable by the sandbox user.
+    // The anthropic provider normally stages .credentials.json into
+    // .openlock/claude-config/ host-side (stageProviderSandboxFiles calls
+    // mkdirSync on the parent), so the dir exists before the container starts.
+    // This mkdir + chown runs unconditionally to: (a) normalize ownership to
+    // the sandbox user after host-side upload, and (b) cover harnesses or
+    // providers that stage no file there. `|| true` keeps it non-fatal.
+    "mkdir -p .openlock/claude-config && chown -R sandbox:sandbox .openlock/claude-config 2>/dev/null || true",
+  ];
+  for (const bm of bundleMounts) {
+    const bundleName = `${basename(bm.source)}.bundle`;
+    const isWorkdir = bm.target === "/sandbox/repo";
+    const branchFlag = isWorkdir && branch !== undefined ? `-b ${shq(branch)} ` : "";
+    setupLines.push(
+      `[ -d ${shq(bm.target)}/.git ] || git clone ${branchFlag}${shq(`.openlock/bundles/${bundleName}`)} ${shq(bm.target)}`,
+    );
+  }
+  setupLines.push("exec sleep infinity");
+  return setupLines.join(" ; ");
+}
+
 async function createSession(
   projectPath: string,
   resolved: ResolvedRepo,
@@ -199,32 +243,7 @@ async function createSession(
 
     console.log(`Creating sandbox "${name}"...`);
     // Setup runs once at create + on every podman start (idempotent).
-    // Final `exec sleep infinity` keeps PID 1 alive so the container
-    // outlives the foreground command between attaches.
-    // /sandbox/repo provisioning lives in the image (RUN mkdir) so it
-    // exists before openshell's PID 1 chdir, regardless of workdir mount.
-    const setupLines = [
-      "cd /sandbox",
-      "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
-      // Claude Code's CLAUDE_CONFIG_DIR must be writable by the sandbox user.
-      // The anthropic provider normally stages .credentials.json into
-      // .openlock/claude-config/ host-side (stageProviderSandboxFiles calls
-      // mkdirSync on the parent), so the dir exists before the container starts.
-      // This mkdir + chown runs unconditionally to: (a) normalize ownership to
-      // the sandbox user after host-side upload, and (b) cover harnesses or
-      // providers that stage no file there. `|| true` keeps it non-fatal.
-      "mkdir -p .openlock/claude-config && chown -R sandbox:sandbox .openlock/claude-config 2>/dev/null || true",
-    ];
-    for (const bm of bundleMounts) {
-      const bundleName = `${basename(bm.source)}.bundle`;
-      const isWorkdir = bm.target === "/sandbox/repo";
-      const branchFlag = isWorkdir && branch !== undefined ? `-b '${branch}' ` : "";
-      setupLines.push(
-        `[ -d ${bm.target}/.git ] || git clone ${branchFlag}.openlock/bundles/${bundleName} ${bm.target}`,
-      );
-    }
-    setupLines.push("exec sleep infinity");
-    const setupCmd = setupLines.join(" ; ");
+    const setupCmd = buildSetupCmd(bundleMounts, branch);
 
     // openshell's supervisor can transiently report Error during first-handshake
     // (Provisioning→Error→Provisioning within ~20ms on cold gateway) and exit
