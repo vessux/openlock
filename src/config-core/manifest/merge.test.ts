@@ -36,14 +36,19 @@ describe("mergeManifestDocs", () => {
   });
 
   it("passes a one-sided list through unchanged", () => {
-    expect((mergeManifestDocs({}, { mounts: [{ target: "/b" }] }) as Record<string, unknown>).mounts)
-      .toEqual([{ target: "/b" }]);
-    expect((mergeManifestDocs({ mounts: [{ target: "/a" }] }, {}) as Record<string, unknown>).mounts)
-      .toEqual([{ target: "/a" }]);
+    expect(
+      (mergeManifestDocs({}, { mounts: [{ target: "/b" }] }) as Record<string, unknown>).mounts,
+    ).toEqual([{ target: "/b" }]);
+    expect(
+      (mergeManifestDocs({ mounts: [{ target: "/a" }] }, {}) as Record<string, unknown>).mounts,
+    ).toEqual([{ target: "/a" }]);
   });
 
   it("lets a non-array local list win so validation can flag the bad type", () => {
-    const merged = mergeManifestDocs({ args: ["--x"] }, { args: "oops" }) as Record<string, unknown>;
+    const merged = mergeManifestDocs({ args: ["--x"] }, { args: "oops" }) as Record<
+      string,
+      unknown
+    >;
     expect(merged.args).toBe("oops");
   });
 });

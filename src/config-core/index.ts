@@ -13,8 +13,8 @@ import {
 import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
 
-export { mergeManifestDocs } from "./manifest/merge";
 export { parseManifest } from "./manifest/index";
+export { mergeManifestDocs } from "./manifest/merge";
 export type { ConfigFile, CredentialBundle, Issue, ManifestConfig, Mount, Severity } from "./types";
 export { SANDBOX_OPENLOCK_PREFIX } from "./types";
 
