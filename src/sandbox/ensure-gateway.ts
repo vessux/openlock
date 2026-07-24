@@ -243,6 +243,20 @@ export function spawnDaemonToLog(args: string[], cwd: string, logPath: string): 
       cwd,
       stdout: logFd,
       stderr: logFd,
+      // Without this, the gateway shares the CLI's process group/session
+      // (Bun.spawn defaults to detached: false), so it's only insulated from
+      // the parent by unref() *not* holding the event loop open — nothing
+      // stops a SIGHUP delivered to that session (e.g. the CLI process exits
+      // as its session leader, as commonly happens for a short-lived
+      // scripted/CI `--no-attach` invocation with no surviving controlling
+      // terminal) from also killing the gateway. `detached: true` calls
+      // setsid() so the gateway becomes its own session/process-group leader,
+      // immune to signals delivered to the CLI's session — verified via
+      // `ps -o pgid=` in spawnDaemonToLog's test (openlock-ab6). Interactive
+      // attach-and-exit didn't show this because a human's shell keeps the
+      // terminal session alive across the CLI exiting, so no SIGHUP cascade
+      // ever fired in that pattern — same latent bug, different exposure.
+      detached: true,
     });
     // The gateway is a daemon — don't hold the parent CLI's event loop open
     // after this function returns. `bun src/cli.ts` (interpreter) auto-exits

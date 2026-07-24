@@ -525,6 +525,12 @@ async function reattachSession(
   credentials: readonly CredentialBundle[],
 ): Promise<ResolvedSession> {
   const containerName = m.name;
+  // Self-heal (openlock-ab6): getSandboxState queries the gateway
+  // (`openshell sandbox get`), so a dead/never-started gateway makes a
+  // perfectly healthy container look "missing" (transport error, not a real
+  // NotFound) — start/reuse the gateway FIRST so the state query below
+  // reflects reality instead of a false "no container".
+  await startGateway();
   const state = await getSandboxState(containerName);
   if (state === "missing") {
     console.error(
@@ -541,7 +547,6 @@ async function reattachSession(
   } else {
     console.log(`Attaching to running session ${m.name}...`);
   }
-  await startGateway();
   await ensureProvider(providerId);
   // Re-provision (not re-attach — the sandbox's --provider set is fixed at
   // create) each declared bundle, since the gateway may have restarted since

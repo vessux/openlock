@@ -206,6 +206,46 @@ describe("spawnDaemonToLog", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // openlock-ab6: `openlock sandbox --no-attach` orphaned the gateway on
+  // exit. Root cause — Bun.spawn defaults to `detached: false`, so the
+  // gateway shared the CLI's process group/session; a short-lived scripted
+  // invocation with no surviving controlling terminal delivers SIGHUP to that
+  // whole session on exit, killing the "detached" (merely unref'd) gateway
+  // too. `detached: true` calls setsid() so the gateway becomes its own
+  // session/process-group leader — verified here via `ps -o pgid=` rather
+  // than actually sending a signal (which would risk the test runner's own
+  // session).
+  it("spawns the daemon in its own process group (survives a SIGHUP to the caller's session)", async () => {
+    function pgidOf(pid: number): string {
+      const proc = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]);
+      return new TextDecoder().decode(proc.stdout).trim();
+    }
+
+    const dir = mkdtempSync(join(tmpdir(), "spawn-daemon-detach-"));
+    const log = join(dir, "out.log");
+    try {
+      const { pid } = spawnDaemonToLog(["sleep", "2"], dir, log);
+      try {
+        const childPgid = pgidOf(pid);
+        const ownPgid = pgidOf(process.pid);
+        expect(childPgid).not.toBe("");
+        // A detached child is its own process-group leader: pgid === its pid,
+        // and therefore differs from the caller's own pgid. Without
+        // `detached: true` the child inherits the caller's pgid instead.
+        expect(childPgid).toBe(String(pid));
+        expect(childPgid).not.toBe(ownPgid);
+      } finally {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // already exited
+        }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("rotateLogIfLarge", () => {
