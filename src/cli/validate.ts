@@ -1,7 +1,9 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import type { ConfigFile, Issue, Severity } from "../config-core";
-import { lintFolder } from "../config-core";
+import { gitignoreCoversLocalConfig, lintFolder } from "../config-core";
 import { printCmdHelp } from "./_help";
 
 export const flagSchema = {
@@ -9,7 +11,7 @@ export const flagSchema = {
   help: { type: "boolean", short: "h" },
 } as const satisfies ParseArgsOptionsConfig;
 
-const FILE_ORDER: ConfigFile[] = ["config.yaml", "policy.yaml"];
+const BASE_FILE_ORDER: ConfigFile[] = ["config.yaml", "policy.yaml"];
 const SEVERITY_ORDER: Severity[] = ["error", "filesystem"];
 
 function renderFile(file: ConfigFile, issues: Issue[]): string[] {
@@ -30,17 +32,17 @@ function renderFile(file: ConfigFile, issues: Issue[]): string[] {
   return lines;
 }
 
-export function renderIssues(issues: Issue[]): string[] {
+export function renderIssues(issues: Issue[], files: ConfigFile[] = BASE_FILE_ORDER): string[] {
   const lines: string[] = [];
-  for (const file of FILE_ORDER) {
+  for (const file of files) {
     const forFile = issues.filter((i) => i.file === file);
     lines.push(...renderFile(file, forFile));
   }
   return lines;
 }
 
-export function summaryLine(issues: Issue[]): string {
-  const parts = FILE_ORDER.map((file) => {
+export function summaryLine(issues: Issue[], files: ConfigFile[] = BASE_FILE_ORDER): string {
+  const parts = files.map((file) => {
     const n = issues.filter((i) => i.file === file).length;
     return n === 0 ? `${file}: ok` : `${file}: ${n} issue${n === 1 ? "" : "s"}`;
   });
@@ -54,9 +56,23 @@ export function validateCmd(args: string[]): void {
     return;
   }
   const projectDir = positionals[0] ?? process.cwd();
+  const folder = join(projectDir, ".openlock");
+  const localExists = existsSync(join(folder, "config.local.yaml"));
+  const files: ConfigFile[] = localExists
+    ? ["config.yaml", "config.local.yaml", "policy.yaml"]
+    : BASE_FILE_ORDER;
   const issues = lintFolder(projectDir, { offline: values.offline === true });
-  for (const line of renderIssues(issues)) console.log(line);
-  console.log(summaryLine(issues));
+  for (const line of renderIssues(issues, files)) console.log(line);
+  console.log(summaryLine(issues, files));
+  if (localExists) {
+    const giPath = join(folder, ".gitignore");
+    const gi = existsSync(giPath) ? readFileSync(giPath, "utf-8") : null;
+    if (!gitignoreCoversLocalConfig(gi)) {
+      console.log(
+        "  note: config.local.yaml is not covered by .openlock/.gitignore — add `config.local.yaml` so personal overrides aren't committed.",
+      );
+    }
+  }
   const blocking = issues.some((i) => i.severity === "error" || i.severity === "filesystem");
   process.exit(blocking ? 1 : 0);
 }

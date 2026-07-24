@@ -52,3 +52,19 @@ describe("summaryLine", () => {
     expect(summaryLine(issues)).toBe("config.yaml: 2 issues · policy.yaml: 1 issue");
   });
 });
+
+describe("renderIssues with config.local.yaml", () => {
+  it("renders a config.local.yaml row when that file is in the order", () => {
+    const issues: Issue[] = [
+      { file: "config.local.yaml", severity: "error", path: "bogus", message: "unknown key" },
+    ];
+    const lines = renderIssues(issues, ["config.yaml", "config.local.yaml", "policy.yaml"]);
+    expect(lines.some((l) => l.includes("config.local.yaml:"))).toBe(true);
+    expect(lines.some((l) => l.includes("unknown key"))).toBe(true);
+  });
+
+  it("omits config.local.yaml when not in the order (no spurious 'ok' row)", () => {
+    const lines = renderIssues([], ["config.yaml", "policy.yaml"]);
+    expect(lines.some((l) => l.includes("config.local.yaml"))).toBe(false);
+  });
+});
