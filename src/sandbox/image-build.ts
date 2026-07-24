@@ -41,9 +41,13 @@ export function buildImageBuildArgv(
   tag: string,
   contextDir: string,
   noCache?: boolean,
+  pull?: boolean,
 ): string[] {
   const argv = [runtime, "build", "-t", tag];
   if (noCache) argv.push("--no-cache");
+  // `--no-cache` alone still reuses a locally-cached FROM base; `--pull` forces
+  // a re-pull so a mutable third-party tag (e.g. `FROM node:20`) refreshes.
+  if (pull) argv.push("--pull");
   argv.push(contextDir);
   return argv;
 }
@@ -81,14 +85,21 @@ export async function ensureImage(args: EnsureImageArgs): Promise<ImageRef> {
 export interface EnsureSandboxDeps {
   ensureBase: (baseContent: string) => Promise<string>;
   imageExists: (runtime: Runtime, tag: string) => Promise<boolean>;
-  build: (runtime: Runtime, tag: string, contextDir: string) => Promise<void>;
+  build: (
+    runtime: Runtime,
+    tag: string,
+    contextDir: string,
+    buildOpts?: { noCache?: boolean; pull?: boolean },
+  ) => Promise<void>;
 }
 
 export async function ensureSandbox(
   userContainerfileContent: string,
+  opts?: { rebuild?: boolean },
   deps?: Partial<EnsureSandboxDeps>,
 ): Promise<string> {
   const runtime = await resolveRuntime();
+  const rebuild = opts?.rebuild ?? false;
   const d = {
     ensureBase: deps?.ensureBase ?? ((c: string) => defaultEnsureBase(c)),
     imageExists: deps?.imageExists ?? defaultImageExistsInternal,
@@ -102,13 +113,16 @@ export async function ensureSandbox(
   // else: third-party FROM — let podman/docker handle the pull during build.
 
   const userTag = computeImageTag(userContainerfileContent, "openlock-sandbox");
-  if (await d.imageExists(runtime, userTag)) return userTag;
+  // --rebuild forces a fresh build (bypass the cached-image short-circuit) with
+  // --no-cache + --pull, so a Containerfile pinned to a mutable third-party tag
+  // (unchanged text ⇒ identical hash) can be refreshed without manual podman rm.
+  if (!rebuild && (await d.imageExists(runtime, userTag))) return userTag;
 
   const hash = userTag.split(":")[1];
   const ctx = contextDirForHash(hash);
   mkdirSync(ctx, { recursive: true });
   writeFileSync(join(ctx, "Dockerfile"), userContainerfileContent);
-  await d.build(runtime, userTag, ctx);
+  await d.build(runtime, userTag, ctx, { noCache: rebuild, pull: rebuild });
   return userTag;
 }
 
@@ -124,8 +138,9 @@ async function defaultBuildInternal(
   runtime: Runtime,
   tag: string,
   contextDir: string,
+  buildOpts?: { noCache?: boolean; pull?: boolean },
 ): Promise<void> {
-  const argv = buildImageBuildArgv(runtime, tag, contextDir, false);
+  const argv = buildImageBuildArgv(runtime, tag, contextDir, buildOpts?.noCache, buildOpts?.pull);
   const proc = Bun.spawn(argv, { stdout: "inherit", stderr: "inherit" });
   const code = await proc.exited;
   if (code !== 0) throw new Error(`${runtime} build failed (exit ${code})`);

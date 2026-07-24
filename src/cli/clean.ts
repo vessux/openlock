@@ -8,7 +8,6 @@ export const flagSchema = {
   copy: { type: "string" },
   all: { type: "boolean" },
   stale: { type: "boolean" },
-  json: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const satisfies ParseArgsOptionsConfig;
 

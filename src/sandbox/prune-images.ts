@@ -1,4 +1,4 @@
-import { type Runtime, resolveRuntime } from "../runtime";
+import type { Runtime } from "../runtime";
 import { GHCR_BASE_PREFIX } from "./ensure-base";
 
 export interface CategorizeOpts {
@@ -36,15 +36,17 @@ export function categorizeImages(allTags: string[], opts: CategorizeOpts): Categ
 
 export interface PruneDeps {
   listTags: (runtime: Runtime) => Promise<string[]>;
-  remove: (runtime: Runtime, tag: string) => Promise<void>;
+  /** Resolves true when the image was actually removed, false when `image rm`
+   * failed (e.g. the image is still referenced by a stopped container). */
+  remove: (runtime: Runtime, tag: string) => Promise<boolean>;
   listActiveSandboxTags: () => Promise<Set<string>>;
 }
 
 export async function pruneImages(
-  opts: { legacy: boolean; currentBaseTag: string; dryRun: boolean },
+  opts: { runtime: Runtime; legacy: boolean; currentBaseTag: string; dryRun: boolean },
   deps: PruneDeps,
-): Promise<{ removed: string[] }> {
-  const runtime = await resolveRuntime();
+): Promise<{ removed: string[]; failed: string[] }> {
+  const { runtime } = opts;
   const allTags = await deps.listTags(runtime);
   const referenced = await deps.listActiveSandboxTags();
   const { toRemove } = categorizeImages(allTags, {
@@ -52,11 +54,17 @@ export async function pruneImages(
     currentBaseTag: opts.currentBaseTag,
     referencedSandboxTags: referenced,
   });
-  if (opts.dryRun) return { removed: toRemove };
+  if (opts.dryRun) return { removed: toRemove, failed: [] };
+  // Report only images actually removed — `image rm` fails (non-zero) when a tag
+  // is still referenced by a stopped container, and reporting it as removed
+  // would give false "reclaimed disk" confidence.
+  const removed: string[] = [];
+  const failed: string[] = [];
   for (const tag of toRemove) {
-    await deps.remove(runtime, tag);
+    if (await deps.remove(runtime, tag)) removed.push(tag);
+    else failed.push(tag);
   }
-  return { removed: toRemove };
+  return { removed, failed };
 }
 
 export async function defaultListTags(runtime: Runtime): Promise<string[]> {
@@ -72,10 +80,10 @@ export async function defaultListTags(runtime: Runtime): Promise<string[]> {
     .filter((s) => s.length > 0 && !s.endsWith(":<none>"));
 }
 
-export async function defaultRemove(runtime: Runtime, tag: string): Promise<void> {
+export async function defaultRemove(runtime: Runtime, tag: string): Promise<boolean> {
   const proc = Bun.spawn([runtime, "image", "rm", tag], {
     stdout: "ignore",
     stderr: "inherit",
   });
-  await proc.exited;
+  return (await proc.exited) === 0;
 }

@@ -1,5 +1,47 @@
 import { describe, expect, it } from "bun:test";
-import { categorizeImages } from "./prune-images";
+import { categorizeImages, pruneImages } from "./prune-images";
+
+describe("pruneImages outcome", () => {
+  const baseOpts = {
+    runtime: "podman" as const,
+    legacy: false,
+    currentBaseTag: "ghcr.io/vessux/openlock-base:current",
+  };
+  const baseDeps = {
+    listTags: async () => ["openlock-sandbox:aaaaaa", "openlock-sandbox:bbbbbb"],
+    listActiveSandboxTags: async () => new Set<string>(),
+  };
+
+  it("reports only actually-removed tags and collects failures", async () => {
+    const result = await pruneImages(
+      { ...baseOpts, dryRun: false },
+      {
+        ...baseDeps,
+        // bbbbbb fails to remove (e.g. still referenced by a stopped container).
+        remove: async (_rt, tag) => tag !== "openlock-sandbox:bbbbbb",
+      },
+    );
+    expect(result.removed).toEqual(["openlock-sandbox:aaaaaa"]);
+    expect(result.failed).toEqual(["openlock-sandbox:bbbbbb"]);
+  });
+
+  it("dry-run returns candidates without calling remove", async () => {
+    let removeCalled = false;
+    const result = await pruneImages(
+      { ...baseOpts, dryRun: true },
+      {
+        ...baseDeps,
+        remove: async () => {
+          removeCalled = true;
+          return true;
+        },
+      },
+    );
+    expect(result.removed).toEqual(["openlock-sandbox:aaaaaa", "openlock-sandbox:bbbbbb"]);
+    expect(result.failed).toEqual([]);
+    expect(removeCalled).toBe(false);
+  });
+});
 
 describe("categorizeImages", () => {
   const all = [

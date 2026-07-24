@@ -27,6 +27,26 @@ describe("capLines", () => {
 });
 
 describe("redactSecrets", () => {
+  it("redacts a literal secret value under an arbitrary/custom header (generic bundle)", () => {
+    const secret = "gho_ThisIsAGithubTokenWithNoRegisteredShape123";
+    const { text, counts } = redactSecrets(`X-Gh-Auth: ${secret}\nother line\n`, [secret]);
+    expect(text).not.toContain(secret);
+    expect(text).toContain("[REDACTED:literal]");
+    expect(counts.literal).toBe(1);
+  });
+
+  it("ignores literal secrets shorter than 8 chars (avoids over-redaction)", () => {
+    const { text } = redactSecrets("value is abc and more abc", ["abc"]);
+    expect(text).toBe("value is abc and more abc");
+  });
+
+  it("redacts a literal secret containing regex-special characters", () => {
+    const secret = "a+b.c(d)*ee$ffff";
+    const { text } = redactSecrets(`log ${secret} end`, [secret]);
+    expect(text).not.toContain(secret);
+    expect(text).toContain("[REDACTED:literal]");
+  });
+
   it("redacts anthropic API keys", () => {
     const { text, counts } = redactSecrets(
       "key=sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890 done",

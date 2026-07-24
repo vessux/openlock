@@ -11,10 +11,6 @@ describe("clean flagSchema", () => {
     expect(flagSchema.stale).toEqual({ type: "boolean" });
   });
 
-  it("declares --json as boolean", () => {
-    expect(flagSchema.json).toEqual({ type: "boolean" });
-  });
-
   it("declares --help with short -h", () => {
     expect(flagSchema.help).toEqual({ type: "boolean", short: "h" });
   });
