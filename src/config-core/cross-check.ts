@@ -1,5 +1,5 @@
 import { PROVIDER_IDS, PROVIDERS } from "../providers/registry";
-import type { Issue } from "./types";
+import type { ConfigFile, Issue } from "./types";
 
 interface ManifestLike {
   credentials?: { name: string; values: Record<string, unknown> }[];
@@ -79,12 +79,15 @@ export function checkCredentialsSupplied(manifest: ManifestLike, policy: PolicyL
  * provider's gateway record — and `buildOpenshellCreateArgv` would emit
  * `--provider <name>` twice. Config-only problem; independent of policy.yaml
  * state. */
-export function checkCredentialNameCollisions(manifest: ManifestLike): Issue[] {
+export function checkCredentialNameCollisions(
+  manifest: ManifestLike,
+  file: ConfigFile = "config.yaml",
+): Issue[] {
   const issues: Issue[] = [];
   (manifest.credentials ?? []).forEach((bundle, i) => {
     if ((PROVIDER_IDS as readonly string[]).includes(bundle.name)) {
       issues.push({
-        file: "config.yaml",
+        file,
         severity: "error",
         path: `credentials[${i}].name`,
         message: `credential bundle name "${bundle.name}" collides with a built-in provider — choose a different name`,

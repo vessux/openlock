@@ -122,20 +122,38 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
   );
   const hasPolicyErr = issues.some((i) => i.file === "policy.yaml" && i.severity === "error");
   // Config-only: a credentials[].name colliding with a built-in provider id.
-  // Runs whenever config.yaml exists and is itself schema-clean — independent
-  // of policy.yaml's state, since this is not a cross-file concern and must
-  // surface even when policy.yaml has unrelated issues.
+  // Runs whenever BOTH config files are schema-clean (hasConfigErr covers
+  // config.yaml and config.local.yaml) — independent of policy.yaml's state,
+  // since this is not a cross-file concern and must surface even when
+  // policy.yaml has unrelated issues. Checked per-file (not on the merged
+  // list) so the reported `file` and `credentials[i]` index are correct for
+  // whichever file actually declared the colliding bundle.
   if (!hasConfigErr && existsSync(configPath)) {
-    const credentials = loadDeclaredCredentialsMerged(folder);
     issues.push(
-      ...checkCredentialNameCollisions({
-        credentials,
-      } as Parameters<typeof checkCredentialNameCollisions>[0]),
+      ...checkCredentialNameCollisions(
+        { credentials: loadDeclaredCredentials(configPath) } as Parameters<
+          typeof checkCredentialNameCollisions
+        >[0],
+        "config.yaml",
+      ),
     );
   }
-  // Cross-file: injected credentials must be supplied. Only when both files
-  // have no severity:"error" issues already queued for them — a structurally
-  // broken doc can't be meaningfully cross-checked.
+  if (!hasConfigErr && existsSync(localConfigPath)) {
+    issues.push(
+      ...checkCredentialNameCollisions(
+        { credentials: loadDeclaredCredentials(localConfigPath) } as Parameters<
+          typeof checkCredentialNameCollisions
+        >[0],
+        "config.local.yaml",
+      ),
+    );
+  }
+  // Cross-file: injected credentials must be supplied by EITHER config file,
+  // so this cross-check stays on the merged credential list (unlike the
+  // per-file collision check above). Only when both config files (config.yaml
+  // + config.local.yaml, via hasConfigErr) and policy.yaml have no
+  // severity:"error" issues already queued — a structurally broken doc can't
+  // be meaningfully cross-checked.
   if (!hasConfigErr && !hasPolicyErr && existsSync(configPath) && existsSync(policyPath)) {
     const credentials = loadDeclaredCredentialsMerged(folder);
     const policyDoc = (yaml.load(readFileSync(policyPath, "utf-8")) ?? {}) as Parameters<

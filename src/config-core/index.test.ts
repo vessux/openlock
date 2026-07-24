@@ -270,4 +270,44 @@ describe("config.local.yaml support", () => {
     expect(gitignoreCoversLocalConfig("node_modules\nconfig.local.yaml\n")).toBe(true);
     expect(gitignoreCoversLocalConfig("/config.local.yaml")).toBe(true);
   });
+
+  it("attributes a name-collision declared only in config.local.yaml to that file with a per-file index", () => {
+    seed({
+      // Unrelated clean credential first, so the local bundle would be
+      // index 1 in a merged list — proves we use the per-file index 0.
+      "config.yaml": "credentials:\n  - name: a\n    values: { X: { from_env: X } }\n",
+      "config.local.yaml":
+        "credentials:\n  - name: anthropic\n    values: { X: { from_env: X } }\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "config.local.yaml" &&
+          i.severity === "error" &&
+          i.path === "credentials[0].name" &&
+          i.message.includes("anthropic"),
+      ),
+    ).toBe(true);
+    // and NOT misattributed to config.yaml
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "config.yaml" && i.severity === "error" && i.message.includes("anthropic"),
+      ),
+    ).toBe(false);
+  });
+
+  it("suppresses cross-checks when config.local.yaml has a schema error", () => {
+    seed({
+      // Without the local schema error, this would produce a name-collision
+      // error (bundle "anthropic" in config.yaml).
+      "config.yaml": "credentials:\n  - name: anthropic\n    values: { X: { from_env: X } }\n",
+      "config.local.yaml": "bogus_key: true\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(issues.some((i) => i.file === "config.local.yaml" && i.severity === "error")).toBe(true);
+    expect(issues.some((i) => i.message.includes("anthropic"))).toBe(false);
+  });
 });
