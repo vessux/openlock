@@ -16,9 +16,9 @@ macOS host                              Linux host
 
 Each `openlock sandbox <path>` call:
 
-1. Detects capabilities (js / py) from the project, picks an image and policy.
+1. Reads the project's `.openlock/` manifest (config + policy) and selects the image for your configured harness.
 2. Builds the supervisor + sandbox images via `podman build` if missing.
-3. Starts the gateway (`cargo build` first run, ~1–2 min).
+3. Starts the gateway — on first run it fetches the prebuilt `openshell-gateway` binary (dev builds compile it from source).
 4. Bundles your repo with `git bundle`, uploads it, pre-trusts `/sandbox/repo`.
 5. Injects host git identity (`user.name` / `user.email` from `git config --global`).
 6. Launches Claude Code inside the sandbox; outbound traffic flows through the gateway with credentials injected from your `openlock login` token.
