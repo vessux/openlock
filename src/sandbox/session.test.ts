@@ -3,11 +3,47 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildSetupCmd,
   pickSessionHarness,
   resolveRepoPolicy,
   stageProviderSandboxFiles,
   userExplicitlyPickedHarness,
 } from "./session";
+
+describe("buildSetupCmd", () => {
+  it("single-quotes mount targets so they cannot inject shell commands", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "setup-inj-"));
+    const marker = join(dir, "PWNED");
+    // Both a plain injection and one hidden in an otherwise-legal odd-char path
+    // (spaces/colons are a supported target feature — see scaffold quoting).
+    for (const target of [
+      `/sandbox/.openlock/x$(touch ${marker})`,
+      `/sandbox/.openlock/a: b$(touch ${marker})`,
+      `/sandbox/.openlock/x\`touch ${marker}\``,
+    ]) {
+      const cmd = buildSetupCmd([{ source: "repo", target, type: "git-bundle" }], undefined);
+      // Drop the trailing `exec sleep infinity` so the script terminates. If the
+      // target were interpolated unquoted, the `$(touch ...)` / backticks would
+      // fire during the `[ -d ... ]` test regardless of git; the marker proves
+      // it did not.
+      const runnable = cmd
+        .split(" ; ")
+        .filter((l) => !l.startsWith("exec sleep"))
+        .join(" ; ");
+      const proc = Bun.spawn(["bash", "-c", runnable], { stdout: "ignore", stderr: "ignore" });
+      await proc.exited;
+      expect(existsSync(marker)).toBe(false);
+    }
+  });
+
+  it("quotes the workdir branch flag", () => {
+    const cmd = buildSetupCmd(
+      [{ source: "repo", target: "/sandbox/repo", type: "git-bundle" }],
+      "feature/x",
+    );
+    expect(cmd).toContain("-b 'feature/x'");
+  });
+});
 
 describe("resolveRepoPolicy", () => {
   function projectWith(configBody: string): string {

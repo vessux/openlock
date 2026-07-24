@@ -129,6 +129,17 @@ function checkSubuid(deps: PreflightDeps): PreflightResult | null {
 export async function preflight(opts: PreflightOpts): Promise<PreflightResult> {
   const { tty, deps } = opts;
   const results = await deps.runDoctorChecks();
+  // The doctor suite includes a gateway-reachability probe (podman + gateway
+  // running) that can take up to ~15s. It's a deliberately warn-only signal, so
+  // preflight does not gate on it — but surface a failure rather than paying the
+  // probe cost and discarding the result, so the user gets the fast, clear
+  // warning before the sandbox create fails downstream for the same reason.
+  const reach = results.find((r) => r.name.startsWith("sandbox → gateway reachability"));
+  if (reach && !reach.ok) {
+    console.warn(
+      `openlock: ${reach.detail ?? "sandbox may not be able to reach the gateway"}${reach.fix ? ` — ${reach.fix}` : ""}`,
+    );
+  }
   return (
     checkDoctor(results, deps.runtime) ??
     (await checkRuntimeDaemon(deps, tty)) ??

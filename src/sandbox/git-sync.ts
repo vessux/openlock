@@ -250,16 +250,30 @@ export async function syncWorkspaceBundle(
     const regen = Bun.spawn(regenArgv, {
       cwd: cli.cwd,
       stdout: "ignore",
-      stderr: "ignore",
+      stderr: "pipe",
     });
     const regenCode = await regen.exited;
     if (regenCode !== 0) {
-      console.warn("No commits to sync.");
+      // `git bundle create --all` exits non-zero and prints "Refusing to create
+      // empty bundle" when the repo has no commits — the benign "nothing to
+      // sync" case. Any other failure (dying container, disk full, permissions)
+      // must NOT be masked as "no commits", or the user silently loses the
+      // signal that sandbox git work may not have been synced back.
+      const stderr = (await new Response(regen.stderr).text()).trim();
+      if (/refus|empty bundle|does not have any commits/i.test(stderr)) {
+        console.warn("No commits to sync.");
+      } else {
+        console.warn(
+          `Failed to bundle sandbox git state; sandbox work may not be synced back${stderr ? `: ${stderr}` : "."}`,
+        );
+      }
       return;
     }
     const ok = await downloadFromSandbox(containerName, "/sandbox/out.bundle", outBundle);
     if (!ok) {
-      console.warn("No commits to sync.");
+      console.warn(
+        `Failed to copy the git bundle out of ${containerName}; sandbox work may not be synced back.`,
+      );
       return;
     }
     await fetchBundle(hostRepoSource, outBundle, sessionName);

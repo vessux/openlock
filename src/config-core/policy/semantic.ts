@@ -84,11 +84,16 @@ function checkTldWildcard(
   name: string,
 ): void {
   if (!host.includes("*")) return;
-  if (!host.startsWith("*.") && !host.startsWith("**.")) return;
-  if (host.split(".").length > 2) return;
+  // A bare "*"/"**" (match every host) is the broadest pattern of all and must
+  // be flagged; otherwise only flag a wildcard directly on a TLD (e.g. "*.com",
+  // "**.io") — a more specific "*.api.example.com" is fine.
+  const bareWildcard = host === "*" || host === "**";
+  const tldWildcard =
+    (host.startsWith("*.") || host.startsWith("**.")) && host.split(".").length <= 2;
+  if (!bareWildcard && !tldWildcard) return;
   errors.push({
     path: `${path}.host`,
-    message: `TLD wildcard "${host}" in policy "${name}" — use a more specific host pattern`,
+    message: `overly broad host wildcard "${host}" in policy "${name}" — use a more specific host pattern`,
   });
 }
 
@@ -98,6 +103,10 @@ function checkCredInjectAllowed(
   ep: Endpoint,
   allowed: string[],
 ): void {
+  // allowed_secrets is an OPTIONAL per-group narrowing filter: when present, an
+  // injected credential must be listed; when absent/empty it imposes no extra
+  // constraint (supply is enforced by the cross-check + the fork runtime). See
+  // the "skips cred check when allowed_secrets is empty" and cross-check tests.
   if (!ep.cred_inject || allowed.length === 0) return;
   const injected = (ep.cred_inject.inject ?? []).map((h) => h.from_credential);
   for (const cred of injected) {
