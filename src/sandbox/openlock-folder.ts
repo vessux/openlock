@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import yaml from "js-yaml";
 import type { CredentialBundle, Mount } from "../config-core";
-import { type ManifestConfig, parseManifest } from "../config-core";
+import { type ManifestConfig, mergeManifestDocs, parseManifest } from "../config-core";
 import type { Harness } from "./harness";
 
 const FOLDER_NAME = ".openlock";
@@ -22,6 +22,11 @@ function containerfilePath(folderPath: string): string {
   return join(folderPath, CONTAINERFILE_FILENAME);
 }
 
+const LOCAL_CONFIG_FILENAME = "config.local.yaml";
+function localConfigPath(folderPath: string): string {
+  return join(folderPath, LOCAL_CONFIG_FILENAME);
+}
+
 function readConfig(folderPath: string): OpenlockFolderConfig {
   const path = configPath(folderPath);
   let raw: string;
@@ -30,7 +35,18 @@ function readConfig(folderPath: string): OpenlockFolderConfig {
   } catch {
     throw new Error(`config.yaml not found at ${path}`);
   }
-  const doc = yaml.load(raw) ?? {};
+  const baseDoc = yaml.load(raw) ?? {};
+  let doc: unknown = baseDoc;
+  const localPath = localConfigPath(folderPath);
+  if (existsSync(localPath)) {
+    let localDoc: unknown;
+    try {
+      localDoc = yaml.load(readFileSync(localPath, "utf-8")) ?? {};
+    } catch (e) {
+      throw new Error(`config.local.yaml parse error at ${localPath}: ${(e as Error).message}`);
+    }
+    doc = mergeManifestDocs(baseDoc, localDoc);
+  }
   return parseManifest(doc, dirname(folderPath));
 }
 

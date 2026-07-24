@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveOpenlockFolder } from "./openlock-folder";
@@ -75,5 +75,53 @@ describe("resolveOpenlockFolder", () => {
     writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
     writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
     expect(() => resolveOpenlockFolder(proj)).toThrow(/unknown key "caps"/);
+  });
+});
+
+describe("resolveOpenlockFolder config.local.yaml overlay", () => {
+  let dir: string;
+  function seedFolder(files: Record<string, string>): void {
+    const folder = join(dir, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    for (const [name, body] of Object.entries(files))
+      writeFileSync(join(folder, name), body, "utf-8");
+  }
+  const POLICY = "version: 1\n";
+  const CONTAINERFILE = "FROM scratch\n";
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "openlock-folder-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns base args when no local file exists", () => {
+    seedFolder({
+      "config.yaml": "args: [--verbose]\n",
+      "policy.yaml": POLICY,
+      Containerfile: CONTAINERFILE,
+    });
+    expect(resolveOpenlockFolder(dir).args).toEqual(["--verbose"]);
+  });
+
+  it("appends local args onto base args", () => {
+    seedFolder({
+      "config.yaml": "args: [--verbose]\n",
+      "config.local.yaml": "args: [--model, opus]\n",
+      "policy.yaml": POLICY,
+      Containerfile: CONTAINERFILE,
+    });
+    expect(resolveOpenlockFolder(dir).args).toEqual(["--verbose", "--model", "opus"]);
+  });
+
+  it("throws with the filename on a config.local.yaml syntax error", () => {
+    seedFolder({
+      "config.yaml": "args: [--verbose]\n",
+      "config.local.yaml": "args: [unterminated\n",
+      "policy.yaml": POLICY,
+      Containerfile: CONTAINERFILE,
+    });
+    expect(() => resolveOpenlockFolder(dir)).toThrow(/config\.local\.yaml/);
   });
 });
