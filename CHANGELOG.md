@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.10.1
+
+Bugfix release on top of v0.10.0 (fork pin unchanged at v0.7.1). A post-release bug sweep of the credential, report, and sandbox-lifecycle paths.
+
+### Added
+
+- **`openlock sandbox --rebuild` forces a fresh image build.** The cached-image short-circuit keyed on the Containerfile hash, so a mutable third-party `FROM` tag (same Containerfile ⇒ identical hash) could never be refreshed without a manual `podman rmi`. `--rebuild` bypasses the cache (`--no-cache --pull`) to pick up the newer base; it warns and is ignored when reattaching to an existing session (image is fixed at creation).
+
+### Fixed
+
+- **Shell injection via `.openlock/config.yaml` mount paths (HIGH).** Mount source/target values from config were interpolated **unquoted** into the `bash -c` sandbox-setup script, so a crafted git-bundle target (e.g. `/sandbox/.openlock/x$(...)`) ran arbitrary commands at container-create time. All config-derived values are now single-quoted; a behavioral test executes the generated script and asserts no injection fires (including odd-but-legal space/colon targets).
+- **Injected credentials could leak into `openlock report` bundles.** A secondary credential injected under a custom header matches no shape/header redaction regex, so its value could survive in the bundled `gateway.log`. Report generation now literal-redacts the actual known secret *values* (stored provider creds, refresh tokens, and `credentials:` bundles resolved from host env), and never throws on an unset bundle env var.
+- **Credential secrets no longer appear in `/proc/<pid>/cmdline`.** Provider provisioning and cred-refresh passed `KEY=VALUE` in the spawned `openshell` argv, exposing tokens in the world-readable process command line. The secret is now handed to the child via its environment and only `--credential KEY` appears in argv. (The fork's `refresh_token` via `--material` still requires `KEY=VALUE` and is deferred — openlock-axb.)
+- **`openlock sandbox --no-attach` no longer orphans the sandbox.** The gateway was spawned without its own session, so a SIGHUP when the short-lived scripted CLI exited killed the gateway too — leaving a healthy container that later `sandbox`/`clean` calls couldn't reach ("no container" / transport error). The gateway is now spawned detached (`setsid`, own session) so it survives however the CLI exits, and reattach starts the gateway *before* querying sandbox state so a dead gateway self-heals instead of masquerading as a missing container.
+- **`openlock report` recorded zero sessions.** It read session state from `state.json`, but the session store writes `meta.json`; bundles always showed no sessions. It now reads `meta.json`.
+- **`git-sync` no longer masks a real sync failure as "nothing to do".** A failed bundle/download drain of in-sandbox git work printed the same `No commits to sync.` as a genuinely empty repo (stderr was discarded). Stderr is now captured and genuine failures are reported distinctly.
+- **`prune-images` reports only images actually removed.** It printed the full candidate list as "removed" even when `image rm` failed; it now checks each removal's exit code, lists real failures separately, and exits non-zero on failure.
+- **Broadest egress patterns are now flagged.** The policy wildcard lint (`checkTldWildcard`) missed a bare `*` / `**` match-all host — the widest possible allow rule. It's now flagged, with the message generalized to "overly broad host wildcard".
+- **`openlock doctor --help` prints usage** instead of running the full check suite.
+- **Preflight surfaces its gateway-reachability probe.** The (already-computed, ≤15s) reachability result was discarded; it's now surfaced as a warning.
+- **Uncaught async dispatch errors print cleanly.** A global `unhandledRejection` handler makes lazy `import().then(cmd)` command branches surface `openlock: <msg>` + exit 1 instead of a raw Bun stack dump. Also removed dead code: the unused `git bundle create` in `clean --copy`, the never-read `clean --json` flag, and corrected a global-config docstring that overclaimed cross-process TOCTOU safety.
+
 ## v0.10.0
 
 ### Added
