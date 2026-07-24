@@ -9,6 +9,7 @@ export const flagSchema = {
   branch: { type: "string", short: "b" },
   "no-attach": { type: "boolean" },
   "debug-egress": { type: "boolean" },
+  rebuild: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const satisfies ParseArgsOptionsConfig;
 
@@ -33,6 +34,7 @@ export function sandboxCmd(args: string[]): void {
       branch: values.branch,
       noAttach: values["no-attach"] === true,
       debugEgress: values["debug-egress"] === true,
+      rebuild: values.rebuild === true,
     }),
   );
 }

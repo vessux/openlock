@@ -1,12 +1,22 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import pkg from "../../package.json" with { type: "json" };
+import { loadDeclaredCredentials } from "../config-core";
 import { runDoctorChecks } from "../doctor";
 import { globalConfigPath } from "../global-config/paths";
 import { OPENSHELL_FORK_TAG } from "../sandbox/fork-binaries";
+import { readCredentials } from "../tokens";
 import { printCmdHelp } from "./_help";
 import { capLines, redactSecrets, stripSecretFields } from "./report-redact";
 
@@ -79,11 +89,12 @@ export async function report(
   const bundleDir = join(stageRoot, bundleName);
   mkdirSync(bundleDir, { recursive: true });
 
+  const literalSecrets = gatherLiteralSecrets();
   const [versions, doctor, sessions, logResult] = await Promise.all([
     collectVersions(),
     collectDoctor(),
     collectSessions(stateDir),
-    collectLog(stateDir),
+    collectLog(stateDir, literalSecrets),
   ]);
 
   const doctorFailures = doctor.filter((d) => !d.ok).length;
@@ -256,12 +267,58 @@ interface LogResult {
   info: SummaryLog;
 }
 
-function collectLog(stateDir: string): LogResult {
+/**
+ * Collect the actual known secret VALUES so redactSecrets can literal-match them
+ * in gateway.log — covering secrets whose shape/header no regex pattern knows
+ * about (notably generic `credentials:` bundles under custom headers). Reads
+ * stored provider credentials (always) plus the project's declared bundles from
+ * cwd/.openlock/config.yaml (best-effort). Never throws — report must not fail
+ * because a bundle's host env var happens to be unset.
+ */
+function storedProviderSecrets(): string[] {
+  const out: string[] = [];
+  try {
+    const file = readCredentials();
+    for (const rec of Object.values(file.providers)) {
+      for (const v of Object.values(rec.credentials ?? {})) {
+        if (typeof v === "string" && v) out.push(v);
+      }
+      if (rec.refresh?.refresh_token) out.push(rec.refresh.refresh_token);
+    }
+  } catch {
+    // No/unreadable credentials.json — nothing to add.
+  }
+  return out;
+}
+
+function declaredBundleSecrets(): string[] {
+  const out: string[] = [];
+  try {
+    const configPath = join(process.cwd(), ".openlock", "config.yaml");
+    if (!existsSync(configPath)) return out;
+    for (const bundle of loadDeclaredCredentials(configPath)) {
+      for (const src of Object.values(bundle.values)) {
+        const envName = (src as { from_env?: unknown })?.from_env;
+        const val = typeof envName === "string" ? process.env[envName] : undefined;
+        if (val) out.push(val);
+      }
+    }
+  } catch {
+    // Unparseable config / odd bundle shape — best-effort only, never throw.
+  }
+  return out;
+}
+
+function gatherLiteralSecrets(): string[] {
+  return [...new Set([...storedProviderSecrets(), ...declaredBundleSecrets()])];
+}
+
+function collectLog(stateDir: string, literalSecrets: string[] = []): LogResult {
   const path = join(stateDir, "gateway.log");
   try {
     const buf = readFileSync(path);
     const tail = capLines(buf.toString("utf8"), LOG_TAIL_LINES);
-    const { text, counts } = redactSecrets(tail);
+    const { text, counts } = redactSecrets(tail, literalSecrets);
     return {
       payload: text,
       info: {

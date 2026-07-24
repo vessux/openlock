@@ -41,8 +41,9 @@ export async function pruneImagesCmd(argv: string[]): Promise<number> {
 
   const runtime = await resolveRuntime();
   const currentBaseTag = computeBaseTag(BASE_CONTAINERFILE);
-  const { removed } = await pruneImages(
+  const { removed, failed } = await pruneImages(
     {
+      runtime,
       legacy: values.legacy as boolean,
       currentBaseTag,
       dryRun: values["dry-run"] as boolean,
@@ -55,11 +56,18 @@ export async function pruneImagesCmd(argv: string[]): Promise<number> {
   );
 
   const verb = values["dry-run"] ? "would remove" : "removed";
-  if (removed.length === 0) {
+  if (removed.length === 0 && failed.length === 0) {
     console.log("nothing to prune");
-  } else {
+  } else if (removed.length > 0) {
     console.log(`${verb} ${removed.length} image(s):`);
     for (const t of removed) console.log(`  ${t}`);
+  }
+  if (failed.length > 0) {
+    console.error(
+      `failed to remove ${failed.length} image(s) (still in use by a stopped container? run \`openlock clean\` first):`,
+    );
+    for (const t of failed) console.error(`  ${t}`);
+    return 1;
   }
   return 0;
 }

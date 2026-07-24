@@ -56,10 +56,32 @@ const GENERIC_PATTERNS: Pattern[] = [
 // Order: provider-specific FIRST (more specific), generic AFTER (catch-all).
 const PATTERNS: Pattern[] = [...PROVIDER_PATTERNS, ...GENERIC_PATTERNS];
 
-export function redactSecrets(input: string): RedactResult {
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Redact secrets from log text. `literalSecrets` are exact known-secret VALUES
+ * (resolved provider credentials + declared credential bundles) — matched
+ * literally and redacted FIRST, so a secret with no registered shape and under
+ * an arbitrary header name (e.g. a generic `credentials:` bundle injected as a
+ * custom header) is still caught, which the shape/header regex patterns alone
+ * would miss. Values under 8 chars are skipped to avoid over-redacting the log.
+ */
+export function redactSecrets(input: string, literalSecrets: string[] = []): RedactResult {
   let text = input;
   const counts: Record<string, number> = {};
-  for (const { kind, re, replace } of PATTERNS) {
+  const literalPatterns: Pattern[] = [...new Set(literalSecrets)]
+    .filter((s) => s.length >= 8)
+    // Longest first so a secret that is a substring of another is redacted
+    // before the shorter match can leave a tail behind.
+    .sort((a, b) => b.length - a.length)
+    .map((s) => ({
+      kind: "literal",
+      re: new RegExp(escapeRegExp(s), "g"),
+      replace: "[REDACTED:literal]",
+    }));
+  for (const { kind, re, replace } of [...literalPatterns, ...PATTERNS]) {
     const matches = text.match(re);
     if (matches && matches.length > 0) {
       counts[kind] = (counts[kind] ?? 0) + matches.length;

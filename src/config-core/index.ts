@@ -41,7 +41,7 @@ export function knownConfigTokens(): string[] {
  * Callers only use this once the caller's own schema-clean guard already
  * proves the file parses as YAML without throwing (a syntax error would have
  * been caught by `lintManifest` and queued as severity:"error"). */
-function loadDeclaredCredentials(
+export function loadDeclaredCredentials(
   configPath: string,
 ): { name: string; values: Record<string, unknown> }[] {
   const doc = (yaml.load(readFileSync(configPath, "utf-8")) ?? {}) as { credentials?: unknown };

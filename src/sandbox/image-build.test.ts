@@ -99,7 +99,7 @@ describe("ensureSandbox", () => {
   it("calls ensureBase when FROM starts with openlock-base prefix", async () => {
     let baseEnsured = false;
     const userContent = "FROM ghcr.io/vessux/openlock-base:abc\nRUN echo hi\n";
-    await ensureSandbox(userContent, {
+    await ensureSandbox(userContent, undefined, {
       ensureBase: async () => {
         baseEnsured = true;
         return "ghcr.io/vessux/openlock-base:abc";
@@ -115,7 +115,7 @@ describe("ensureSandbox", () => {
   it("skips ensureBase for third-party FROM", async () => {
     let baseEnsured = false;
     const userContent = "FROM custom-registry.example/img:1\nRUN x\n";
-    await ensureSandbox(userContent, {
+    await ensureSandbox(userContent, undefined, {
       ensureBase: async () => {
         baseEnsured = true;
         return "...";
@@ -129,7 +129,7 @@ describe("ensureSandbox", () => {
   it("builds when user-tag image not present", async () => {
     let built = false;
     const userContent = "FROM ghcr.io/vessux/openlock-base:abc\n";
-    await ensureSandbox(userContent, {
+    await ensureSandbox(userContent, undefined, {
       ensureBase: async () => "ghcr.io/vessux/openlock-base:abc",
       imageExists: async () => false,
       build: async () => {
@@ -139,8 +139,25 @@ describe("ensureSandbox", () => {
     expect(built).toBe(true);
   });
 
+  it("rebuild forces a build even when the image exists, with noCache+pull", async () => {
+    let builtWith: { noCache?: boolean; pull?: boolean } | undefined = { noCache: false };
+    await ensureSandbox(
+      "FROM ghcr.io/vessux/openlock-base:abc\n",
+      { rebuild: true },
+      {
+        ensureBase: async () => "ghcr.io/vessux/openlock-base:abc",
+        // Image already exists — rebuild must bypass this short-circuit.
+        imageExists: async () => true,
+        build: async (_rt, _tag, _ctx, opts) => {
+          builtWith = opts;
+        },
+      },
+    );
+    expect(builtWith).toEqual({ noCache: true, pull: true });
+  });
+
   it("returns openlock-sandbox-prefixed tag", async () => {
-    const tag = await ensureSandbox("FROM ghcr.io/vessux/openlock-base:abc\n", {
+    const tag = await ensureSandbox("FROM ghcr.io/vessux/openlock-base:abc\n", undefined, {
       ensureBase: async () => "ghcr.io/vessux/openlock-base:abc",
       imageExists: async () => true,
       build: async () => {},

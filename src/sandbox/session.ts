@@ -72,12 +72,16 @@ export interface SandboxOpts {
   /** Opt-in supervisor debug for L7 egress header capture (see container.ts).
    * Applies only at container creation; ignored when reattaching an existing one. */
   debugEgress?: boolean;
+  /** Force a fresh sandbox-image build (--no-cache + --pull), bypassing the
+   * cached-image short-circuit. Refreshes a mutable third-party FROM tag whose
+   * Containerfile text (and thus hash) is unchanged. Create-path only. */
+  rebuild?: boolean;
 }
 
-async function buildSandboxImage(openlockFolderPath: string): Promise<string> {
+async function buildSandboxImage(openlockFolderPath: string, rebuild: boolean): Promise<string> {
   const cfPath = join(openlockFolderPath, "Containerfile");
   const userContent = readFileSync(cfPath, "utf-8");
-  const tag = await ensureSandbox(userContent);
+  const tag = await ensureSandbox(userContent, { rebuild });
   console.log(`Sandbox image ${tag}`);
   return tag;
 }
@@ -191,6 +195,7 @@ async function createSession(
   providerId: ProviderId,
   branch: string | undefined,
   debugEgress: boolean,
+  rebuild: boolean,
 ): Promise<NewSession> {
   const { policy, mounts } = resolved;
 
@@ -204,7 +209,7 @@ async function createSession(
     attachProviders.push(bundle.name);
   }
 
-  const imageTag = await buildSandboxImage(join(projectPath, ".openlock"));
+  const imageTag = await buildSandboxImage(join(projectPath, ".openlock"), rebuild);
   console.log(`Policy: ${policy}`);
   console.log(`Image: ${imageTag}`);
 
@@ -596,6 +601,7 @@ async function resolveOrCreateSession(
   providerId: ProviderId,
   branch: string | undefined,
   debugEgress: boolean,
+  rebuild: boolean,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
@@ -607,12 +613,18 @@ async function resolveOrCreateSession(
       providerId,
       branch,
       debugEgress,
+      rebuild,
     );
     updateSessionMeta(sessionsDir(), created.id, {
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
     });
     return { containerName: created.containerName, sessionName: created.name };
+  }
+  if (rebuild) {
+    console.warn(
+      "openlock: --rebuild is ignored when reattaching an existing session; run `openlock clean` first to force a fresh image build.",
+    );
   }
   return reattachSession(matches[0]!, resolved.mounts, providerId, resolved.credentials);
 }
@@ -744,6 +756,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     providerId,
     opts.branch,
     opts.debugEgress === true,
+    opts.rebuild === true,
   );
 
   if (opts.noAttach === true) {
