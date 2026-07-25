@@ -1,18 +1,10 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import pkg from "../../package.json" with { type: "json" };
-import { loadDeclaredCredentials } from "../config-core";
+import { loadDeclaredCredentialsMerged } from "../config-core";
 import { runDoctorChecks } from "../doctor";
 import { globalConfigPath } from "../global-config/paths";
 import { OPENSHELL_FORK_TAG } from "../sandbox/fork-binaries";
@@ -272,8 +264,8 @@ interface LogResult {
  * in gateway.log — covering secrets whose shape/header no regex pattern knows
  * about (notably generic `credentials:` bundles under custom headers). Reads
  * stored provider credentials (always) plus the project's declared bundles from
- * cwd/.openlock/config.yaml (best-effort). Never throws — report must not fail
- * because a bundle's host env var happens to be unset.
+ * cwd/.openlock/config.yaml + config.local.yaml (best-effort). Never throws —
+ * report must not fail because a bundle's host env var happens to be unset.
  */
 function storedProviderSecrets(): string[] {
   const out: string[] = [];
@@ -291,12 +283,11 @@ function storedProviderSecrets(): string[] {
   return out;
 }
 
-function declaredBundleSecrets(): string[] {
+export function declaredBundleSecrets(): string[] {
   const out: string[] = [];
   try {
-    const configPath = join(process.cwd(), ".openlock", "config.yaml");
-    if (!existsSync(configPath)) return out;
-    for (const bundle of loadDeclaredCredentials(configPath)) {
+    const folder = join(process.cwd(), ".openlock");
+    for (const bundle of loadDeclaredCredentialsMerged(folder)) {
       for (const src of Object.values(bundle.values)) {
         const envName = (src as { from_env?: unknown })?.from_env;
         const val = typeof envName === "string" ? process.env[envName] : undefined;

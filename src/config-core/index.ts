@@ -41,8 +41,11 @@ export function knownConfigTokens(): string[] {
  * everyday filesystem misconfig unrelated to credentials (openlock-8ir).
  * Callers only use this once the caller's own schema-clean guard already
  * proves the file parses as YAML without throwing (a syntax error would have
- * been caught by `lintManifest` and queued as severity:"error"). */
-export function loadDeclaredCredentials(
+ * been caught by `lintManifest` and queued as severity:"error").
+ * Not exported — only used within this module (by loadDeclaredCredentialsMerged
+ * and the manifest-merge path below); external callers should go through
+ * loadDeclaredCredentialsMerged instead. */
+function loadDeclaredCredentials(
   configPath: string,
 ): { name: string; values: Record<string, unknown> }[] {
   const doc = (yaml.load(readFileSync(configPath, "utf-8")) ?? {}) as { credentials?: unknown };
