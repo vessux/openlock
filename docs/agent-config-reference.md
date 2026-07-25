@@ -6,6 +6,11 @@ Audience: an AI agent configuring openlock in a user's project. This is the comp
 
 Top-level keys (exactly these; unknown keys are rejected): `mounts`, `args`, `env`, `credentials`.
 
+A gitignored sibling `config.local.yaml` (same keys, all optional) overlays this
+file: `harness` and unknown keys — local wins; `env` — per-key merge; `mounts` /
+`args` / `credentials` — appended (base then local). It is merged before
+validation, so the effective config is what gets checked.
+
 - `mounts[]` — each entry: `source`, `target`, `type`, optional `readOnly` (valid on `type: bind` only).
   - `type` is one of: `copy-once`, `copy-refresh`, `bind`, `git-bundle`.
   - `copy-once` / `copy-refresh` targets must be under `/sandbox/.openlock/`.

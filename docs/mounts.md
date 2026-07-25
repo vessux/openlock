@@ -107,3 +107,24 @@ args: ["--plugin-dir", "/sandbox/.openlock/skills"]
 **Symlinks (copy-*).** Symlinks in `mounts[].source` are dereferenced at copy time, so producers that compile to host-symlinked caches (e.g., seed-skills) materialize as real files inside the container.
 
 **Validation.** Openlock does not cross-validate `target` paths against references in `args[]` / `env{}`.
+
+## User-local overrides (`config.local.yaml`)
+
+`.openlock/config.yaml` is committed and shared with your team. For personal
+overrides that shouldn't be committed — extra mounts, preferred harness args,
+per-user env — add a sibling `.openlock/config.local.yaml`. `openlock init`
+writes a `config.local.yaml.example` template and adds `config.local.yaml` to
+`.openlock/.gitignore`.
+
+When present, `config.local.yaml` overlays `config.yaml` (same schema, all keys
+optional):
+
+| Key | Merge |
+|-----|-------|
+| `harness` | your value replaces the shared one |
+| `env` | merged per key; your value wins on a collision |
+| `mounts`, `args`, `credentials` | appended after the shared list |
+
+`openlock validate` lints both files and warns if `config.local.yaml` exists but
+isn't gitignored. CLI flags and environment variables still take precedence over
+the merged file, exactly as before.
