@@ -128,9 +128,23 @@ export function ensureLine(existing: string | null, line: string): string {
 
 function writeLocalScaffolding(folder: string): void {
   const examplePath = join(folder, "config.local.yaml.example");
-  if (!existsSync(examplePath)) writeFileSync(examplePath, renderConfigLocalExample(), "utf-8");
+  // Exclusive create ("wx"): write the template only if absent, atomically — no
+  // check-then-write race. An existing (possibly user-edited) example is kept.
+  try {
+    writeFileSync(examplePath, renderConfigLocalExample(), { encoding: "utf-8", flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
   const giPath = join(folder, ".gitignore");
-  const existing = existsSync(giPath) ? readFileSync(giPath, "utf-8") : null;
+  // Read-if-present without a check-then-read race: attempt the read and treat a
+  // missing file as "no existing content".
+  let existing: string | null;
+  try {
+    existing = readFileSync(giPath, "utf-8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    existing = null;
+  }
   writeFileSync(giPath, ensureLine(existing, "config.local.yaml"), "utf-8");
 }
 
