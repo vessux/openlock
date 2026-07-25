@@ -16,6 +16,46 @@ Drops `openlock` into `~/.local/bin`. Set `OPENLOCK_INSTALL_DIR` to override. Th
 
 Verify with `openlock doctor`.
 
+## Rootless podman on Linux
+
+Rootless podman needs the invoking user to have a `subuid`/`subgid` range
+configured before it can remap container UIDs. Some distros provision this
+automatically at `useradd` time; others (Arch notably) don't, and a fresh
+install fails until you add one yourself:
+
+```bash
+sudo usermod --add-subuids 100000-1100000 --add-subgids 100000-1100000 $USER
+podman system migrate
+```
+
+The exact defaults, package, and setup steps vary by distro — see the [Arch
+wiki's Rootless Podman page](https://wiki.archlinux.org/title/Podman#Rootless_Podman)
+for a worked example; other distros follow the same shape with their own
+package manager / default ranges.
+
+**The range has to cover openlock's sandbox uid, not just exist.** openlock's
+in-container agent user is a fixed uid (`SANDBOX_UID` in
+[`seed-containerfile.ts`](../src/sandbox/seed-containerfile.ts)) that podman's
+`--userns=keep-id` remaps through your subuid/subgid range — the range's
+*count* has to exceed it, which a commonly-recommended stock range doesn't
+always do out of the box. `openlock doctor` checks this on Linux and prints
+the exact `usermod --add-subuids ...` command to fix it if your range is too
+small, so run it first rather than guessing.
+
+**Footgun: widening a range that's already in use.** If you already have
+rootless podman working and need to *widen* your existing subuid/subgid range
+(rather than set one up from scratch), stop the podman service for that user
+first — a live rootless session keeps using the old mapping until it's
+restarted, so `usermod --add-subuids` followed by `podman system migrate`
+alone can silently not take effect:
+
+```bash
+systemctl --user stop podman.socket
+sudo usermod --add-subuids 100000-1100000 --add-subgids 100000-1100000 $USER
+podman system migrate
+systemctl --user enable --now podman.socket
+```
+
 ## Shell completion
 
 `openlock` ships completion scripts for bash, zsh, and fish via a generator subcommand:
