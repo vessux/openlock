@@ -121,7 +121,7 @@ export function ensureLine(existing: string | null, line: string): string {
     .split("\n")
     .map((l) => l.trim())
     .includes(line);
-  if (present) return existing ?? `${line}\n`;
+  if (present) return existing as string;
   const trimmed = (existing ?? "").replace(/\n+$/, "");
   return `${trimmed ? `${trimmed}\n` : ""}${line}\n`;
 }
@@ -201,8 +201,12 @@ export async function runInit(args: RunInitArgs): Promise<number> {
   const mode = planInit(inspectInitFolder(folder), args.force);
 
   if (mode.kind === "complete") {
+    writeLocalScaffolding(folder);
     args.io.write(
       "`.openlock/` is complete — edit by hand, or re-run with --force to regenerate.\n",
+    );
+    args.io.write(
+      "Ensured config.local.yaml.example + .openlock/.gitignore (personal overrides; config.local.yaml is gitignored).\n",
     );
     return 0;
   }
@@ -242,6 +246,9 @@ export async function runInit(args: RunInitArgs): Promise<number> {
     args.io.write(
       `Wrote .openlock/config.yaml, policy.yaml, Containerfile (harness: ${args.harness}, workdir: ${opts.workdir}).\n`,
     );
+    args.io.write(
+      "Also wrote config.local.yaml.example (personal overrides; config.local.yaml is gitignored).\n",
+    );
     args.io.write("Review, run `openlock validate`, then `openlock sandbox`.\n");
     return 0;
   }
@@ -250,6 +257,9 @@ export async function runInit(args: RunInitArgs): Promise<number> {
   writeFiles(folder, files, mode.write);
   writeLocalScaffolding(folder);
   args.io.write(`Wrote ${mode.write.join(", ")} (defaults). Kept ${mode.keep.join(", ")}.\n`);
+  args.io.write(
+    "Also wrote config.local.yaml.example (personal overrides; config.local.yaml is gitignored).\n",
+  );
   args.io.write("Edit the regenerated file(s) as needed, then `openlock sandbox`.\n");
   return 0;
 }

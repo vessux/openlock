@@ -188,4 +188,85 @@ describe("config.local scaffolding helpers", () => {
       "a\nconfig.local.yaml\nb\n",
     );
   });
+
+  it("ensureLine handles input with no trailing newline", () => {
+    expect(ensureLine("node_modules", "config.local.yaml")).toBe(
+      "node_modules\nconfig.local.yaml\n",
+    );
+    expect(ensureLine("config.local.yaml", "config.local.yaml")).toBe("config.local.yaml");
+  });
+});
+
+describe("runInit config.local scaffolding", () => {
+  it("fresh init writes config.local.yaml.example and .gitignore with config.local.yaml", async () => {
+    const proj = tmpProject();
+    const code = await runInit({
+      projectPath: proj,
+      force: false,
+      harness: "claude_code",
+      io: nonTtyIO,
+    });
+    expect(code).toBe(0);
+    const folder = join(proj, ".openlock");
+    expect(existsSync(join(folder, "config.local.yaml.example"))).toBe(true);
+    const gi = readFileSync(join(folder, ".gitignore"), "utf-8");
+    expect(gi.split("\n").map((l) => l.trim())).toContain("config.local.yaml");
+  });
+
+  it("complete path also scaffolds config.local.yaml.example + .gitignore", async () => {
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    for (const f of ["config.yaml", "policy.yaml", "Containerfile"]) {
+      writeFileSync(join(folder, f), "x");
+    }
+    const code = await runInit({
+      projectPath: proj,
+      force: false,
+      harness: "claude_code",
+      io: nonTtyIO,
+    });
+    expect(code).toBe(0);
+    expect(existsSync(join(folder, "config.local.yaml.example"))).toBe(true);
+    const gi = readFileSync(join(folder, ".gitignore"), "utf-8");
+    expect(gi.split("\n").map((l) => l.trim())).toContain("config.local.yaml");
+    // untouched: complete path must not overwrite existing files
+    expect(readFileSync(join(folder, "config.yaml"), "utf-8")).toBe("x");
+  });
+
+  it("gap-fill preserves existing .gitignore entries and appends config.local.yaml", async () => {
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), "# hand edited\nmounts: []\n");
+    writeFileSync(join(folder, ".gitignore"), "node_modules\n");
+    const code = await runInit({
+      projectPath: proj,
+      force: false,
+      harness: "claude_code",
+      io: nonTtyIO,
+    });
+    expect(code).toBe(0);
+    const gi = readFileSync(join(folder, ".gitignore"), "utf-8");
+    const lines = gi.split("\n").map((l) => l.trim());
+    expect(lines).toContain("node_modules");
+    expect(lines).toContain("config.local.yaml");
+  });
+
+  it("does not clobber an already-edited config.local.yaml.example", async () => {
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.local.yaml.example"), "# my custom notes\n");
+    const code = await runInit({
+      projectPath: proj,
+      force: false,
+      harness: "claude_code",
+      io: nonTtyIO,
+    });
+    expect(code).toBe(0);
+    expect(readFileSync(join(folder, "config.local.yaml.example"), "utf-8")).toBe(
+      "# my custom notes\n",
+    );
+  });
 });
