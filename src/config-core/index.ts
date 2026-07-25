@@ -10,6 +10,7 @@ import {
   MOUNT_ENTRY_KEYS,
   MOUNT_TYPES,
 } from "./manifest/index";
+import { mergeManifestDocs } from "./manifest/merge";
 import { ALL_POLICY_KEYS, lintPolicy } from "./policy/index";
 import type { Issue } from "./types";
 
@@ -72,6 +73,30 @@ export function gitignoreCoversLocalConfig(content: string | null): boolean {
     .split("\n")
     .map((l) => l.trim())
     .some((l) => l === "config.local.yaml" || l === "/config.local.yaml");
+}
+
+/** Cross-file: the runtime merges config.local.yaml onto config.yaml and
+ * validates the MERGED doc (parseManifest), so a collision that only appears
+ * once the overlay is applied — e.g. a mount target duplicated across the two
+ * files — is invisible to the per-file passes but fatal at launch. Lints the
+ * merged effective config and returns only issues the per-file passes didn't
+ * already report (deduped by severity+message; cross-file collisions carry a
+ * message no single-file pass produced). Callers should only invoke this when
+ * both files are schema-clean and a local file exists. */
+function lintMergedConfig(
+  configPath: string,
+  localConfigPath: string,
+  projectDir: string,
+  opts: { offline: boolean },
+  alreadyReported: Issue[],
+): Issue[] {
+  const baseDoc = yaml.load(readFileSync(configPath, "utf-8")) ?? {};
+  const localDoc = yaml.load(readFileSync(localConfigPath, "utf-8")) ?? {};
+  const merged = mergeManifestDocs(baseDoc, localDoc);
+  const known = new Set(alreadyReported.map((i) => `${i.severity} ${i.message}`));
+  return lintManifest(merged, projectDir, { ...opts, file: "config.local.yaml" }).filter(
+    (mi) => !known.has(`${mi.severity} ${mi.message}`),
+  );
 }
 
 /** Validate the whole .openlock/ folder (manifest + policy). Collect-all,
@@ -168,6 +193,11 @@ export function lintFolder(projectDir: string, opts: { offline: boolean }): Issu
         policyDoc,
       ),
     );
+  }
+  // Only when both files are schema-clean (hasConfigErr false) and a local
+  // file exists — see lintMergedConfig for why this pass exists.
+  if (!hasConfigErr && existsSync(configPath) && existsSync(localConfigPath)) {
+    issues.push(...lintMergedConfig(configPath, localConfigPath, projectDir, opts, issues));
   }
   return issues;
 }

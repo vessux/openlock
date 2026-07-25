@@ -310,4 +310,30 @@ describe("config.local.yaml support", () => {
     expect(issues.some((i) => i.file === "config.local.yaml" && i.severity === "error")).toBe(true);
     expect(issues.some((i) => i.message.includes("anthropic"))).toBe(false);
   });
+
+  it("catches a cross-file duplicate mount target that only appears when merged", () => {
+    seed({
+      "config.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n",
+      "config.local.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(
+      issues.some((i) => i.file === "config.local.yaml" && /duplicate target/i.test(i.message)),
+    ).toBe(true);
+  });
+
+  it("does not double-report a duplicate target that already exists within config.yaml alone", () => {
+    seed({
+      "config.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/dup\n    type: bind\n  - source: .\n    target: /sandbox/.openlock/dup\n    type: bind\n",
+      "config.local.yaml": "args: [--x]\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    const dupTargetIssues = issues.filter((i) => /duplicate target/i.test(i.message));
+    expect(dupTargetIssues.length).toBe(1);
+  });
 });
