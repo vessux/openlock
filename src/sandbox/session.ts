@@ -28,6 +28,11 @@ import {
   waitForSandboxReady,
 } from "./container";
 import { resolveCredentialValues } from "./credentials";
+import {
+  computeBuildInputsHashFromFiles,
+  decideReattachAction,
+  type ReattachAction,
+} from "./drift";
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureGenericProvider, ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
@@ -50,7 +55,7 @@ import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
 import { heartbeatIntervalMs, reapIdleMs } from "./reap";
-import { buildIdleNudge, classifyAll, reapIdleStaleSessions } from "./session-ops";
+import { buildIdleNudge, classifyAll, cleanSession, reapIdleStaleSessions } from "./session-ops";
 import {
   findSessionsByPath,
   listAllSessions,
@@ -74,7 +79,8 @@ export interface SandboxOpts {
   debugEgress?: boolean;
   /** Force a fresh sandbox-image build (--no-cache + --pull), bypassing the
    * cached-image short-circuit. Refreshes a mutable third-party FROM tag whose
-   * Containerfile text (and thus hash) is unchanged. Create-path only. */
+   * Containerfile text (and thus hash) is unchanged. On reattach it is honored
+   * too: the existing session is torn down and recreated (see resolveOrCreateSession). */
   rebuild?: boolean;
 }
 
@@ -118,6 +124,17 @@ export function resolveRepoPolicy(projectPath: string, policyOverride?: string):
   };
   if (folder.harness !== undefined) repo.harness = folder.harness;
   return repo;
+}
+
+/** Hash of the container's "cold" build inputs (Containerfile + mounts + policy
+ * content) for the current `.openlock/` config — the same computation at create
+ * and reattach, so drift is detected by a plain string compare. */
+function sessionBuildInputsHash(projectPath: string, resolved: ResolvedRepo): string | undefined {
+  return computeBuildInputsHashFromFiles(
+    join(projectPath, ".openlock", "Containerfile"),
+    resolved.mounts,
+    resolved.policy,
+  );
 }
 
 interface NewSession {
@@ -308,6 +325,7 @@ async function createSession(
       lastAttachedAt: null,
       attachedPid: null,
       harness,
+      buildInputsHash: sessionBuildInputsHash(projectPath, resolved),
     };
     saveSession(sessionsDir(), meta);
 
@@ -542,6 +560,17 @@ function exitOnAmbiguousSessions(projectPath: string, matches: SessionMeta[]): v
   process.exit(2);
 }
 
+/** Refuse to touch a session another live process is attached to. Applies to
+ * both reattach and the drift-triggered recreate (which tears the container
+ * down) — a concurrent `openlock sandbox` on the same repo must not yank the
+ * container out from under an attached session. */
+function exitIfSessionInUse(m: SessionMeta): void {
+  if (pidAlive(m.attachedPid) && m.attachedPid !== process.pid) {
+    console.error(`Session ${m.name} is in use by pid ${m.attachedPid}.`);
+    process.exit(1);
+  }
+}
+
 async function reattachSession(
   m: SessionMeta,
   mounts: readonly Mount[],
@@ -562,10 +591,7 @@ async function reattachSession(
     );
     process.exit(1);
   }
-  if (pidAlive(m.attachedPid) && m.attachedPid !== process.pid) {
-    console.error(`Session ${m.name} is in use by pid ${m.attachedPid}.`);
-    process.exit(1);
-  }
+  exitIfSessionInUse(m);
   if (state === "exited") {
     console.log(`Resuming session ${m.name} (container was stopped)...`);
   } else {
@@ -594,6 +620,52 @@ async function reattachSession(
   return { containerName, sessionName: m.name };
 }
 
+/** Blocking y/N prompt shown on reattach when the sandbox's cold build inputs
+ * drifted. Default (empty answer) is No — never destroy the container unasked. */
+async function promptRebuildOnDrift(name: string): Promise<boolean> {
+  process.stdout.write(
+    `openlock: .openlock config/policy changed since sandbox "${name}" was built. Rebuild it now? [y/N] `,
+  );
+  const reader = Bun.stdin.stream().getReader();
+  const { value } = await reader.read();
+  reader.releaseLock();
+  const answer = new TextDecoder()
+    .decode(value ?? new Uint8Array())
+    .trim()
+    .toLowerCase();
+  return answer === "y" || answer === "yes";
+}
+
+/** Tear down a drifted session and create a fresh one from the current config.
+ * Mirrors `openlock clean` + a fresh create; the session gets a new name/id. */
+async function recreateSession(
+  m: SessionMeta,
+  projectPath: string,
+  resolved: ResolvedRepo,
+  harness: Harness,
+  providerId: ProviderId,
+  branch: string | undefined,
+  debugEgress: boolean,
+  rebuild: boolean,
+): Promise<ResolvedSession> {
+  await startGateway(); // cleanSession → deleteSandbox routes through the gateway
+  await cleanSession(m.name);
+  const created = await createSession(
+    projectPath,
+    resolved,
+    harness,
+    providerId,
+    branch,
+    debugEgress,
+    rebuild,
+  );
+  updateSessionMeta(sessionsDir(), created.id, {
+    attachedPid: process.pid,
+    lastAttachedAt: new Date().toISOString(),
+  });
+  return { containerName: created.containerName, sessionName: created.name };
+}
+
 async function resolveOrCreateSession(
   projectPath: string,
   resolved: ResolvedRepo,
@@ -602,6 +674,7 @@ async function resolveOrCreateSession(
   branch: string | undefined,
   debugEgress: boolean,
   rebuild: boolean,
+  interactive: boolean,
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
@@ -621,12 +694,55 @@ async function resolveOrCreateSession(
     });
     return { containerName: created.containerName, sessionName: created.name };
   }
-  if (rebuild) {
+
+  // Reattach path. Detect drift of the container's cold build inputs
+  // (Containerfile + mounts + policy) vs. the current .openlock config: those
+  // can't be hot-applied to a running container, only a recreate honors them.
+  const m = matches[0]!;
+  // Guard up front: both the attach and the drift-triggered recreate must
+  // refuse a session another live process holds (recreate would delete it).
+  exitIfSessionInUse(m);
+  // undefined ⇒ can't read the current Containerfile/policy (they'd have to
+  // have vanished since create); decideReattachAction treats that as
+  // "can't compare, proceed" unless --rebuild forces a recreate anyway.
+  const currentHash = sessionBuildInputsHash(projectPath, resolved);
+  const action: ReattachAction = decideReattachAction({
+    storedHash: m.buildInputsHash,
+    currentHash,
+    rebuildFlag: rebuild,
+    interactive,
+  });
+
+  if (action === "warn-stale") {
     console.warn(
-      "openlock: --rebuild is ignored when reattaching an existing session; run `openlock clean` first to force a fresh image build.",
+      `openlock: .openlock config/policy changed since sandbox "${m.name}" was built; ` +
+        "attaching the existing container unchanged. Re-run with --rebuild to apply the changes (recreates the sandbox).",
     );
   }
-  return reattachSession(matches[0]!, resolved.mounts, providerId, resolved.credentials);
+
+  const attachStale = () => reattachSession(m, resolved.mounts, providerId, resolved.credentials);
+
+  if (action === "proceed" || action === "warn-stale") return attachStale();
+
+  if (action === "prompt" && !(await promptRebuildOnDrift(m.name))) {
+    console.log(
+      `Keeping existing sandbox "${m.name}"; changes not applied. Re-run with --rebuild to apply them later.`,
+    );
+    return attachStale();
+  }
+
+  // action === "rebuild", or the prompt was answered yes.
+  console.log(`Rebuilding sandbox "${m.name}" to apply config/policy changes...`);
+  return recreateSession(
+    m,
+    projectPath,
+    resolved,
+    harness,
+    providerId,
+    branch,
+    debugEgress,
+    rebuild,
+  );
 }
 
 /**
@@ -757,6 +873,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     opts.branch,
     opts.debugEgress === true,
     opts.rebuild === true,
+    tty,
   );
 
   if (opts.noAttach === true) {
