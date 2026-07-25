@@ -84,6 +84,20 @@ mounts:
 
 Each git-bundle source basename must be unique. Sync-back applies to the workdir bundle only; non-workdir bundles are snapshot-at-create.
 
+#### Example — Claude Code with permissions disabled
+
+```yaml
+args: ["--dangerously-skip-permissions"]
+```
+
+This is the point of running inside a sandbox: the container (Landlock, seccomp,
+netns enforcement + gateway egress control — see [Security & runtime](./security.md))
+is the safety boundary, not the harness's own per-action prompts. Disabling
+Claude Code's confirmation prompts *inside* the sandbox is safe in a way it
+isn't on your host. Other harnesses take their own permission/autonomy flags
+the same way — pass whatever `args[]` your harness documents;
+`--dangerously-skip-permissions` is Claude-Code-specific.
+
 #### Example — Claude Code with seed-skills plugin (copy-refresh)
 
 ```yaml
@@ -100,7 +114,7 @@ args: ["--plugin-dir", "/sandbox/.openlock/skills"]
 
 **Ownership (Linux bind).** On rootless podman, the openshell fork auto-applies `--userns=keep-id:uid=N,gid=N` (sandbox uid from the image's `USER` directive) whenever any `--volume` is set, so bind files are bidirectionally editable across host ↔ container without manual prep. On rootless docker, ownership depends on daemon-wide `userns-remap`; for cross-uid bind on docker, prefer copy-* mounts. On Mac the virtiofs layer handles this transparently.
 
-**Sandbox uid in `openlock-core` images: 999999 (diverges from upstream).** The openshell fork's [`COMMUNITY_SANDBOX_UID`](https://github.com/vessux/OpenShell/blob/main/crates/openshell-driver-podman/src/client.rs) is `1_000_660_000` — high enough to avoid host-uid collisions when no userns remapping is active. The fork uses that value only as a fallback when `Config.User` is non-numeric; the actual uid for the `--userns=keep-id:uid=N` call comes from each image's `USER` directive, parsed as `u32`. **Our `openlock-core` images pin uid `999999` with `USER 999999:999999`** because `1_000_660_000` falls outside macOS podman-machine's default subuid range (`100000-1099999`) and breaks `openlock update-images` on Mac with `crun: setgroups: Invalid argument`. `999999` fits both Mac (1..1_000_000) and Linux (`524288+` typical) ranges. The fork handles per-image uids cleanly, so `openlock-core` (999999), upstream community images (1_000_660_000), and BYOC images with their own uid all coexist — the only caveat is that host-side scripts hardcoding `1_000_660_000` (chown, manual cleanup) will not target `openlock-core` containers. If you ship a BYOC image, declare a numeric `USER <uid>:<gid>` and the fork will pick it up automatically.
+**Sandbox uid in `openlock-core` images: 60000 (diverges from upstream).** The openshell fork's [`COMMUNITY_SANDBOX_UID`](https://github.com/vessux/OpenShell/blob/main/crates/openshell-driver-podman/src/client.rs) is `1_000_660_000` — high enough to avoid host-uid collisions when no userns remapping is active. The fork uses that value only as a fallback when `Config.User` is non-numeric; the actual uid for the `--userns=keep-id:uid=N` call comes from each image's `USER` directive, parsed as `u32`. **Our `openlock-core` images pin uid `60000` with `USER 60000:60000`** (previously `999999`, changed in v0.9.1). `--userns=keep-id:uid=N` needs the host's subuid/subgid *count* to exceed `N`; `999999` didn't fit a stock `/etc/subuid` range on a fresh bare-metal rootless-podman Linux host, so `/sandbox` came up unwritable there (VM-backed setups like macOS podman-machine and Lima ship larger default ranges, which masked the problem). `60000` fits a commonly-recommended stock range on both Linux and Mac without requiring anyone to widen anything — see [Rootless podman on Linux](./installation.md#rootless-podman-on-linux) for what to do if your range still doesn't cover it. The fork handles per-image uids cleanly, so `openlock-core` (60000), upstream community images (1_000_660_000), and BYOC images with their own uid all coexist — the only caveat is that host-side scripts hardcoding `1_000_660_000` (chown, manual cleanup) will not target `openlock-core` containers. If you ship a BYOC image, declare a numeric `USER <uid>:<gid>` and the fork will pick it up automatically.
 
 **VM driver.** Bind mounts are NOT supported when openshell uses its VM driver. The driver rejects bind mounts at sandbox create.
 

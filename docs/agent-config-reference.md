@@ -14,7 +14,7 @@ validation, so the effective config is what gets checked.
 - `mounts[]` — each entry: `source`, `target`, `type`, optional `readOnly` (valid on `type: bind` only).
   - `type` is one of: `copy-once`, `copy-refresh`, `bind`, `git-bundle`.
   - `copy-once` / `copy-refresh` targets must be under `/sandbox/.openlock/`.
-- `args[]` — extra argv appended to the in-container agent launch.
+- `args[]` — extra argv appended to the in-container agent launch. Common use: the harness's own permission-bypass flag — e.g. Claude Code's `--dangerously-skip-permissions` — since the sandbox (not the harness's in-process prompts) is the security boundary. See the worked example in [Mounts, args & env](./mounts.md) and [Security & runtime](./security.md).
 - `env{}` — extra environment variables on the agent process.
 - `credentials[]` — secondary tool-credentials injected at egress (e.g. a GitHub PAT for `api.github.com`). Each entry: `name` (the gateway provider name attached to the sandbox) and `values` (a mapping of credential-env-key → source). The only source form is `{ from_env: VAR }` — the value is read from the host environment at `openlock sandbox` time, provisioned into the gateway, and injected per `policy.yaml` `cred_inject`. The value is never committed and never enters the sandbox env. The gateway provider type is always `generic`. Pair each entry with a `cred_inject` + `allowed_secrets` block in `policy.yaml` (see below); `openlock validate` errors if a `cred_inject.from_credential` is not supplied by a declared `credentials:` entry (or the primary provider).
 

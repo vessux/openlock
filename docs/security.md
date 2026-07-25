@@ -4,6 +4,8 @@
 
 Always reach into a session via `openlock shell` / `openlock exec` — these route through the openshell supervisor, which applies `HTTPS_PROXY`, Landlock, seccomp, and netns enforcement. Direct `podman exec sandbox-<name> ...` from the host bypasses the supervisor and lands the process in the container's netns without proxy enforcement, so egress policy, `cred_inject`, and the per-binary credential gate do not apply. Treat podman socket access as part of your trust boundary.
 
+Because the container is the safety boundary, it's fine — expected, even — to run the agent inside it with its own permission prompts turned off (e.g. Claude Code's `--dangerously-skip-permissions`, passed via `args:` in `config.yaml`; see [Agent config reference](./agent-config-reference.md) and [Mounts, args & env](./mounts.md) for the worked example). The harness's in-process approval flow isn't the control that matters here — the sandbox is.
+
 ## Container runtime choice
 
 openlock supports **podman** (default, rootless) and **docker** as container runtimes. Select via:
