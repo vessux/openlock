@@ -1,8 +1,14 @@
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import { getSandboxState, execCmd as runExec } from "../sandbox/container";
+// buildProxyLogCmd lives in sandbox/ (not here) so it's reusable by the
+// TLS-fallback health check (session.ts/tls-state.ts) without that code
+// reaching into cli/ — sandbox/ code must not import from cli/.
+import { buildProxyLogCmd } from "../sandbox/proxy-log";
 import { printCmdHelp } from "./_help";
 import { resolveSessionName } from "./_resolve";
+
+export { buildProxyLogCmd };
 
 export const flagSchema = {
   follow: { type: "boolean", short: "f" },
@@ -11,28 +17,6 @@ export const flagSchema = {
 } as const satisfies ParseArgsOptionsConfig;
 
 const DEFAULT_LINES = 200;
-
-/**
- * Build the in-sandbox command that surfaces the openshell proxy's OCSF audit
- * log: per-request L7 allow/deny decisions (method, URL, policy, engine, and the
- * calling binary) written by the in-container supervisor/proxy — the data-plane
- * the host gateway log never shows. Date-stamped at
- * `/var/log/openshell.<date>.log` (root-owned, world-readable). The glob handles
- * date rollover; the `openshell-ocsf.<date>.log` sibling is intentionally NOT
- * matched (`openshell.*` requires a literal dot after `openshell`).
- */
-export function buildProxyLogCmd(opts: { follow?: boolean; lines?: number } = {}): string[] {
-  const n =
-    typeof opts.lines === "number" && Number.isInteger(opts.lines) && opts.lines >= 0
-      ? opts.lines
-      : DEFAULT_LINES;
-  const flags = opts.follow === true ? `-n ${n} -f` : `-n ${n}`;
-  return [
-    "sh",
-    "-c",
-    `tail ${flags} /var/log/openshell.*.log 2>/dev/null || echo "(no proxy log found at /var/log/openshell.*.log)"`,
-  ];
-}
 
 export async function logsCmd(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
