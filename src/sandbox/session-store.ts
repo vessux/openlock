@@ -13,6 +13,12 @@ export interface SessionMeta {
   lastAttachedAt: string | null;
   attachedPid: number | null;
   harness: Harness;
+  /** sha256 of the container's "cold" build inputs at create time
+   * (Containerfile + mounts + policy content) — see sandbox/drift.ts. Used on
+   * reattach to detect drift and offer a rebuild. Absent on sessions created
+   * before drift-tracking existed (and on the `--policy` override path where
+   * inputs can't be read); a missing value means "can't compare, don't prompt". */
+  buildInputsHash?: string;
 }
 
 // Legacy meta files (pre-slim-images) may carry extra fields like `caps` or
