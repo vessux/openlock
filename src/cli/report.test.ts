@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPENSHELL_FORK_TAG } from "../sandbox/fork-binaries";
-import { report } from "./report";
+import { declaredBundleSecrets, report } from "./report";
 
 describe("report()", () => {
   let stateDir = "";
@@ -141,5 +141,32 @@ describe("report()", () => {
 
     const probe = Bun.spawn(["test", "-f", join(bundleRoot, "gateway.log")]);
     expect(await probe.exited).not.toBe(0);
+  });
+});
+
+describe("declaredBundleSecrets", () => {
+  let dir: string;
+  let cwd: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "olrep-"));
+    mkdirSync(join(dir, ".openlock"), { recursive: true });
+    cwd = process.cwd();
+    process.chdir(dir);
+    process.env.OL_TEST_TOKEN = "s3cr3t-value";
+  });
+  afterEach(() => {
+    process.chdir(cwd);
+    delete process.env.OL_TEST_TOKEN;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("gathers a secret declared only in config.local.yaml", () => {
+    writeFileSync(join(dir, ".openlock", "config.yaml"), "args: [--x]\n", "utf-8");
+    writeFileSync(
+      join(dir, ".openlock", "config.local.yaml"),
+      "credentials:\n  - name: t\n    values:\n      T: { from_env: OL_TEST_TOKEN }\n",
+      "utf-8",
+    );
+    expect(declaredBundleSecrets()).toContain("s3cr3t-value");
   });
 });

@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { knownConfigTokens, lintFolder } from "./index";
+import {
+  gitignoreCoversLocalConfig,
+  knownConfigTokens,
+  lintFolder,
+  loadDeclaredCredentialsMerged,
+} from "./index";
 
 let root: string;
 beforeEach(() => {
@@ -223,5 +228,112 @@ describe("knownConfigTokens", () => {
   it("returns a de-duplicated, sorted list", () => {
     const tokens = knownConfigTokens();
     expect(tokens).toEqual([...new Set(tokens)].sort());
+  });
+});
+
+describe("config.local.yaml support", () => {
+  let dir: string;
+  function seed(files: Record<string, string>): void {
+    const folder = join(dir, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    for (const [n, b] of Object.entries(files)) writeFileSync(join(folder, n), b, "utf-8");
+  }
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "olcc-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("attributes a config.local.yaml schema error to that file", () => {
+    seed({
+      "config.yaml": "args: [--x]\n",
+      "config.local.yaml": "bogus_key: true\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(issues.some((i) => i.file === "config.local.yaml" && i.severity === "error")).toBe(true);
+  });
+
+  it("merges credentials from both files", () => {
+    seed({
+      "config.yaml": "credentials:\n  - name: a\n    values: {}\n",
+      "config.local.yaml": "credentials:\n  - name: b\n    values: {}\n",
+    });
+    const names = loadDeclaredCredentialsMerged(join(dir, ".openlock")).map((c) => c.name);
+    expect(names).toEqual(["a", "b"]);
+  });
+
+  it("detects whether .gitignore covers config.local.yaml", () => {
+    expect(gitignoreCoversLocalConfig(null)).toBe(false);
+    expect(gitignoreCoversLocalConfig("node_modules\n")).toBe(false);
+    expect(gitignoreCoversLocalConfig("node_modules\nconfig.local.yaml\n")).toBe(true);
+    expect(gitignoreCoversLocalConfig("/config.local.yaml")).toBe(true);
+  });
+
+  it("attributes a name-collision declared only in config.local.yaml to that file with a per-file index", () => {
+    seed({
+      // Unrelated clean credential first, so the local bundle would be
+      // index 1 in a merged list — proves we use the per-file index 0.
+      "config.yaml": "credentials:\n  - name: a\n    values: { X: { from_env: X } }\n",
+      "config.local.yaml":
+        "credentials:\n  - name: anthropic\n    values: { X: { from_env: X } }\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "config.local.yaml" &&
+          i.severity === "error" &&
+          i.path === "credentials[0].name" &&
+          i.message.includes("anthropic"),
+      ),
+    ).toBe(true);
+    // and NOT misattributed to config.yaml
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "config.yaml" && i.severity === "error" && i.message.includes("anthropic"),
+      ),
+    ).toBe(false);
+  });
+
+  it("suppresses cross-checks when config.local.yaml has a schema error", () => {
+    seed({
+      // Without the local schema error, this would produce a name-collision
+      // error (bundle "anthropic" in config.yaml).
+      "config.yaml": "credentials:\n  - name: anthropic\n    values: { X: { from_env: X } }\n",
+      "config.local.yaml": "bogus_key: true\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(issues.some((i) => i.file === "config.local.yaml" && i.severity === "error")).toBe(true);
+    expect(issues.some((i) => i.message.includes("anthropic"))).toBe(false);
+  });
+
+  it("catches a cross-file duplicate mount target that only appears when merged", () => {
+    seed({
+      "config.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n",
+      "config.local.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    expect(
+      issues.some((i) => i.file === "config.local.yaml" && /duplicate target/i.test(i.message)),
+    ).toBe(true);
+  });
+
+  it("does not double-report a duplicate target that already exists within config.yaml alone", () => {
+    seed({
+      "config.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/dup\n    type: bind\n  - source: .\n    target: /sandbox/.openlock/dup\n    type: bind\n",
+      "config.local.yaml": "args: [--x]\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    const dupTargetIssues = issues.filter((i) => /duplicate target/i.test(i.message));
+    expect(dupTargetIssues.length).toBe(1);
   });
 });
