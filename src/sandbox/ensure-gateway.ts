@@ -148,6 +148,12 @@ export function renderGatewayConfigToml(
       `default_image = "${tomlEscape(DEFAULT_SANDBOX_IMAGE)}"`,
       `supervisor_image = "${tomlEscape(opts.supervisorImage)}"`,
       `socket_path = "${tomlEscape(opts.podmanSocket)}"`,
+      // Upstream gates driver-config bind mounts behind an operator flag that
+      // defaults to false; without it the driver hard-errors with "podman bind
+      // mounts require enable_bind_mounts = true". openlock already exposes
+      // host bind mounts via `--volume`, so this grants no capability users
+      // don't have today — it just satisfies the gate.
+      "enable_bind_mounts = true",
       "",
     );
   } else {
@@ -155,6 +161,8 @@ export function renderGatewayConfigToml(
       "[openshell.drivers.docker]",
       `default_image = "${tomlEscape(DEFAULT_SANDBOX_IMAGE)}"`,
       `supervisor_image = "${tomlEscape(opts.supervisorImage)}"`,
+      // See the podman block above — docker has the identical gate.
+      "enable_bind_mounts = true",
       "",
     );
   }
