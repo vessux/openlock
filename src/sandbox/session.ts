@@ -64,6 +64,12 @@ import {
   sessionsDir,
   updateSessionMeta,
 } from "./session-store";
+import {
+  decideTlsFallbackAction,
+  fetchTlsFallbackVerdict,
+  formatTlsFallbackBlockedMessage,
+  formatTlsFallbackUnknownWarning,
+} from "./tls-state";
 
 export interface SandboxOpts {
   path: string;
@@ -636,6 +642,55 @@ async function promptRebuildOnDrift(name: string): Promise<boolean> {
   return answer === "y" || answer === "yes";
 }
 
+/** Blocking y/N prompt shown when TLS termination is confirmed disabled (bd
+ * openlock-bj2): the in-container proxy is running with ZERO L7 enforcement.
+ * Default (empty answer) is No — never silently run a session with the
+ * credential/content moat off. Mirrors promptRebuildOnDrift's UX. */
+async function promptProceedWithTlsDisabled(name: string): Promise<boolean> {
+  process.stdout.write(
+    `Proceed anyway with sandbox "${name}" running WITHOUT L7 credential/content enforcement? [y/N] `,
+  );
+  const reader = Bun.stdin.stream().getReader();
+  const { value } = await reader.read();
+  reader.releaseLock();
+  const answer = new TextDecoder()
+    .decode(value ?? new Uint8Array())
+    .trim()
+    .toLowerCase();
+  return answer === "y" || answer === "yes";
+}
+
+/**
+ * Post-ready health assertion (bd openlock-bj2): the fork's in-container
+ * proxy falls back to a raw byte tunnel — no cred_inject, no allowed_secrets
+ * scoping, no content policy — when its ephemeral TLS CA fails to
+ * generate/write at supervisor startup. That's a cold-start-only failure
+ * mode, but exactly the rootless-podman/uid-remap/mount-permission class this
+ * project hits repeatedly, and it is otherwise silent: the supervisor logs a
+ * Medium OCSF event and moves on. Runs once create/reattach/recreate have all
+ * converged on a Ready container (resolveOrCreateSession only returns once
+ * waitForSandboxReady succeeded down whichever path it took), before any
+ * harness or `exec` touches the session. Exits the process on a confirmed or
+ * user-declined block.
+ */
+async function enforceTlsTerminationHealthy(name: string, interactive: boolean): Promise<void> {
+  const verdict = await fetchTlsFallbackVerdict(name);
+  const action = decideTlsFallbackAction({ verdict, interactive });
+  if (action === "proceed") return;
+  if (action === "warn-unknown") {
+    console.warn(formatTlsFallbackUnknownWarning(name));
+    return;
+  }
+  console.error(formatTlsFallbackBlockedMessage(name));
+  if (action === "prompt" && (await promptProceedWithTlsDisabled(name))) {
+    console.warn(
+      `openlock: proceeding with sandbox "${name}" — L7 credential/content enforcement is DISABLED.`,
+    );
+    return;
+  }
+  process.exit(1);
+}
+
 /** Tear down a drifted session and create a fresh one from the current config.
  * Mirrors `openlock clean` + a fresh create; the session gets a new name/id. */
 async function recreateSession(
@@ -875,6 +930,11 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     opts.rebuild === true,
     tty,
   );
+
+  // Convergence point for create / reattach / drift-triggered recreate: all
+  // three paths inside resolveOrCreateSession only return once the container
+  // reported Ready. Check exactly once here, before either attach mode.
+  await enforceTlsTerminationHealthy(containerName, tty);
 
   if (opts.noAttach === true) {
     // Detached create: the persistent container is up (the sleep-infinity
