@@ -33,6 +33,22 @@ describe("renderGatewayConfigToml", () => {
     expect(out).not.toContain("socket_path");
   });
 
+  // Upstream's driver-config mount path hard-errors unless this is set, and it
+  // is a gateway-level TOML toggle -- not settable per `sandbox create`. Both
+  // drivers gate independently, so both blocks need it (bd openlock-4sh).
+  it("enables bind mounts for podman", () => {
+    const out = renderGatewayConfigToml("podman", {
+      supervisorImage: "img:latest",
+      podmanSocket: "/run/podman/podman.sock",
+    });
+    expect(out).toContain("enable_bind_mounts = true");
+  });
+
+  it("enables bind mounts for docker", () => {
+    const out = renderGatewayConfigToml("docker", { supervisorImage: "img:latest" });
+    expect(out).toContain("enable_bind_mounts = true");
+  });
+
   it("throws when podman runtime but no podmanSocket", () => {
     expect(() => renderGatewayConfigToml("podman", { supervisorImage: "x" })).toThrow(
       /podmanSocket/,
