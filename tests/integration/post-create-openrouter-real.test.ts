@@ -107,7 +107,7 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
   it.skipIf(!LIVE || BEARER === null)(
     "openrouter.ai accepts the cred_inject-rewritten Bearer and responds at API level",
     async () => {
-      const sessionName = `openlock-or-real-${Date.now().toString(36)}`;
+      const sessionName = `ol-orr-${Date.now().toString(36)}`;
       const containerName = `openshell-sandbox-${sessionName}`;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-or-real-"));
       const repoDir = join(tmp, "repo");

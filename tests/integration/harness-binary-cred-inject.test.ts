@@ -86,7 +86,7 @@ describe("harness binary triggers cred_inject (live integration)", () => {
   it.skipIf(!LIVE)(
     `claude_code: /usr/local/bin/claude runs L7 echo via ${POLICY_NAME}`,
     async () => {
-      const sessionName = `openlock-hb-claude-${Date.now().toString(36)}`;
+      const sessionName = `ol-hb-${Date.now().toString(36)}`;
       const providerName = "openlock-test-hb-claude";
       const tmp = mkdtempSync(join(tmpdir(), "openlock-hb-"));
       const repoDir = join(tmp, "repo");

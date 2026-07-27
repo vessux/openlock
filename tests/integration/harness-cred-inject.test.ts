@@ -74,7 +74,7 @@ describe("harness cred_inject mechanism (live integration)", () => {
   it.skipIf(!LIVE)(
     "opencode policy + cred_inject rewrites headers via proxy echo mode",
     async () => {
-      const sessionName = `openlock-test-${Date.now().toString(36)}`;
+      const sessionName = `ol-echo-${Date.now().toString(36)}`;
       const containerName = `openlock-sb-${sessionName}`;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-it-"));
       const repoDir = join(tmp, "repo");
