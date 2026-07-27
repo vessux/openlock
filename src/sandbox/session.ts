@@ -598,7 +598,13 @@ async function reattachSession(
     process.exit(1);
   }
   exitIfSessionInUse(m);
-  if (state === "exited") {
+  // "exited" (Failed/Exited) and "stopped" (an intentional `openlock stop`)
+  // both need an explicit resume start; only "running"/"other" are already
+  // up. Kept as one combined check (rather than switching the message/start
+  // gate to "stopped" alone) so a genuinely-dead container still gets a
+  // resume attempt, matching pre-openlock-weo behavior.
+  const needsStart = state === "exited" || state === "stopped";
+  if (needsStart) {
     console.log(`Resuming session ${m.name} (container was stopped)...`);
   } else {
     console.log(`Attaching to running session ${m.name}...`);
@@ -610,10 +616,18 @@ async function reattachSession(
   for (const bundle of credentials) {
     await ensureGenericProvider(bundle.name, resolveCredentialValues(bundle, process.env));
   }
-  if (state === "exited") {
+  if (needsStart) {
     await startSandbox(containerName);
+    // The gateway's phase reconcile sweep runs on a ~60s cadence, so phase
+    // can still read Stopped for up to ~35s after StartSandbox already
+    // returned success and the container is Up (openlock-weo). Tolerate that
+    // lag — but only here, right after we issued the start ourselves — and
+    // give it a longer budget so a slightly slower sweep doesn't just move
+    // the same false-negative later.
+    await waitForSandboxReady(m.name, { tolerateStopped: true, timeoutMs: 90_000 });
+  } else {
+    await waitForSandboxReady(m.name);
   }
-  await waitForSandboxReady(m.name);
   for (const mount of mounts) {
     if (mount.type !== "copy-refresh") continue;
     console.log(`Refreshing mount ${mount.target}...`);

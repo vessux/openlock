@@ -4,7 +4,13 @@ import { getCliInvocation } from "./fork-binaries";
 import { type Harness, harnessLaunchArgv } from "./harness";
 import { filterOpenshellStderr } from "./openshell-stderr";
 
-export type ContainerState = "running" | "exited" | "missing" | "other";
+// "stopped" is split out from "exited" (openlock-weo): phase Stopped is the
+// intentional, resumable result of `openlock stop`, not a real failure like
+// Failed/Exited. Callers that just issued an explicit Start need to tell the
+// two apart — the gateway's phase reconciler lags a running container by up
+// to ~35s, so "Stopped" right after StartSandbox returns success is stale
+// observation, not death. See assertSandboxNotExited/waitForSandboxReady.
+export type ContainerState = "running" | "exited" | "stopped" | "missing" | "other";
 
 // Wrap a command in `env K=V ...` so extra env vars apply without shell
 // quoting risk. Returns the original argv unchanged when env is empty.
@@ -272,15 +278,34 @@ export function formatSandboxExitedError(name: string, logs: string): string {
   return `sandbox "${name}" exited during provisioning. Last supervisor logs:\n${logs}`;
 }
 
+export interface AssertSandboxNotExitedOpts {
+  // Treat phase Stopped as transient rather than a confirmed death. Only
+  // correct right after this caller issued an explicit `openshell sandbox
+  // start` — there, a lagging phase reconcile (up to ~35s, openlock-weo)
+  // can still read Stopped well after the container is actually Up. On a
+  // cold wait where nothing was started, Stopped still means
+  // dead-and-not-restarting, so this must default to false.
+  tolerateStopped?: boolean;
+}
+
 // Fails fast with the real cause once the container is confirmed dead
-// (Failed/Exited/Stopped/missing), instead of letting callers burn their full
-// poll timeout only to report a generic "not ready"/"not visible" message.
-// No-ops (returns normally) while the sandbox is merely still provisioning.
-export async function assertSandboxNotExited(name: string): Promise<void> {
+// (Failed/Exited/missing, or Stopped when not tolerated), instead of letting
+// callers burn their full poll timeout only to report a generic "not
+// ready"/"not visible" message. No-ops (returns normally) while the sandbox
+// is merely still provisioning (or transiently Stopped, see above).
+export async function assertSandboxNotExited(
+  name: string,
+  opts: AssertSandboxNotExitedOpts = {},
+): Promise<void> {
   const state = await getSandboxState(name);
-  if (state !== "exited" && state !== "missing") return;
+  if (state === "stopped" && opts.tolerateStopped === true) return;
+  if (state !== "exited" && state !== "missing" && state !== "stopped") return;
   const logs = await fetchSandboxFailureLogs(name);
   throw new Error(formatSandboxExitedError(name, logs));
+}
+
+export interface WaitForSandboxReadyOpts extends AssertSandboxNotExitedOpts {
+  timeoutMs?: number;
 }
 
 // Wait until the openshell-sandbox supervisor reports the sandbox in Ready
@@ -288,7 +313,11 @@ export async function assertSandboxNotExited(name: string): Promise<void> {
 // found" until the supervisor finishes provisioning, so probe with a no-op
 // /bin/true and retry. Required before any subsequent execHarness/execBash/
 // execCmd call.
-export async function waitForSandboxReady(name: string, timeoutMs = 60_000): Promise<void> {
+export async function waitForSandboxReady(
+  name: string,
+  opts: WaitForSandboxReadyOpts = {},
+): Promise<void> {
+  const { timeoutMs = 60_000, tolerateStopped } = opts;
   const cli = await getCliInvocation();
   const argv = buildOpenshellExecArgv(cli.argv, name, ["/bin/true"], { tty: "off" });
   const deadline = Date.now() + timeoutMs;
@@ -300,9 +329,23 @@ export async function waitForSandboxReady(name: string, timeoutMs = 60_000): Pro
       stderr: "ignore",
     });
     if ((await proc.exited) === 0) return;
-    await assertSandboxNotExited(name);
+    await assertSandboxNotExited(name, { tolerateStopped });
     await Bun.sleep(500);
   }
+  // Deliberately strict here (no tolerateStopped) even though the loop above
+  // polled tolerantly: a Stopped phase we were willing to wait out mid-poll
+  // is not the same as a Stopped phase that never resolved across the whole
+  // budget — that's a real death (openlock-hsn: Start reports success but
+  // the container never actually restarts), and it deserves the specific
+  // formatSandboxExitedError (with supervisor logs), not a bare timeout.
+  // Runs unconditionally, not gated on `tolerateStopped`: on the cold path
+  // it's a no-op duplicate of the strict check the loop already ran every
+  // 500ms (so no behavior change there), and on either path it can only
+  // ever escalate to a more specific error — a sandbox that's merely slow
+  // (state "running"/"other") passes this check cleanly and still falls
+  // through to the generic timeout below, so a genuine slow-boot is never
+  // masked.
+  await assertSandboxNotExited(name);
   throw new Error(`sandbox ${name} did not reach Ready state within ${timeoutMs}ms`);
 }
 
@@ -380,7 +423,8 @@ export function parseSandboxGetPhase(stdout: string): ContainerState {
   const m = stripped.match(/^\s*Phase:\s*(\S+)/m);
   const phase = m?.[1];
   if (phase === "Ready" || phase === "Running") return "running";
-  if (phase === "Failed" || phase === "Exited" || phase === "Stopped") return "exited";
+  if (phase === "Stopped") return "stopped";
+  if (phase === "Failed" || phase === "Exited") return "exited";
   return "other";
 }
 
