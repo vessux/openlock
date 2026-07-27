@@ -6,10 +6,14 @@ import { filterOpenshellStderr } from "./openshell-stderr";
 
 // "stopped" is split out from "exited" (openlock-weo): phase Stopped is the
 // intentional, resumable result of `openlock stop`, not a real failure like
-// Failed/Exited. Callers that just issued an explicit Start need to tell the
-// two apart — the gateway's phase reconciler lags a running container by up
-// to ~35s, so "Stopped" right after StartSandbox returns success is stale
-// observation, not death. See assertSandboxNotExited/waitForSandboxReady.
+// Error (the only genuine failure phase — see parseSandboxGetPhase, there is
+// no Failed/Exited/Running). Callers that just issued an explicit Start need
+// to tell the two apart — the gateway's phase is derived from driver state and
+// gated on a container healthcheck, so it can still lag a container that has
+// already started by tens of seconds (~35s observed; consistent with either
+// the healthcheck cadence or the gateway's reconcile sweep — not
+// disambiguated). "Stopped" right after StartSandbox returns success can be
+// stale observation, not death. See assertSandboxNotExited/waitForSandboxReady.
 export type ContainerState = "running" | "exited" | "stopped" | "missing" | "other";
 
 // Wrap a command in `env K=V ...` so extra env vars apply without shell
@@ -281,8 +285,10 @@ export function formatSandboxExitedError(name: string, logs: string): string {
 export interface AssertSandboxNotExitedOpts {
   // Treat phase Stopped as transient rather than a confirmed death. Only
   // correct right after this caller issued an explicit `openshell sandbox
-  // start` — there, a lagging phase reconcile (up to ~35s, openlock-weo)
-  // can still read Stopped well after the container is actually Up. On a
+  // start` — there, the gateway's phase observation can lag the container
+  // actually coming up by tens of seconds (~35s observed, openlock-weo;
+  // mechanism not disambiguated — see the ContainerState comment above), so
+  // it can still read Stopped well after the container is actually Up. On a
   // cold wait where nothing was started, Stopped still means
   // dead-and-not-restarting, so this must default to false.
   tolerateStopped?: boolean;
@@ -360,11 +366,14 @@ export async function waitForSandboxReady(
 // up on `sandbox delete`.
 // ============================================================================
 
-// `openshell sandbox get` accepts only [name] + --policy-only — there is no
-// -o/--output flag. We parse the human-formatted output for the `Phase:` line
-// (the only field getSandboxState consumes).
+// `openshell sandbox get` supports `-o/--output json` on our pinned fork
+// (v0.8.0+; upstream b422b678/#1989) — confirmed via `openshell sandbox get
+// --help` on the built fork binary, not assumed. Prefer this over
+// `sandbox list -o json` + name-filter: it's the narrower call and matches
+// what getSandboxState already does. Structured JSON (openlock-gr1) replaces
+// regexing the colorized human table for the `Phase:` line.
 export function buildSandboxGetArgv(cliPrefix: readonly string[], name: string): string[] {
-  return [...cliPrefix, "sandbox", "get", name];
+  return [...cliPrefix, "sandbox", "get", name, "--output", "json"];
 }
 
 export function buildSandboxDeleteArgv(cliPrefix: readonly string[], name: string): string[] {
@@ -415,16 +424,39 @@ export async function getSandboxState(name: string): Promise<ContainerState> {
   return parseSandboxGetPhase(out);
 }
 
-// Extracts the Phase field from `openshell sandbox get` human output, which
-// is colorized + indented like `  Phase: Ready`. Strips ANSI before matching.
+// Extracts the phase from `openshell sandbox get --output json`, which
+// prints a plain (uncolorized — colorizing only happens on the table-format
+// branch, which the json/yaml branches early-return past) pretty-printed
+// JSON object with a top-level "phase" string field. That field carries the
+// *human-readable* phase label, not the proto enum name (e.g. "Ready", not
+// "SANDBOX_PHASE_READY") — confirmed against the pinned fork source
+// (crates/openshell-cli/src/run.rs `sandbox_to_json`/`sandbox_detail_to_json`
+// set `"phase": phase_name(sandbox.phase())`) and empirically by running that
+// crate's own `sandbox_detail_to_json_includes_policy_fields` unit test,
+// which asserts `json["phase"] == "Ready"` for `SandboxPhase::Ready`.
+//
+// The real `phase_name` mapping (crates/openshell-cli/src/commands/common.rs)
+// only ever emits "Unspecified" | "Provisioning" | "Ready" | "Error" |
+// "Deleting" | "Stopped" | "Unknown" — there is no "Running", "Failed", or
+// "Exited" phase; the previous regex-based parser checked for those anyway
+// (dead branches) and, more importantly, never matched "Error" at all, so a
+// real failure phase silently fell through to "other" (treated as merely
+// still-provisioning) instead of "exited". Fixed here: "Error" is the actual
+// failure phase and now maps to "exited".
+//
+// Falls back to "other" on unparseable/non-object JSON rather than throwing;
+// a genuinely dead/missing sandbox is already caught by the non-zero exit
+// code in getSandboxState before this is ever called.
 export function parseSandboxGetPhase(stdout: string): ContainerState {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ESC (0x1b) is the point — stripping ANSI CSI sequences.
-  const stripped = stdout.replace(/\u001b\[[0-9;]*m/g, "");
-  const m = stripped.match(/^\s*Phase:\s*(\S+)/m);
-  const phase = m?.[1];
-  if (phase === "Ready" || phase === "Running") return "running";
+  let phase: unknown;
+  try {
+    phase = (JSON.parse(stdout) as { phase?: unknown }).phase;
+  } catch {
+    return "other";
+  }
+  if (phase === "Ready") return "running";
+  if (phase === "Error") return "exited";
   if (phase === "Stopped") return "stopped";
-  if (phase === "Failed" || phase === "Exited") return "exited";
   return "other";
 }
 

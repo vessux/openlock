@@ -618,12 +618,15 @@ async function reattachSession(
   }
   if (needsStart) {
     await startSandbox(containerName);
-    // The gateway's phase reconcile sweep runs on a ~60s cadence, so phase
-    // can still read Stopped for up to ~35s after StartSandbox already
-    // returned success and the container is Up (openlock-weo). Tolerate that
-    // lag — but only here, right after we issued the start ourselves — and
-    // give it a longer budget so a slightly slower sweep doesn't just move
-    // the same false-negative later.
+    // The gateway derives phase from observed driver state gated on a
+    // container healthcheck, so phase can still read Stopped for up to ~35s
+    // (observed) after StartSandbox already returned success and the
+    // container is Up (openlock-weo) — consistent with either the
+    // healthcheck cadence or the gateway's reconcile sweep; not
+    // disambiguated. Tolerate that lag — but only here, right after we
+    // issued the start ourselves — and give it a longer budget so a
+    // slightly slower observation doesn't just move the same false-negative
+    // later.
     await waitForSandboxReady(m.name, { tolerateStopped: true, timeoutMs: 90_000 });
   } else {
     await waitForSandboxReady(m.name);
