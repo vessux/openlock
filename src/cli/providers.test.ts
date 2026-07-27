@@ -46,4 +46,36 @@ describe("_renderProvidersTable", () => {
     expect(line).toContain("stored=yes");
     expect(line).toContain("in_gateway=yes");
   });
+
+  it("defaults credential health to unknown and refresh to '-' when omitted (openlock-7mh)", () => {
+    const lines = _renderProvidersTable({ inGateway: new Set(), getStored: (_id) => null });
+    const line = lines.find((l) => l.startsWith("openrouter"))!;
+    expect(line).toContain("credential=unknown");
+    expect(line).toContain("refresh=-");
+  });
+
+  it("reports real credential health, not mere presence — expired stays visible even though in_gateway=yes", () => {
+    const lines = _renderProvidersTable({
+      inGateway: new Set(["anthropic"]),
+      getStored: (id) => (id === "anthropic" ? {} : null),
+      getCredentialHealth: (id) => (id === "anthropic" ? "expired" : "unknown"),
+      getRefreshHealth: (id) => (id === "anthropic" ? "error" : null),
+    });
+    const line = lines.find((l) => l.startsWith("anthropic"))!;
+    expect(line).toContain("in_gateway=yes");
+    expect(line).toContain("credential=expired");
+    expect(line).toContain("refresh=error");
+  });
+
+  it("shows a live credential distinctly from an unknown one", () => {
+    const lines = _renderProvidersTable({
+      inGateway: new Set(["anthropic"]),
+      getStored: (id) => (id === "anthropic" ? {} : null),
+      getCredentialHealth: (id) => (id === "anthropic" ? "live" : "unknown"),
+      getRefreshHealth: () => "ok",
+    });
+    const line = lines.find((l) => l.startsWith("anthropic"))!;
+    expect(line).toContain("credential=live");
+    expect(line).toContain("refresh=ok");
+  });
 });
