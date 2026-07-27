@@ -100,6 +100,12 @@ function warnOnTypeDrift(providerId: ProviderId, record: ProviderRecord): void {
   }
 }
 
+// Explicit env var name for `--secret-material-env refresh_token=<name>` below
+// (openshell-cli resolves the value from this exact env var on the spawned
+// process; the name itself is arbitrary, just needs to not collide with
+// anything else set on that process's env).
+const REFRESH_TOKEN_ENV_VAR = "OPENLOCK_REFRESH_TOKEN";
+
 /**
  * Seed the gateway for a refresh-capable provider (e.g. the Claude OAuth
  * subscription provider).
@@ -172,24 +178,39 @@ async function seedRefreshProvider(
     // token is kebab-case `oauth2-refresh-token` (the stored/profile value is
     // snake `oauth2_refresh_token`); and refresh configure needs its OWN
     // --credential-expires-at to seed the refresh worker's next_refresh.
-    await mustOk(shell, [
-      "provider",
-      "refresh",
-      "configure",
-      providerId,
-      "--credential-key",
-      "ANTHROPIC_BEARER_TOKEN",
-      "--strategy",
-      "oauth2-refresh-token",
-      "--material",
-      `client_id=${refresh.client_id}`,
-      "--material",
-      `refresh_token=${refresh.refresh_token}`,
-      "--secret-material-key",
-      "refresh_token",
-      "--credential-expires-at",
-      refresh.access_expires_at,
-    ]);
+    //
+    // The refresh token is a long-lived OAuth secret, so it travels via
+    // `--secret-material-env refresh_token=<ENVVAR>` + the spawned process's
+    // env, not inline on `--material` (which would land in the world-readable
+    // /proc/<pid>/cmdline for the process lifetime — same class of bug as
+    // credentialArgsAndEnv fixes for `--credential`). `parse_secret_material_env_pairs`
+    // (openshell-cli/src/commands/common.rs) resolves `KEY=ENVVAR` from the CLI
+    // process's own env and auto-adds `KEY` to secret_material_keys, so a
+    // separate `--secret-material-key refresh_token` is redundant here (and,
+    // per provider_refresh_config in run.rs, only errors on an overlap between
+    // --material and --secret-material-env, not on this kind of redundancy —
+    // it's dropped for clarity, not to dodge an error).
+    // `client_id` is not secret and stays on `--material` as-is.
+    await mustOk(
+      shell,
+      [
+        "provider",
+        "refresh",
+        "configure",
+        providerId,
+        "--credential-key",
+        "ANTHROPIC_BEARER_TOKEN",
+        "--strategy",
+        "oauth2-refresh-token",
+        "--material",
+        `client_id=${refresh.client_id}`,
+        "--secret-material-env",
+        `refresh_token=${REFRESH_TOKEN_ENV_VAR}`,
+        "--credential-expires-at",
+        refresh.access_expires_at,
+      ],
+      { [REFRESH_TOKEN_ENV_VAR]: refresh.refresh_token },
+    );
   }
 
   warnOnTypeDrift(providerId, record);
