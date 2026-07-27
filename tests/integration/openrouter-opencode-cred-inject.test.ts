@@ -74,7 +74,7 @@ describe("openrouter cred_inject mechanism (live integration)", () => {
   it.skipIf(!LIVE)(
     "openrouter policy + cred_inject rewrites Authorization header via proxy echo mode",
     async () => {
-      const sessionName = `openlock-test-${Date.now().toString(36)}`;
+      const sessionName = `ol-or-${Date.now().toString(36)}`;
       const containerName = `openlock-sb-${sessionName}`;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-or-it-"));
       const repoDir = join(tmp, "repo");

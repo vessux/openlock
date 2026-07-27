@@ -94,7 +94,7 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
   it.skipIf(!LIVE)(
     "buildOpenshellExecArgv path enforces proxy + cred_inject post-create",
     async () => {
-      const sessionName = `openlock-test-hnp-${Date.now().toString(36)}`;
+      const sessionName = `ol-hnp-${Date.now().toString(36)}`;
       const containerName = `openshell-sandbox-${sessionName}`;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-hnp-"));
       const repoDir = join(tmp, "repo");

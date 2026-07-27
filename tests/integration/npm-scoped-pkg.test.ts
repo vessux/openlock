@@ -64,7 +64,7 @@ describe("npm scoped packages via default-js policy", () => {
   it.skipIf(!LIVE)(
     "fetch of @scope%2Fname is allowed (allow_encoded_slash: true on npm endpoint)",
     async () => {
-      const sessionName = `openlock-isb-${Date.now().toString(36)}`;
+      const sessionName = `ol-npm-${Date.now().toString(36)}`;
       const containerName = `openshell-sandbox-${sessionName}`;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-isb-"));
       const repoDir = join(tmp, "repo");
