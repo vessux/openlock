@@ -34,6 +34,8 @@ curl -fsSL https://raw.githubusercontent.com/vessux/openlock/main/install.sh | b
 
 Drops `openlock` into `~/.local/bin`. Set `OPENLOCK_INSTALL_DIR` to override. The fork binaries (gateway, supervisor, openshell CLI) are fetched lazily on first run into `~/.cache/openlock/bin/`.
 
+To remove openlock, run `curl -fsSL https://raw.githubusercontent.com/vessux/openlock/main/uninstall.sh | bash` — by default it's conservative: it stops the gateway and reports what remains, keeping the binary if sandboxes still need it to be cleaned up. `--purge` removes everything including sandboxes and workspace volumes, with a confirmation prompt if any uncommitted work could be at risk. See [docs/installation.md](docs/installation.md#uninstall) for details.
+
 ## Prerequisites
 
 - [podman](https://podman.io) — `podman machine` started on macOS, or a reachable rootless socket on Linux (`systemctl --user enable --now podman.socket`)
