@@ -4,7 +4,7 @@ Audience: an AI agent configuring openlock in a user's project. This is the comp
 
 ## `.openlock/config.yaml` (manifest)
 
-Top-level keys (exactly these; unknown keys are rejected): `mounts`, `args`, `env`, `credentials`.
+Top-level keys (exactly these; unknown keys are rejected): `harness`, `mounts`, `args`, `env`, `credentials`.
 
 A gitignored sibling `config.local.yaml` (same keys, all optional) overlays this
 file: `harness` and unknown keys — local wins; `env` — per-key merge; `mounts` /
