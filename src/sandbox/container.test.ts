@@ -1,5 +1,9 @@
-import { describe, expect, it, test } from "bun:test";
+import { afterEach, describe, expect, it, test } from "bun:test";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  assertSandboxNotExited,
   buildHarnessExecArgv,
   buildOpenshellCreateArgv,
   buildOpenshellExecArgv,
@@ -15,6 +19,7 @@ import {
   formatSandboxExitedError,
   parseSandboxGetPhase,
   TETHER_STDIO,
+  waitForSandboxReady,
   wrapCmdWithEnv,
 } from "./container";
 
@@ -207,8 +212,19 @@ describe("buildHarnessExecArgv (harness binary selection)", () => {
 });
 
 describe("buildSandboxGetArgv", () => {
-  it("emits `openshell sandbox get <name>`", () => {
-    expect(buildSandboxGetArgv(["cli"], "sess")).toEqual(["cli", "sandbox", "get", "sess"]);
+  // openlock-gr1: structured JSON, not the colorized human table — confirmed
+  // via `openshell sandbox get --help` on the pinned fork build that
+  // `sandbox get` itself supports -o/--output (table|yaml|json), so this is
+  // the narrower call vs. `sandbox list -o json` + a name filter.
+  it("emits `openshell sandbox get <name> --output json`", () => {
+    expect(buildSandboxGetArgv(["cli"], "sess")).toEqual([
+      "cli",
+      "sandbox",
+      "get",
+      "sess",
+      "--output",
+      "json",
+    ]);
   });
 
   it("supports a multi-element cli prefix", () => {
@@ -220,32 +236,45 @@ describe("buildSandboxGetArgv", () => {
       "sandbox",
       "get",
       "sess",
+      "--output",
+      "json",
     ]);
   });
 });
 
 describe("parseSandboxGetPhase", () => {
-  // openshell sandbox get prints colorized human output, e.g.
-  //   \x1b[1m\x1b[36mSandbox:\x1b[39m\x1b[0m
-  //     \x1b[2mPhase:\x1b[0m Ready
-  // The parser must strip ANSI escapes and locate the `Phase: <state>` line.
-  it("returns 'running' for Ready/Running phase", () => {
-    expect(parseSandboxGetPhase("  Phase: Ready\n  Revision: 1")).toBe("running");
-    expect(parseSandboxGetPhase("  Phase: Running")).toBe("running");
+  // openlock-gr1: openshell sandbox get --output json prints a plain (no
+  // ANSI) JSON object with a top-level "phase" field carrying the
+  // human-readable label (verified against the pinned fork's own
+  // sandbox_detail_to_json_includes_policy_fields unit test — see the
+  // function's doc comment). Real values: Unspecified | Provisioning |
+  // Ready | Error | Deleting | Stopped | Unknown. There is no "Running",
+  // "Failed", or "Exited" — those never occur on the wire.
+  it("returns 'running' for phase Ready", () => {
+    expect(parseSandboxGetPhase('{"phase":"Ready","revision":1}')).toBe("running");
   });
-  it("returns 'exited' for Failed/Exited/Stopped phase", () => {
-    expect(parseSandboxGetPhase("  Phase: Failed")).toBe("exited");
-    expect(parseSandboxGetPhase("  Phase: Exited")).toBe("exited");
-    expect(parseSandboxGetPhase("  Phase: Stopped")).toBe("exited");
+  // Error is the real failure phase (the previous regex-based parser never
+  // matched it at all, silently misclassifying it as "other" — openlock-gr1
+  // fixes that as a side effect of moving to structured JSON).
+  it("returns 'exited' for phase Error", () => {
+    expect(parseSandboxGetPhase('{"phase":"Error"}')).toBe("exited");
   });
-  it("returns 'other' when phase is unknown or missing", () => {
-    expect(parseSandboxGetPhase("  Phase: Provisioning")).toBe("other");
-    expect(parseSandboxGetPhase("  Phase: Error")).toBe("other");
-    expect(parseSandboxGetPhase("no phase here")).toBe("other");
+  // Stopped is split out from exited (openlock-weo): it's the intentional,
+  // resumable result of `openlock stop`, not a real failure — callers that
+  // just issued an explicit Start need to tell the two apart.
+  it("returns 'stopped' for phase Stopped, distinct from Error", () => {
+    expect(parseSandboxGetPhase('{"phase":"Stopped"}')).toBe("stopped");
   });
-  it("strips ANSI color codes around the Phase label and value", () => {
-    const ansi = "\x1b[1m\x1b[36mSandbox:\x1b[39m\x1b[0m\n\n  \x1b[2mPhase:\x1b[0m Ready\n";
-    expect(parseSandboxGetPhase(ansi)).toBe("running");
+  it("returns 'other' for every other real phase value", () => {
+    expect(parseSandboxGetPhase('{"phase":"Provisioning"}')).toBe("other");
+    expect(parseSandboxGetPhase('{"phase":"Deleting"}')).toBe("other");
+    expect(parseSandboxGetPhase('{"phase":"Unspecified"}')).toBe("other");
+    expect(parseSandboxGetPhase('{"phase":"Unknown"}')).toBe("other");
+  });
+  it("returns 'other' on unparseable or phase-less output rather than throwing", () => {
+    expect(parseSandboxGetPhase("not json at all")).toBe("other");
+    expect(parseSandboxGetPhase("{}")).toBe("other");
+    expect(parseSandboxGetPhase("")).toBe("other");
   });
 });
 
@@ -290,6 +319,123 @@ describe("formatSandboxExitedError (GH #75 piece 4 — surface real supervisor f
     expect(msg).toContain("no supervisor");
     expect(msg).toContain("openlock doctor");
     expect(msg).toContain("podman logs openshell-sandbox-my-sess");
+  });
+});
+
+// openlock-weo: on Linux the gateway's phase is derived from observed driver
+// state gated on a container healthcheck, so it can still read Stopped for
+// up to ~35s (observed; consistent with either the healthcheck cadence or
+// the gateway's reconcile sweep — not disambiguated) after an explicit
+// `openshell sandbox start` already returned success and the container is
+// Up. assertSandboxNotExited/waitForSandboxReady must tolerate that lag only
+// right after such a Start, and still fast-fail on Stopped everywhere else
+// (a container nobody just started is genuinely dead, not lagging).
+//
+// No mocking convention exists in this file (everything above is pure
+// argv/string functions) and getCliInvocation/Bun.spawn aren't module-mocked
+// anywhere in the repo, so these drive the real functions against a
+// throwaway fake `openshell` CLI script, wired in via the dev/test-only
+// OPENLOCK_OPENSHELL_BIN override (src/sandbox/fork-binaries.ts). The
+// scenario (phase, exec exit code) is baked directly into the script content
+// per test rather than threaded through env vars: Bun.spawn snapshots
+// process.env at first use rather than re-reading live mutations, so a
+// `FAKE_PHASE`-style env var set in the test body is invisible to the child.
+function writeFakeOpenshellCli(phase: string, execExitCode = 1): string {
+  const dir = mkdtempSync(join(tmpdir(), "fake-openshell-"));
+  const bin = join(dir, "openshell");
+  writeFileSync(
+    bin,
+    [
+      "#!/bin/bash",
+      'if [ "$1" = "sandbox" ] && [ "$2" = "get" ]; then',
+      `  echo '{"phase":"${phase}"}'`,
+      "  exit 0",
+      'elif [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
+      `  exit ${execExitCode}`,
+      'elif [ "$1" = "logs" ]; then',
+      '  echo "fake supervisor log"',
+      "  exit 0",
+      "fi",
+      "exit 0",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(bin, 0o755);
+  return bin;
+}
+
+describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
+  const savedBin = process.env.OPENLOCK_OPENSHELL_BIN;
+
+  afterEach(() => {
+    if (savedBin === undefined) delete process.env.OPENLOCK_OPENSHELL_BIN;
+    else process.env.OPENLOCK_OPENSHELL_BIN = savedBin;
+  });
+
+  describe("assertSandboxNotExited", () => {
+    it("no-ops on phase Stopped when tolerateStopped is set (post-explicit-Start)", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
+      await expect(
+        assertSandboxNotExited("sess", { tolerateStopped: true }),
+      ).resolves.toBeUndefined();
+    });
+
+    it("still throws on phase Stopped when not tolerated (cold path, nothing started)", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
+      await expect(assertSandboxNotExited("sess")).rejects.toThrow(/exited during provisioning/);
+    });
+
+    it("throws on Error even with tolerateStopped set — only Stopped is transient", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Error");
+      await expect(assertSandboxNotExited("sess", { tolerateStopped: true })).rejects.toThrow(
+        /exited during provisioning/,
+      );
+    });
+  });
+
+  describe("waitForSandboxReady", () => {
+    it("keeps polling through a post-Start Stopped phase mid-budget (does not fail on the first sighting)", async () => {
+      // Loose upper bound (well above one 500ms poll tick, well below the
+      // full budget) proves it tolerated at least one Stopped reading
+      // instead of throwing on the very first poll.
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
+      const start = Date.now();
+      await expect(
+        waitForSandboxReady("sess", { tolerateStopped: true, timeoutMs: 1500 }),
+      ).rejects.toThrow(/exited during provisioning/);
+      expect(Date.now() - start).toBeGreaterThanOrEqual(500);
+    });
+
+    // openlock-hsn: if a resume-triggered Start reports success but the
+    // container never actually restarts, phase stays Stopped forever. The
+    // tolerant poll loop above must not swallow that into a bare timeout —
+    // the final strict check must still surface the real cause (with logs).
+    it("surfaces the exited error (with supervisor logs), not a bare timeout, when Stopped never resolves under tolerateStopped", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
+      await expect(
+        waitForSandboxReady("sess", { tolerateStopped: true, timeoutMs: 700 }),
+      ).rejects.toThrow(/exited during provisioning.*fake supervisor log/s);
+    });
+
+    it("fast-fails on Stopped when not tolerated, well before the timeout budget", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
+      const start = Date.now();
+      await expect(waitForSandboxReady("sess", { timeoutMs: 5000 })).rejects.toThrow(
+        /exited during provisioning/,
+      );
+      expect(Date.now() - start).toBeLessThan(2000);
+    });
+
+    // The final strict check must only ever escalate to a more specific
+    // error, never mask a genuine "still provisioning, just slow" timeout —
+    // a sandbox stuck in a live-but-not-Ready phase (never Stopped/Error/
+    // missing) must still fall through to the generic timeout.
+    it("still reports the generic timeout for a sandbox that is merely slow (never Stopped/dead)", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Provisioning");
+      await expect(waitForSandboxReady("sess", { timeoutMs: 700 })).rejects.toThrow(
+        /did not reach Ready state within 700ms/,
+      );
+    });
   });
 });
 

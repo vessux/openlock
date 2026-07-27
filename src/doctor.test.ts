@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
+  buildCmakeCheck,
   buildGatewayReachabilityCheck,
   buildReachabilityProbeArgv,
   buildRuntimeChecks,
@@ -141,8 +142,11 @@ describe("installHint", () => {
     expect(installHint("git", "darwin")).toBe("brew install git");
   });
 
-  it("uses apt on Linux", () => {
-    expect(installHint("podman", "linux")).toBe("apt install podman");
+  it("is package-manager-neutral on Linux (no distro assumption)", () => {
+    const hint = installHint("podman", "linux");
+    expect(hint).toContain("podman");
+    expect(hint).toContain("package manager");
+    expect(hint).not.toContain("apt install");
   });
 });
 
@@ -172,6 +176,28 @@ describe("doctor fix hints", () => {
     const results = await runDoctorChecks("podman");
     const git = results.find((r) => r.name === "git");
     expect(git?.fix).toBe(installHint("git"));
+  });
+});
+
+describe("buildCmakeCheck (dev-mode-only, openlock-e7q)", () => {
+  it("is absent outside dev mode regardless of whether cmake is installed", () => {
+    expect(buildCmakeCheck(false, true)).toEqual([]);
+    expect(buildCmakeCheck(false, false)).toEqual([]);
+  });
+
+  it("is present and passes in dev mode when cmake is installed", async () => {
+    const checks = buildCmakeCheck(true, true);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]?.name).toBe("cmake");
+    expect(await checks[0]?.test()).toBe(true);
+  });
+
+  it("is present and fails with an actionable, package-manager-neutral fix when cmake is missing", async () => {
+    const checks = buildCmakeCheck(true, false);
+    expect(checks).toHaveLength(1);
+    expect(await checks[0]?.test()).toBe(false);
+    expect(checks[0]?.fix).toContain("cmake");
+    expect(checks[0]?.fix).not.toContain("apt install");
   });
 });
 

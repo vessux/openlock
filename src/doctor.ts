@@ -26,11 +26,14 @@ function defaultReadSubuid(): string {
 
 const DOCKER_INSTALL_DOCS = "https://docs.docker.com/engine/install/";
 
-/** Platform-aware install command. Mac uses brew; Linux assumes apt and lets
- * non-Debian users substitute their own package manager. */
+/** Platform-aware install hint. macOS points at brew (a safe, near-universal
+ * assumption for Mac devs). Linux distros vary too much to guess a single
+ * package manager reliably (apt vs dnf vs pacman vs zypper vs apk, plus
+ * ID_LIKE chains) — a hint that guesses wrong is worse than one that doesn't
+ * guess, so Linux stays package-manager-neutral rather than hardcoding one. */
 export function installHint(pkg: string, platform: NodeJS.Platform = process.platform): string {
-  const pm = platform === "darwin" ? "brew" : "apt";
-  return `${pm} install ${pkg}`;
+  if (platform === "darwin") return `brew install ${pkg}`;
+  return `install ${pkg} via your distro's package manager (e.g. apt, dnf, pacman)`;
 }
 
 interface CheckOutcome {
@@ -397,6 +400,30 @@ export function buildSubuidCheck(
   ];
 }
 
+/** Dev-mode-only: building the gateway from source (`openshell-server` ->
+ * `openshell-prover` -> `z3-sys`, since the 2026-06 sync) invokes bundled-z3's
+ * CMake build. Without `cmake` on PATH the failure surfaces deep inside a long
+ * `cargo build` — other crates keep compiling first, so it reads as normal
+ * progress until it dies late with a cryptic "is cmake not installed?" — this
+ * check catches it up front instead. A released-binary (non-dev) install never
+ * builds anything, so the check is entirely absent outside dev mode.
+ *
+ * No separate C/C++ toolchain check: any dev-mode cargo build already needs a
+ * linker, so a working C compiler is exercised (and would already be failing
+ * doctor's `cargo`-adjacent build path) well before cmake becomes relevant —
+ * adding a dedicated check here would just be a second, less accurate probe
+ * for something already implied. */
+export function buildCmakeCheck(dev: boolean, hasCmake: boolean): Check[] {
+  if (!dev) return [];
+  return [
+    {
+      name: "cmake",
+      test: async () => hasCmake,
+      fix: `${installHint("cmake")} (required to build the gateway's bundled z3 dependency in dev mode)`,
+    },
+  ];
+}
+
 // A malformed config.yaml is reported separately by the "global config" check
 // below; don't let it crash doctor here too — just fall back to the
 // suggest-only default (matches network_auto_reload's documented default).
@@ -450,6 +477,7 @@ export async function runDoctorChecks(
             test: async () => commandExists("cargo"),
             fix: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
           },
+          ...buildCmakeCheck(dev, commandExists("cmake")),
           ...(isMac
             ? [
                 {

@@ -8,6 +8,20 @@ curl -fsSL https://raw.githubusercontent.com/vessux/openlock/main/install.sh | b
 
 Drops `openlock` into `~/.local/bin`. Set `OPENLOCK_INSTALL_DIR` to override. The fork binaries (gateway, supervisor, openshell CLI) are fetched lazily on first run into `~/.cache/openlock/bin/`.
 
+## Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vessux/openlock/main/uninstall.sh | bash
+```
+
+`install.sh` only drops a binary, but openlock lazily creates gateway state, sandbox containers, workspace volumes, and images that only `openlock` itself knows how to enumerate — so removal isn't just deleting the binary. `uninstall.sh` handles this by tearing down *through* `openlock` while it still exists, then removing the binary.
+
+By default it's conservative: stops the gateway, then **reports** everything else still on disk (sessions, config, credentials, images) with the exact command to remove each — nothing that could hold a credential or uncommitted work is touched unasked.
+
+The binary is removed last, and is deliberately **kept** when sessions or leftover images still need it — otherwise the report would be telling you to run `openlock clean --all` for resources it had just removed the tool for. Its `~/.cache/openlock` is kept alongside it, since that cache holds the fork binaries the CLI needs. The script says so explicitly, so a retained binary doesn't look like a failed uninstall; once nothing needs it, a re-run removes the binary and cache and reports a clean removal.
+
+Pass `--purge` to remove everything, including config, credentials, sandbox containers, and **workspace volumes**. Since a workspace volume can hold uncommitted work, `--purge` warns and asks for an explicit `[y/N]` confirmation whenever sessions still exist (mentioning `openlock clean --all --copy <dir>` as the salvage route); `--yes` skips the prompt for scripted use, and `--dry-run` prints the plan without changing anything.
+
 ## Prerequisites
 
 - [podman](https://podman.io) — `podman machine` started on macOS, or a reachable rootless socket on Linux (`systemctl --user enable --now podman.socket`)

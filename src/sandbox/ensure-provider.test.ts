@@ -179,18 +179,34 @@ describe("_ensureProviderForTests", () => {
       expect(update).toContain("ANTHROPIC_BEARER_TOKEN=2026-06-12T12:00:00Z");
 
       // refresh configure: NAME is positional (not --name), kebab strategy,
-      // material values, secret-material-key, and its OWN expires-at.
+      // client_id stays inline on --material (not secret), and its OWN
+      // expires-at.
       expect(configure?.[3]).toBe("anthropic");
       expect(configure).not.toContain("--name");
       expect(configure).toContain("--strategy");
       expect(configure?.[configure.indexOf("--strategy") + 1]).toBe("oauth2-refresh-token");
       expect(configure).toContain("--material");
       expect(configure).toContain("client_id=client-abc");
-      expect(configure).toContain("refresh_token=rt-secret");
-      expect(configure).toContain("--secret-material-key");
-      expect(configure?.[configure.indexOf("--secret-material-key") + 1]).toBe("refresh_token");
       expect(configure).toContain("--credential-expires-at");
       expect(configure).toContain("2026-06-12T12:00:00Z");
+
+      // The refresh token is secret and must NOT appear anywhere in argv —
+      // neither inline (`refresh_token=rt-secret`) nor as a bare value — and
+      // must NOT be marked via the now-redundant --secret-material-key (that
+      // flag is dropped; --secret-material-env auto-marks the key secret on
+      // the gateway side). It travels via --secret-material-env + env instead.
+      expect(configure).not.toContain("--secret-material-key");
+      expect(configure).not.toContain("refresh_token=rt-secret");
+      for (const arg of configure ?? []) {
+        expect(arg).not.toContain("rt-secret");
+      }
+      expect(configure).toContain("--secret-material-env");
+      const envFlagValue = configure?.[(configure?.indexOf("--secret-material-env") ?? -1) + 1];
+      expect(envFlagValue).toMatch(/^refresh_token=/);
+      const envVarName = envFlagValue?.split("=")[1];
+      expect(envVarName).toBeTruthy();
+      const configureEnv = m.envs[m.calls.indexOf(configure as string[])];
+      expect(configureEnv?.[envVarName as string]).toBe("rt-secret");
     });
 
     it("never clobbers when present: no create/update/refresh-configure", async () => {
