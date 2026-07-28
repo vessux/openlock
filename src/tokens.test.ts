@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -182,6 +182,65 @@ describe("v1 -> v2 migration", () => {
     readCredentials(path);
     const after = readFileSync(path, "utf-8");
     expect(after).toBe(before);
+  });
+});
+
+describe("v1 -> v2 migration safety (openlock-cjr: no silent destruction)", () => {
+  const legacyRaw = JSON.stringify({
+    token: "legacy-token",
+    created_at: "2026-04-01T00:00:00.000Z",
+  });
+
+  it("backs up the original V1 file content before truncating it", () => {
+    writeFileSync(path, legacyRaw, { mode: 0o600 });
+    readCredentials(path);
+    const backupPath = `${path}.v1.bak`;
+    expect(existsSync(backupPath)).toBe(true);
+    expect(readFileSync(backupPath, "utf-8")).toBe(legacyRaw);
+    // and the live file was still migrated to the empty v2 stub:
+    expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({ version: 2, providers: {} });
+  });
+
+  it("warns exactly once when migrating a legacy file, even across repeated reads", () => {
+    writeFileSync(path, legacyRaw, { mode: 0o600 });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      readCredentials(path);
+      readCredentials(path);
+      readCredentials(path);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("openlock login");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not touch or back up a normal v2 file", () => {
+    writeProvider(
+      "anthropic",
+      { type: "claude", credentials: { ANTHROPIC_AUTH_TOKEN: "x" }, created_at: "t" },
+      path,
+    );
+    const before = readFileSync(path, "utf-8");
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      readCredentials(path);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+    expect(readFileSync(path, "utf-8")).toBe(before);
+    expect(existsSync(`${path}.v1.bak`)).toBe(false);
+  });
+
+  it("hasAnyProvider is false right after a V1 migration (backup does not resurrect it)", () => {
+    writeFileSync(path, legacyRaw, { mode: 0o600 });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(hasAnyProvider(path)).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
