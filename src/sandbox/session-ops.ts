@@ -99,6 +99,10 @@ export async function reapIdleStaleSessions(deps: ReapDeps = {}): Promise<{
   const stop = deps.stop ?? stopSandbox;
 
   const rows = await classify();
+  // openlock-vtl audit: safe by construction against classification
+  // "unreachable" — "idle-stale" requires containerState === "running" to be
+  // reached at all (see classifySession), which "unreachable" can never
+  // satisfy, so an unreachable session is never a reap target.
   const targets = rows.filter((r) => r.classification === "idle-stale");
   if (targets.length === 0) return { reaped: [], durationMs: 0 };
   console.log(

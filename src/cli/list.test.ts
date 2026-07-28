@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { gatewayJsonForTest, renderGatewayHeaderForTest } from "./list";
+import type { Classification } from "../sandbox/reap";
+import { classificationFlag, gatewayJsonForTest, renderGatewayHeaderForTest } from "./list";
 
 describe("renderGatewayHeader", () => {
   it("renders stopped gateway with consistent column positions", () => {
@@ -52,5 +53,40 @@ describe("gatewayJson", () => {
       rssKb: null,
       uptimeMs: null,
     });
+  });
+});
+
+describe("classificationFlag (openlock-vtl: 'openlock list' must show unreachable honestly)", () => {
+  it("renders 'unreachable' as its own distinct flag, NOT the 'missing' one", () => {
+    const flag = classificationFlag("unreachable");
+    expect(flag).toBe("(gateway unreachable)");
+    expect(flag).not.toBe("(no container)");
+  });
+
+  it("preserves the existing flags for the pre-existing classifications", () => {
+    expect(classificationFlag("idle-stale")).toBe("(idle, reapable)");
+    expect(classificationFlag("attached")).toBe("(attached)");
+    expect(classificationFlag("missing")).toBe("(no container)");
+    expect(classificationFlag("idle-recent")).toBe("");
+    expect(classificationFlag("exited")).toBe("");
+  });
+
+  // Compiler-enforced exhaustiveness (openlock-vtl): if Classification is
+  // ever widened again without updating this function, TypeScript fails the
+  // build on the `never` branch — this test just documents that the switch
+  // covers every current member, so a passing suite plus a passing
+  // typecheck together are the real guarantee.
+  it("covers every current Classification member", () => {
+    const all: Classification[] = [
+      "attached",
+      "idle-recent",
+      "idle-stale",
+      "exited",
+      "missing",
+      "unreachable",
+    ];
+    for (const c of all) {
+      expect(() => classificationFlag(c)).not.toThrow();
+    }
   });
 });

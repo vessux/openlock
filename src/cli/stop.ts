@@ -23,6 +23,13 @@ export async function stopCmd(args: string[]): Promise<number> {
   if (values.all === true || values.stale === true) {
     const stale = values.stale === true;
     const rows = await classifyAll();
+    // openlock-vtl audit: safe by construction against classification
+    // "unreachable" without any extra check needed here — --stale only ever
+    // targets "idle-stale" (which requires containerState === "running" to
+    // be reached at all, see classifySession) and --all's raw-state check
+    // requires containerState === "running" directly; "unreachable" can
+    // never satisfy either, so a session we couldn't confirm the state of is
+    // never targeted.
     const targets = rows.filter((r) =>
       stale
         ? r.classification === "idle-stale"

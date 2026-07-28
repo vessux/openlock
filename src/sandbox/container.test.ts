@@ -17,6 +17,7 @@ import {
   buildSandboxStopArgv,
   buildSandboxUploadArgv,
   formatSandboxExitedError,
+  getSandboxState,
   parseSandboxGetPhase,
   TETHER_STDIO,
   waitForSandboxReady,
@@ -265,11 +266,20 @@ describe("parseSandboxGetPhase", () => {
   it("returns 'stopped' for phase Stopped, distinct from Error", () => {
     expect(parseSandboxGetPhase('{"phase":"Stopped"}')).toBe("stopped");
   });
-  it("returns 'other' for every other real phase value", () => {
+  it("returns 'other' (keep polling) for phases that are legitimately still-coming-up or indeterminate", () => {
     expect(parseSandboxGetPhase('{"phase":"Provisioning"}')).toBe("other");
-    expect(parseSandboxGetPhase('{"phase":"Deleting"}')).toBe("other");
     expect(parseSandboxGetPhase('{"phase":"Unspecified"}')).toBe("other");
+    // Unknown deliberately stays "other" (openlock-ddd): the driver
+    // genuinely couldn't determine state, which isn't proof of death, so
+    // keep-polling remains the safe read.
     expect(parseSandboxGetPhase('{"phase":"Unknown"}')).toBe("other");
+  });
+  // openlock-ddd: Deleting is terminal (never reaches Ready) but not a
+  // failure — split out from "other" so waitForSandboxReady can fail fast
+  // with an accurate message instead of polling a doomed sandbox to the full
+  // timeout budget.
+  it("returns 'deleting' for phase Deleting, distinct from the keep-polling 'other' bucket", () => {
+    expect(parseSandboxGetPhase('{"phase":"Deleting"}')).toBe("deleting");
   });
   it("returns 'other' on unparseable or phase-less output rather than throwing", () => {
     expect(parseSandboxGetPhase("not json at all")).toBe("other");
@@ -340,16 +350,28 @@ describe("formatSandboxExitedError (GH #75 piece 4 — surface real supervisor f
 // per test rather than threaded through env vars: Bun.spawn snapshots
 // process.env at first use rather than re-reading live mutations, so a
 // `FAKE_PHASE`-style env var set in the test body is invisible to the child.
-function writeFakeOpenshellCli(phase: string, execExitCode = 1): string {
+// openlock-vtl: `getFailure` simulates `openshell sandbox get` itself
+// exiting non-zero (a transport-level failure, e.g. gateway down) rather
+// than succeeding with a phase — orthogonal to `phase`, which only applies
+// on the success path. Defaults to unset so every pre-existing call site
+// (which only ever exercises the success path) is unaffected.
+function writeFakeOpenshellCli(
+  phase: string,
+  execExitCode = 1,
+  getFailure?: { exitCode: number; stderr: string },
+): string {
   const dir = mkdtempSync(join(tmpdir(), "fake-openshell-"));
   const bin = join(dir, "openshell");
+  const getBranch =
+    getFailure !== undefined
+      ? [`  echo '${getFailure.stderr}' 1>&2`, `  exit ${getFailure.exitCode}`]
+      : [`  echo '{"phase":"${phase}"}'`, "  exit 0"];
   writeFileSync(
     bin,
     [
       "#!/bin/bash",
       'if [ "$1" = "sandbox" ] && [ "$2" = "get" ]; then',
-      `  echo '{"phase":"${phase}"}'`,
-      "  exit 0",
+      ...getBranch,
       'elif [ "$1" = "sandbox" ] && [ "$2" = "exec" ]; then',
       `  exit ${execExitCode}`,
       'elif [ "$1" = "logs" ]; then',
@@ -363,6 +385,51 @@ function writeFakeOpenshellCli(phase: string, execExitCode = 1): string {
   chmodSync(bin, 0o755);
   return bin;
 }
+
+describe("getSandboxState (openlock-vtl)", () => {
+  const savedBin = process.env.OPENLOCK_OPENSHELL_BIN;
+
+  afterEach(() => {
+    if (savedBin === undefined) delete process.env.OPENLOCK_OPENSHELL_BIN;
+    else process.env.OPENLOCK_OPENSHELL_BIN = savedBin;
+  });
+
+  it("maps a genuine not-found (NotFound in stderr) to 'missing'", async () => {
+    process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Ready", 1, {
+      exitCode: 1,
+      stderr: "Error: sandbox not found",
+    });
+    await expect(getSandboxState("sess")).resolves.toBe("missing");
+  });
+
+  it("maps a genuine not-found (NotFound spelled as the proto variant) to 'missing'", async () => {
+    process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Ready", 1, {
+      exitCode: 1,
+      stderr: "status: NotFound, message: no such sandbox",
+    });
+    await expect(getSandboxState("sess")).resolves.toBe("missing");
+  });
+
+  // The actual bug: a non-zero exit that is NOT a genuine not-found (a
+  // transport-level failure — gateway down, connection refused) must NOT
+  // collapse into "missing". Before the fix, getSandboxState mapped ANY
+  // non-zero exit to "missing" unconditionally, making a down gateway
+  // indistinguishable from a genuinely-absent sandbox.
+  it("maps a transport-level failure (connection refused, non-NotFound stderr) to 'unreachable', NOT 'missing'", async () => {
+    process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Ready", 1, {
+      exitCode: 1,
+      stderr: "Error: transport error: Connection refused (os error 61)",
+    });
+    const state = await getSandboxState("sess");
+    expect(state).toBe("unreachable");
+    expect(state).not.toBe("missing");
+  });
+
+  it("still maps a successful call through parseSandboxGetPhase (unaffected by the stderr path)", async () => {
+    process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Ready");
+    await expect(getSandboxState("sess")).resolves.toBe("running");
+  });
+});
 
 describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
   const savedBin = process.env.OPENLOCK_OPENSHELL_BIN;
@@ -390,6 +457,28 @@ describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
       await expect(assertSandboxNotExited("sess", { tolerateStopped: true })).rejects.toThrow(
         /exited during provisioning/,
       );
+    });
+
+    // openlock-ddd: Deleting is terminal (never reaches Ready) but the
+    // message must be specific — NOT the generic "exited during
+    // provisioning" formatSandboxExitedError produces for real failures.
+    it("fails fast with an accurate 'being deleted' message on phase Deleting", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Deleting");
+      await expect(assertSandboxNotExited("sess")).rejects.toThrow(/sess is being deleted/);
+      await expect(assertSandboxNotExited("sess")).rejects.not.toThrow(
+        /exited during provisioning/,
+      );
+    });
+
+    // openlock-vtl: "unreachable" is NOT a confirmed death — a transient
+    // transport hiccup mid-poll must not abort a wait that would otherwise
+    // succeed once the gateway answers again.
+    it("no-ops on 'unreachable' (transport failure), same as a merely-slow sandbox", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Ready", 1, {
+        exitCode: 1,
+        stderr: "Error: transport error: Connection refused (os error 61)",
+      });
+      await expect(assertSandboxNotExited("sess")).resolves.toBeUndefined();
     });
   });
 
@@ -426,12 +515,36 @@ describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
       expect(Date.now() - start).toBeLessThan(2000);
     });
 
+    // openlock-ddd: this is the actual bug — a sandbox racing a delete
+    // against this attach/create previously polled for the FULL timeout
+    // budget (60s default, 90s on resume) before reporting a generic "did
+    // not reach Ready state", instead of failing fast with the real,
+    // knowable cause.
+    it("fast-fails on Deleting with an accurate message, well before the timeout budget", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Deleting");
+      const start = Date.now();
+      await expect(waitForSandboxReady("sess", { timeoutMs: 5000 })).rejects.toThrow(
+        /sess is being deleted/,
+      );
+      expect(Date.now() - start).toBeLessThan(2000);
+    });
+
     // The final strict check must only ever escalate to a more specific
     // error, never mask a genuine "still provisioning, just slow" timeout —
     // a sandbox stuck in a live-but-not-Ready phase (never Stopped/Error/
-    // missing) must still fall through to the generic timeout.
-    it("still reports the generic timeout for a sandbox that is merely slow (never Stopped/dead)", async () => {
+    // missing/Deleting) must still fall through to the generic timeout.
+    // Provisioning and Unknown are both real phases that collapse to
+    // ContainerState "other" and must both keep polling rather than fail
+    // fast (openlock-ddd: Unknown deliberately gets no special treatment).
+    it("still reports the generic timeout for a sandbox that is merely slow (Provisioning, never Stopped/dead)", async () => {
       process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Provisioning");
+      await expect(waitForSandboxReady("sess", { timeoutMs: 700 })).rejects.toThrow(
+        /did not reach Ready state within 700ms/,
+      );
+    });
+
+    it("still reports the generic timeout for phase Unknown (driver couldn't determine state, not proof of death)", async () => {
+      process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Unknown");
       await expect(waitForSandboxReady("sess", { timeoutMs: 700 })).rejects.toThrow(
         /did not reach Ready state within 700ms/,
       );
