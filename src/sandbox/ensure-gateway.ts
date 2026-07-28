@@ -11,13 +11,21 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type Runtime, resolveRuntime } from "../runtime";
+import { parseRuntime, type Runtime, resolveRuntime } from "../runtime";
 import { ensureSupervisorImage } from "./build-supervisor-image";
 import { getGatewayBinary } from "./fork-binaries";
 import { pidAlive } from "./proc";
 
 const STATE_DIR = join(process.env.HOME || homedir(), ".local", "state", "openlock");
 const PID_FILE = join(STATE_DIR, "gateway.pid");
+// Driver the RUNNING gateway was started with (openlock-ox1). Written
+// alongside PID_FILE at every gateway start; absent means either the
+// gateway isn't running or (if it IS running) it was started by a version
+// of openlock that predates this file — either way, "unknown", never a
+// mismatch. Deliberately a separate file rather than folding into PID_FILE
+// (a bare integer read/relied on in several places) to keep this additive
+// and not touch that format.
+const DRIVER_FILE = join(STATE_DIR, "gateway.driver");
 const LOG_FILE = join(STATE_DIR, "gateway.log");
 // gateway.log is appended to forever across gateway restarts (openlock-lai:
 // observed at 100MB, unrotated). Rotate at (re)start time — the only moment
@@ -46,11 +54,31 @@ function readPid(): number | null {
   return Number.isNaN(pid) ? null : pid;
 }
 
+/** Driver recorded for the currently-running gateway (openlock-ox1), or
+ * `undefined` when the file is absent/unparseable — treated as "unknown",
+ * never coerced to a guess. See DRIVER_FILE's own comment for why absence
+ * is expected and safe (legacy gateway, or simply not running). */
+function readRunningDriver(): Runtime | undefined {
+  if (!existsSync(DRIVER_FILE)) return undefined;
+  let raw: string;
+  try {
+    raw = readFileSync(DRIVER_FILE, "utf-8").trim();
+  } catch {
+    return undefined;
+  }
+  return parseRuntime(raw) ?? undefined;
+}
+
 export interface GatewayStatus {
   running: boolean;
   pid: number | null;
   rssKb?: number;
   uptimeMs?: number;
+  /** Driver ('podman'|'docker') the RUNNING gateway was started with
+   * (openlock-ox1). `undefined` when not running, OR when running but
+   * started before driver-recording existed — both are "can't tell", never
+   * a false mismatch signal. See findGatewayDriverMismatch. */
+  driver?: Runtime;
 }
 
 export function readGatewayRssKb(pid: number): number | null {
@@ -86,7 +114,8 @@ export function gatewayStatus(): GatewayStatus {
   } catch {
     uptimeMs = undefined;
   }
-  return { running: true, pid, rssKb, uptimeMs };
+  const driver = readRunningDriver();
+  return { running: true, pid, rssKb, uptimeMs, driver };
 }
 
 function registerGatewayMetadata(): void {
@@ -284,10 +313,62 @@ export function spawnDaemonToLog(args: string[], cwd: string, logPath: string): 
   }
 }
 
+/**
+ * Whether starting a gateway for `requestedRuntime` would silently reuse an
+ * ALREADY-RUNNING gateway started with a DIFFERENT driver (openlock-ox1).
+ * Returns the mismatched running driver (for the error message), or `null`
+ * when there's no mismatch — including when `runningDriver` is `undefined`
+ * (a gateway started before driver-recording existed, or any other reason
+ * we can't tell). Same "absent means unknown, never a false positive"
+ * discipline as openlock-04t's findUnattachedCredentialBundles: an unknown
+ * driver must never be treated as either "matches" or "definitely wrong".
+ *
+ * Only meaningful when a gateway IS running — callers gate on that
+ * themselves (this function has no opinion on liveness).
+ */
+export function findGatewayDriverMismatch(
+  requestedRuntime: Runtime,
+  runningDriver: Runtime | undefined,
+): Runtime | null {
+  if (runningDriver === undefined) return null;
+  return runningDriver !== requestedRuntime ? runningDriver : null;
+}
+
+/**
+ * Error message for a detected driver mismatch (openlock-ox1) — names BOTH
+ * drivers (the running one and the one actually requested) and points at
+ * the fix. Deliberately does NOT offer to restart the gateway automatically:
+ * that would tear down every sandbox belonging to the currently-running
+ * driver out from under whoever created them, for a request that never
+ * asked for that. Hard error (not a warning) because the class of failure —
+ * silently ignoring an explicit user directive — is the same one this
+ * project already refuses for provider selection (no inference, no magic
+ * fallback: explicit or error), and unlike credential-bundle drift
+ * (openlock-04t, which warns) there is no "still works, just missing one
+ * thing" reading here: the ENTIRE sandbox would silently run on the wrong
+ * driver.
+ */
+export function formatGatewayDriverMismatchError(
+  requestedRuntime: Runtime,
+  runningDriver: Runtime,
+): string {
+  return (
+    `Gateway is running with driver '${runningDriver}', but '${requestedRuntime}' was requested ` +
+    "(OPENLOCK_RUNTIME env var or config default_runtime). Run `openlock gateway stop` first, then " +
+    `retry — the gateway is not restarted automatically here, since that would tear down any sandboxes ` +
+    `still running under the '${runningDriver}' driver.`
+  );
+}
+
 export async function startGateway(): Promise<void> {
   const runtime = await resolveRuntime();
-  const { running, pid } = gatewayStatus();
+  const { running, pid, driver } = gatewayStatus();
   if (running) {
+    const mismatchedDriver = findGatewayDriverMismatch(runtime, driver);
+    if (mismatchedDriver !== null) {
+      console.error(formatGatewayDriverMismatchError(runtime, mismatchedDriver));
+      process.exit(1);
+    }
     console.log(`Gateway already running (pid ${pid})`);
     return;
   }
@@ -341,6 +422,7 @@ export async function startGateway(): Promise<void> {
   const { pid: gwPid } = spawnDaemonToLog(args, STATE_DIR, LOG_FILE);
 
   writeFileSync(PID_FILE, String(gwPid));
+  writeFileSync(DRIVER_FILE, runtime);
   console.log(`Gateway starting (pid ${gwPid}), log: ${LOG_FILE}`);
 
   const deadline = Date.now() + 30_000;
@@ -474,5 +556,6 @@ export function stopGateway(): void {
   }
   process.kill(pid, "SIGTERM");
   if (existsSync(PID_FILE)) unlinkSync(PID_FILE);
+  if (existsSync(DRIVER_FILE)) unlinkSync(DRIVER_FILE);
   console.log(`Gateway stopped (pid ${pid}).`);
 }

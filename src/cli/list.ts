@@ -18,6 +18,11 @@ interface GatewayJson {
   pid: number | null;
   rssKb: number | null;
   uptimeMs: number | null;
+  // openlock-ox1: the active driver is otherwise invisible in every status
+  // surface, which is half the reason a driver mismatch went unnoticed.
+  // null when not running, or when running but the driver wasn't recorded
+  // (legacy gateway, pre-dating this field).
+  driver: string | null;
 }
 
 function gatewayJson(status: GatewayStatus): GatewayJson {
@@ -27,19 +32,21 @@ function gatewayJson(status: GatewayStatus): GatewayJson {
     pid: status.pid,
     rssKb: status.rssKb ?? null,
     uptimeMs: status.uptimeMs ?? null,
+    driver: status.driver ?? null,
   };
 }
 
 function renderGatewayHeader(status: GatewayStatus): string {
   if (!status.running) {
-    return `GATEWAY        STATE    PID    RSS       UPTIME\n${GATEWAY_NAME.padEnd(10)}     stopped  -      -         -\n`;
+    return `GATEWAY        STATE    PID    RSS       UPTIME    DRIVER\n${GATEWAY_NAME.padEnd(10)}     stopped  -      -         -         -\n`;
   }
   const pid = status.pid === null ? "-" : String(status.pid);
   const rss = status.rssKb === undefined ? "-" : formatBytes(status.rssKb);
   const uptime = status.uptimeMs === undefined ? "-" : formatDuration(status.uptimeMs);
+  const driver = status.driver ?? "-";
   return [
-    "GATEWAY        STATE    PID    RSS       UPTIME",
-    `${GATEWAY_NAME.padEnd(10)}     running  ${pid.padEnd(6)} ${rss.padEnd(9)} ${uptime}`,
+    "GATEWAY        STATE    PID    RSS       UPTIME    DRIVER",
+    `${GATEWAY_NAME.padEnd(10)}     running  ${pid.padEnd(6)} ${rss.padEnd(9)} ${uptime.padEnd(9)} ${driver}`,
     "",
   ].join("\n");
 }

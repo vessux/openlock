@@ -5,11 +5,11 @@ import { classificationFlag, gatewayJsonForTest, renderGatewayHeaderForTest } fr
 describe("renderGatewayHeader", () => {
   it("renders stopped gateway with consistent column positions", () => {
     const out = renderGatewayHeaderForTest({ running: false, pid: null });
-    expect(out).toContain("GATEWAY        STATE    PID    RSS       UPTIME");
+    expect(out).toContain("GATEWAY        STATE    PID    RSS       UPTIME    DRIVER");
     expect(out).toContain("stopped");
-    // UPTIME column starts at the same offset in header and data row
+    // DRIVER column starts at the same offset in header and data row
     const lines = out.split("\n");
-    expect(lines[0]!.indexOf("UPTIME")).toBe(lines[1]!.length - 1);
+    expect(lines[0]!.indexOf("DRIVER")).toBe(lines[1]!.length - 1);
   });
 
   it("renders running gateway with formatted rss and uptime", () => {
@@ -30,6 +30,27 @@ describe("renderGatewayHeader", () => {
     expect(out).toContain("999");
     expect(out).toContain(" -");
   });
+
+  // openlock-ox1: the active driver was invisible in every status surface —
+  // half the reason a podman/docker gateway mismatch went unnoticed.
+  describe("DRIVER column (openlock-ox1)", () => {
+    it("shows the recorded driver on a running gateway", () => {
+      const out = renderGatewayHeaderForTest({ running: true, pid: 1, driver: "docker" });
+      expect(out).toContain("docker");
+    });
+
+    it("shows '-' when running but the driver wasn't recorded (legacy gateway)", () => {
+      const out = renderGatewayHeaderForTest({ running: true, pid: 1 });
+      const dataLine = out.split("\n")[1]!;
+      expect(dataLine.trim().endsWith("-")).toBe(true);
+    });
+
+    it("shows '-' when the gateway is stopped", () => {
+      const out = renderGatewayHeaderForTest({ running: false, pid: null });
+      const dataLine = out.split("\n")[1]!;
+      expect(dataLine.trim().endsWith("-")).toBe(true);
+    });
+  });
 });
 
 describe("gatewayJson", () => {
@@ -41,6 +62,7 @@ describe("gatewayJson", () => {
       pid: 7,
       rssKb: null,
       uptimeMs: null,
+      driver: null,
     });
   });
 
@@ -52,7 +74,13 @@ describe("gatewayJson", () => {
       pid: null,
       rssKb: null,
       uptimeMs: null,
+      driver: null,
     });
+  });
+
+  it("surfaces the recorded driver (openlock-ox1)", () => {
+    const j = gatewayJsonForTest({ running: true, pid: 7, driver: "docker" });
+    expect(j.driver).toBe("docker");
   });
 });
 
