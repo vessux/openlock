@@ -21,7 +21,7 @@ jobs:
         with:
           bun-version: latest
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Lint (biome)
         run: bun run lint
@@ -57,7 +57,7 @@ jobs:
         with:
           bun-version: latest
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Install podman (5.x+, heredoc-aware)
         if: matrix.runtime == 'podman'
