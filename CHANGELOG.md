@@ -2,7 +2,7 @@
 
 ## v0.11.1
 
-Bugfix release on top of v0.11.0 (fork pin v0.8.1 → v0.8.2). Fixes a release-blocking credential-refresh regression introduced by the v0.8.0 fork sync, plus three post-release bugs affecting sandboxed Claude Code startup and gateway credential recovery.
+Bugfix release on top of v0.11.0 (fork pin v0.8.1 → v0.8.2). Fixes a release-blocking credential-refresh regression introduced by the v0.8.0 fork sync, plus four post-release bugs affecting sandboxed Claude Code startup and gateway credential recovery.
 
 ### Fixed
 
