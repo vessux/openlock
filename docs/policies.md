@@ -61,4 +61,9 @@ created. If you add a new `credentials:` entry to a project that already has a
 running session, re-running `openlock sandbox` re-provisions the credential in
 the gateway but does not attach the new provider to that existing sandbox —
 recreate the session (`openlock clean <name>` then `openlock sandbox`) so the
-new provider gets attached.
+new provider gets attached. `openlock sandbox` warns when it detects this
+(a declared `credentials:` bundle that was never attached to the session
+you're reattaching to) and points you at the same `openlock clean` + recreate
+fix; the warning only fires for sessions created after that detection
+shipped, so on an older session recreating is still the thing to check for
+first if a newly-added credential silently isn't reaching the sandbox.

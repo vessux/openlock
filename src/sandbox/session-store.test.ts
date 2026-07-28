@@ -227,3 +227,96 @@ describe("session-store harness field (backward compat)", () => {
     }
   });
 });
+
+describe("session-store attachedCredentialBundles field (openlock-04t)", () => {
+  let baseDir: string;
+
+  function setup(): string {
+    baseDir = mkdtempSync(join(tmpdir(), "openlock-session-credbundles-"));
+    return baseDir;
+  }
+
+  function cleanup(): void {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+
+  it("round-trips a present-and-empty array (genuinely nothing attached at create)", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-empty-bundles",
+        name: "sb-empty-bundles",
+        repoPath: "/some/repo",
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-07-28T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "claude_code",
+        attachedCredentialBundles: [],
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.attachedCredentialBundles).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("round-trips a non-empty recorded set", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-with-bundles",
+        name: "sb-with-bundles",
+        repoPath: "/some/repo",
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-07-28T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "claude_code",
+        attachedCredentialBundles: ["github", "npm"],
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.attachedCredentialBundles).toEqual(["github", "npm"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  // The migration-safety case (openlock-04t): a session written to disk
+  // before this field existed must read back with the field UNDEFINED, not
+  // silently coerced to `[]` — undefined is what tells reattach's drift
+  // check "unknown, can't compare, don't warn", whereas `[]` would be read
+  // as "genuinely nothing was ever attached" and flag every declared bundle
+  // as unattached on the very first reattach after this feature ships.
+  it("legacy record with the field entirely absent reads back as undefined, NOT []", () => {
+    setup();
+    try {
+      const id = "legacy-no-bundles-field";
+      mkdirSync(join(baseDir, id), { recursive: true });
+      writeFileSync(
+        join(baseDir, id, "meta.json"),
+        JSON.stringify({
+          id,
+          name: "sb-legacy-credbundles",
+          repoPath: "/some/repo",
+          image: "openlock-core",
+          policy: "default",
+          createdAt: "2026-05-01T00:00:00Z",
+          lastAttachedAt: null,
+          attachedPid: null,
+          harness: "claude_code",
+          // no attachedCredentialBundles key at all — pre-dates this feature.
+        }),
+      );
+      const loaded = loadSession(baseDir, id);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.attachedCredentialBundles).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+});

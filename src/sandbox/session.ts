@@ -31,6 +31,7 @@ import { resolveCredentialValues } from "./credentials";
 import {
   computeBuildInputsHashFromFiles,
   decideReattachAction,
+  findUnattachedCredentialBundles,
   type ReattachAction,
 } from "./drift";
 import { startGateway, stopGateway } from "./ensure-gateway";
@@ -167,6 +168,57 @@ export function stageProviderSandboxFiles(staging: string, files: readonly Sandb
   }
 }
 
+/**
+ * Bundle names to attach to a NEW sandbox's SandboxSpec, and the same ground
+ * truth recorded into `SessionMeta.attachedCredentialBundles` (openlock-04t)
+ * so a later reattach can detect a `credentials:` bundle that was declared
+ * AFTER create and therefore never actually attached (see
+ * drift.ts findUnattachedCredentialBundles). Kept as its own pure function,
+ * used for BOTH the create-time attach list and the recorded meta, so the
+ * two can never independently drift apart from what was actually declared.
+ */
+export function attachedCredentialBundleNames(credentials: readonly CredentialBundle[]): string[] {
+  return credentials.map((b) => b.name);
+}
+
+/**
+ * Warn (openlock-04t) — loudly, on every reattach until the session is
+ * recreated, matching decideReattachAction's "warn-stale" precedent rather
+ * than hard-erroring (informing over refusing for a documented, non-
+ * destructive risk) — when a declared `credentials:` bundle was never
+ * attached to THIS sandbox's SandboxSpec at create time. reattachSession's
+ * own re-provision loop still creates/updates the bundle's GATEWAY-side
+ * provider record regardless, which succeeds and leaves `openlock validate`
+ * seeing nothing wrong — exactly the silent failure this surfaces:
+ * cred_inject for an unattached bundle fails closed at egress with no other
+ * openlock-side signal. Delegates the actual comparison to
+ * findUnattachedCredentialBundles, which treats an absent (legacy,
+ * pre-dating this field) recorded set as "can't compare" — so a session
+ * created before this feature shipped never gets a spurious first-reattach
+ * warning. Exported (and kept side-effect-only, no branching returned) so
+ * the message shape is independently testable without needing reattachSession
+ * itself to be exported/injectable.
+ */
+export function warnOnUnattachedCredentialBundles(
+  sessionName: string,
+  declared: readonly CredentialBundle[],
+  recordedAttached: readonly string[] | undefined,
+): void {
+  const unattached = findUnattachedCredentialBundles(
+    declared.map((b) => b.name),
+    recordedAttached,
+  );
+  if (unattached.length === 0) return;
+  const plural = unattached.length !== 1;
+  console.warn(
+    `openlock: credential bundle${plural ? "s" : ""} ${unattached.join(", ")} ` +
+      `${plural ? "are" : "is"} declared in .openlock/config.yaml but ${plural ? "were" : "was"} never attached ` +
+      `to sandbox "${sessionName}" — providers attach only at sandbox CREATE time, so cred_inject for ` +
+      `${plural ? "them" : "it"} will fail closed at egress. Run \`openlock clean ${sessionName}\` and re-create ` +
+      "the sandbox to pick up the new credential.",
+  );
+}
+
 /** POSIX single-quote a value for safe embedding in a `bash -c` string. */
 function shq(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -225,11 +277,10 @@ async function createSession(
   await startGateway();
   await ensureProvider(providerId);
 
-  const attachProviders: string[] = [];
+  const attachProviders = attachedCredentialBundleNames(resolved.credentials);
   for (const bundle of resolved.credentials) {
     const values = resolveCredentialValues(bundle, process.env);
     await ensureGenericProvider(bundle.name, values);
-    attachProviders.push(bundle.name);
   }
 
   const imageTag = await buildSandboxImage(join(projectPath, ".openlock"), rebuild);
@@ -332,6 +383,11 @@ async function createSession(
       attachedPid: null,
       harness,
       buildInputsHash: sessionBuildInputsHash(projectPath, resolved),
+      // openlock-04t: the ground truth reattach compares the currently-
+      // declared `credentials:` bundle set against. Recorded here (not
+      // derived from `resolved.credentials` on reattach) because attach only
+      // ever happens at create — this IS what actually got attached.
+      attachedCredentialBundles: attachProviders,
     };
     saveSession(sessionsDir(), meta);
 
@@ -628,6 +684,9 @@ async function reattachSession(
     console.log(`Attaching to running session ${m.name}...`);
   }
   await ensureProvider(providerId);
+  // openlock-04t: see warnOnUnattachedCredentialBundles for the full
+  // reasoning (silent-failure surface, warn-not-error, legacy-safety).
+  warnOnUnattachedCredentialBundles(m.name, credentials, m.attachedCredentialBundles);
   // Re-provision (not re-attach — the sandbox's --provider set is fixed at
   // create) each declared bundle, since the gateway may have restarted since
   // this session was created and lost its provider records.
