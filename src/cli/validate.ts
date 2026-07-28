@@ -12,22 +12,27 @@ export const flagSchema = {
 } as const satisfies ParseArgsOptionsConfig;
 
 const BASE_FILE_ORDER: ConfigFile[] = ["config.yaml", "policy.yaml"];
-const SEVERITY_ORDER: Severity[] = ["error", "filesystem"];
+const SEVERITY_ORDER: Severity[] = ["error", "filesystem", "warning"];
+// Non-"error" severities get a bracketed tag prefix; "error" (the common
+// case) stays untagged to match the pre-existing output shape.
+const SEVERITY_TAGS: Partial<Record<Severity, string>> = {
+  filesystem: "[fs] ",
+  warning: "[warn] ",
+};
+
+function renderIssue(issue: Issue): string[] {
+  const loc = issue.path ? `${issue.path}: ` : "";
+  const tag = SEVERITY_TAGS[issue.severity] ?? "";
+  const lines = [`    ${tag}${loc}${issue.message}`];
+  if (issue.fix) lines.push(`      fix: ${issue.fix}`);
+  return lines;
+}
 
 function renderFile(file: ConfigFile, issues: Issue[]): string[] {
-  const lines: string[] = [];
-  if (issues.length === 0) {
-    lines.push(`  ${file}: ok`);
-    return lines;
-  }
-  lines.push(`  ${file}:`);
+  if (issues.length === 0) return [`  ${file}: ok`];
+  const lines: string[] = [`  ${file}:`];
   for (const sev of SEVERITY_ORDER) {
-    for (const issue of issues.filter((i) => i.severity === sev)) {
-      const loc = issue.path ? `${issue.path}: ` : "";
-      const tag = sev === "filesystem" ? "[fs] " : "";
-      lines.push(`    ${tag}${loc}${issue.message}`);
-      if (issue.fix) lines.push(`      fix: ${issue.fix}`);
-    }
+    for (const issue of issues.filter((i) => i.severity === sev)) lines.push(...renderIssue(issue));
   }
   return lines;
 }

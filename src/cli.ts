@@ -55,7 +55,20 @@ Common flags:
 function main(): void {
   const args = process.argv.slice(2);
 
-  if (args.includes("--version") || args.includes("-v") || args[0] === "version") {
+  // Global flags (--version/-v, --print-base-tag, and --help/-h below) are
+  // only recognized before the first `--` separator. `exec`/`shell` use `--`
+  // to mark "everything after this belongs to the exec'd command inside the
+  // sandbox", so a naive `args.includes(...)` scan over the whole argv would
+  // hijack e.g. `openlock exec X -- rm -v file` or `-- ssh -v host` — printing
+  // openlock's OWN version and exiting 0 without ever running the command
+  // (openlock-j9d). Restricting the scan to the pre-`--` prefix preserves
+  // --version/--print-base-tag working anywhere in openlock's own invocation
+  // (per the "Common flags" usage text) while never looking past a `--` that
+  // belongs to someone else.
+  const sepIdx = args.indexOf("--");
+  const globalArgs = sepIdx === -1 ? args : args.slice(0, sepIdx);
+
+  if (globalArgs.includes("--version") || globalArgs.includes("-v") || args[0] === "version") {
     // OPENLOCK_BUILD_SHA is substituted at compile time via `bun build --define`
     // (see .github/workflows/release.yml). Absent for local `bun run`, where
     // `typeof` on the undeclared identifier safely yields "undefined".
@@ -64,7 +77,7 @@ function main(): void {
     process.exit(0);
   }
 
-  if (args.includes("--print-base-tag")) {
+  if (globalArgs.includes("--print-base-tag")) {
     console.log(computeBaseTag(BASE_CONTAINERFILE));
     process.exit(0);
   }

@@ -1,4 +1,5 @@
 import { PROVIDER_IDS, PROVIDERS } from "../providers/registry";
+import { HARNESSES } from "../sandbox/harness";
 import type { ConfigFile, Issue } from "./types";
 
 interface ManifestLike {
@@ -6,6 +7,7 @@ interface ManifestLike {
 }
 
 interface PolicyEndpointLike {
+  host?: string;
   cred_inject?: { inject?: { from_credential?: string }[] };
 }
 
@@ -67,6 +69,97 @@ export function checkCredentialsSupplied(manifest: ManifestLike, policy: PolicyL
   for (const [groupKey, group] of Object.entries(policy.network_policies ?? {})) {
     (group.endpoints ?? []).forEach((endpoint, i) => {
       checkEndpoint(groupKey, i, endpoint, supplied, seen, issues);
+    });
+  }
+  return issues;
+}
+
+function endpointCredInjects(endpoint: PolicyEndpointLike): boolean {
+  return (endpoint.cred_inject?.inject?.length ?? 0) > 0;
+}
+
+/** Every host any registered provider's `policyEndpoints()` (across every
+ * harness) emits WITH a `cred_inject` block — i.e. a host the provider itself
+ * considers credential-bearing (e.g. api.anthropic.com, platform.claude.com,
+ * openrouter.ai). Harness is ignored by the current provider implementations,
+ * but iterating every harness keeps this correct if that ever changes rather
+ * than assuming the implementation detail. */
+function knownProviderCredentialHosts(): Set<string> {
+  const hosts = new Set<string>();
+  for (const id of PROVIDER_IDS) {
+    for (const harness of HARNESSES) {
+      for (const ep of PROVIDERS[id].policyEndpoints(harness)) {
+        if (ep.cred_inject) hosts.add(ep.host);
+      }
+    }
+  }
+  return hosts;
+}
+
+function uninjectedHostIssue(
+  groupKey: string,
+  endpointIndex: number,
+  host: string,
+  reason: string,
+): Issue {
+  return {
+    file: "policy.yaml",
+    severity: "warning",
+    path: `network_policies.${groupKey}.endpoints[${endpointIndex}].cred_inject`,
+    message:
+      `endpoint for host "${host}" in network_policies.${groupKey} allows traffic but declares no ` +
+      `cred_inject, even though ${reason}. Without cred_inject, the sandbox's PLACEHOLDER credential ` +
+      `is forwarded verbatim; the real service typically answers 401/403, which agent harnesses treat ` +
+      `as fatal — strictly worse than denying the connection.`,
+    fix: `add a cred_inject block to this endpoint (mirror the other endpoint for ${host}, or the provider's policyEndpoints), or remove/scope down the host if it is genuinely meant to stay unauthenticated`,
+  };
+}
+
+/** The reverse of checkCredentialsSupplied: cred_inject is a per-endpoint
+ * field (sibling of `rules`, NOT inherited across hosts or endpoints), so
+ * adding a new endpoint to unblock a connection error can silently forward
+ * the in-sandbox placeholder credential to a host that actually requires
+ * auth. Warns (does not hard-error, since both signals below are heuristic —
+ * "another endpoint in this group injects for this host" and "this host is a
+ * known provider credential domain" — rather than a structural certainty like
+ * an unresolvable `from_credential` name) when an endpoint allows a host that
+ * either (a) another endpoint in the SAME network_policy group cred_injects,
+ * or (b) matches a known provider's credential-bearing host, while declaring
+ * no cred_inject of its own. This exact mistake shipped in a release
+ * (openlock-z08) and caused a live 401 (verified 2026-07-27): a
+ * platform.claude.com endpoint allowing GET/POST /** with no cred_inject
+ * passed `openlock validate` clean. */
+export function checkUninjectedCredentialHost(policy: PolicyLike): Issue[] {
+  const knownHosts = knownProviderCredentialHosts();
+  const issues: Issue[] = [];
+  for (const [groupKey, group] of Object.entries(policy.network_policies ?? {})) {
+    const endpoints = group.endpoints ?? [];
+    const injectedHostsInGroup = new Set<string>();
+    for (const ep of endpoints) {
+      if (ep.host && endpointCredInjects(ep)) injectedHostsInGroup.add(ep.host);
+    }
+    endpoints.forEach((endpoint, i) => {
+      const host = endpoint.host;
+      if (!host || endpointCredInjects(endpoint)) return;
+      if (injectedHostsInGroup.has(host)) {
+        issues.push(
+          uninjectedHostIssue(
+            groupKey,
+            i,
+            host,
+            `another endpoint in this network_policy already injects a credential for it`,
+          ),
+        );
+      } else if (knownHosts.has(host)) {
+        issues.push(
+          uninjectedHostIssue(
+            groupKey,
+            i,
+            host,
+            `it is a known credential-bearing provider endpoint`,
+          ),
+        );
+      }
     });
   }
   return issues;

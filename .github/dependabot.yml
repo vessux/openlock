@@ -17,6 +17,17 @@ updates:
         patterns:
           - "@types/*"
           - "bun-types"
+    ignore:
+      # js-yaml 5.x changed its module shape (no default export in the ESM
+      # build) and `load()` now throws on empty input instead of returning
+      # undefined — both are real breaking changes for openlock, not just a
+      # version bump. See openlock-n2v: migration attempted 2026-07-28 and
+      # reverted (full test gate failed: src/global-config/index.ts's
+      # empty-global-config path relies on the old load("") -> undefined
+      # behavior). Re-attempt only as a deliberate migration, not via
+      # dependabot auto-merge.
+      - dependency-name: "js-yaml"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
