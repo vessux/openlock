@@ -49,8 +49,48 @@ function isLegacyV1(obj: Record<string, unknown>): obj is { token: string; creat
 // credential — so we drop it and surface an empty file, prompting a fresh
 // `openlock login` through the new OAuth flow. We still bump the file to V2 on
 // disk so the stale single-token shape stops being re-parsed every read.
-function migrateV1(_legacy: { token: string; created_at?: string }): CredentialsFileV2 {
-  return emptyFile();
+//
+// openlock-cjr: this used to truncate the V1 file with no backup and no
+// notice — a getter-shaped function (readCredentials, called even by purely
+// informational reads like `openlock doctor`) silently destroying credential
+// material. We chose (a) back-up-then-warn over (b) leave-untouched: (b)
+// re-detects V1 on EVERY future read forever (nothing on disk ever changes),
+// so a one-time warning would need separate persisted state anyway — which is
+// itself a mutation, defeating the "don't mutate in the getter" motivation for
+// (b) in the first place. (a) already mutates once (bumping to V2, as before)
+// so the migration is naturally one-time: once the file reads as V2,
+// isLegacyV1 is false on every later read, in this or any later process.
+function backupPathFor(path: string): string {
+  return `${path}.v1.bak`;
+}
+
+/** Preserve the original V1 bytes before the destructive write, and verify the
+ * backup landed correctly BEFORE touching the original — never truncate on
+ * the strength of an unverified backup. Throws (aborting the migration, the
+ * original file left untouched) if the backup can't be written or doesn't
+ * read back identically — e.g. disk full — rather than proceeding anyway. */
+function backupLegacyFile(path: string, raw: string): void {
+  const backup = backupPathFor(path);
+  writeFileSync(backup, raw, { mode: 0o600 });
+  const verify = readFileSync(backup, "utf-8");
+  if (verify !== raw) {
+    throw new Error(
+      `openlock: could not verify the legacy credentials backup at ${backup} — aborting the ` +
+        `migration to avoid losing data. ${path} was left untouched.`,
+    );
+  }
+}
+
+function migrateLegacyV1(path: string, raw: string): CredentialsFileV2 {
+  backupLegacyFile(path, raw);
+  const migrated = emptyFile();
+  writeAtomic(path, migrated);
+  console.warn(
+    `openlock: found a legacy v1 credentials file at ${path}. Its setup-token bearer can't be ` +
+      `used in the current OAuth-subscription mode, so it has been cleared; your original file ` +
+      `was preserved at ${backupPathFor(path)}. Run \`openlock login\` to set up credentials again.`,
+  );
+  return migrated;
 }
 
 function writeAtomic(path: string, data: CredentialsFileV2): void {
@@ -63,9 +103,15 @@ function writeAtomic(path: string, data: CredentialsFileV2): void {
 
 export function readCredentials(path?: string): CredentialsFileV2 {
   const p = path ?? credentialsPath();
+  let raw: string;
+  try {
+    raw = readFileSync(p, "utf-8");
+  } catch {
+    return emptyFile();
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(p, "utf-8"));
+    parsed = JSON.parse(raw);
   } catch {
     return emptyFile();
   }
@@ -74,9 +120,7 @@ export function readCredentials(path?: string): CredentialsFileV2 {
   }
   const obj = parsed as Record<string, unknown>;
   if (isLegacyV1(obj)) {
-    const migrated = migrateV1(obj as { token: string; created_at?: string });
-    writeAtomic(p, migrated);
-    return migrated;
+    return migrateLegacyV1(p, raw);
   }
   if (obj.version !== 2 || typeof obj.providers !== "object" || obj.providers === null) {
     return emptyFile();

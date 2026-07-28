@@ -136,6 +136,13 @@ export function renderGatewayConfigToml(
       `signing_key_path = "${tomlEscape(opts.gatewayJwt.signingKeyPath)}"`,
       `public_key_path = "${tomlEscape(opts.gatewayJwt.publicKeyPath)}"`,
       `kid_path = "${tomlEscape(opts.gatewayJwt.kidPath)}"`,
+      // openlock-4b1 / GH #75: never-expire local sandbox JWTs is a FORK
+      // DEFAULT (default_sandbox_token_ttl_secs() in openshell-core's
+      // GatewayJwtConfig, currently 0), not something openlock has ever
+      // pinned. We depend on 0 (a sandbox stopped >1h must still resume
+      // without ExpiredSignature) — pin it explicitly so a future upstream
+      // sync flipping that default can't silently resurrect the bug.
+      "ttl_secs = 0",
       "",
     );
   }

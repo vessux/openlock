@@ -73,6 +73,23 @@ describe("renderGatewayConfigToml", () => {
     expect(out).toContain("allow_unauthenticated_users = true");
   });
 
+  it("pins ttl_secs=0 (openlock-4b1: never-expire local sandbox JWT is a fork default we don't inherit)", () => {
+    // default_sandbox_token_ttl_secs() in openshell-core's GatewayJwtConfig
+    // defaults to 0 today, but that's a fork default we've never asserted —
+    // pin it explicitly so a future upstream sync flipping the default can't
+    // silently resurrect the GH #75 JWT-expiry-on-resume bug.
+    const out = renderGatewayConfigToml("podman", {
+      supervisorImage: "img:latest",
+      podmanSocket: "/run/podman/podman.sock",
+      gatewayJwt: {
+        signingKeyPath: "/s/jwt/signing.pem",
+        publicKeyPath: "/s/jwt/public.pem",
+        kidPath: "/s/jwt/kid",
+      },
+    });
+    expect(out).toContain("ttl_secs = 0");
+  });
+
   it("omits gateway_jwt and auth blocks when gatewayJwt absent", () => {
     const out = renderGatewayConfigToml("podman", {
       supervisorImage: "img:latest",
