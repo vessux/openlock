@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { checkCredentialNameCollisions, checkCredentialsSupplied } from "./cross-check";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import yaml from "js-yaml";
+import {
+  checkCredentialNameCollisions,
+  checkCredentialsSupplied,
+  checkUninjectedCredentialHost,
+} from "./cross-check";
 
 const policyInjecting = (cred: string) => ({
   version: 1,
@@ -125,5 +132,86 @@ describe("checkCredentialNameCollisions", () => {
       credentials: [{ name: "github", values: { GITHUB_TOKEN: { from_env: "GITHUB_TOKEN" } } }],
     });
     expect(issues).toEqual([]);
+  });
+});
+
+describe("checkUninjectedCredentialHost", () => {
+  test("warns when an endpoint allows a known provider credential host with no cred_inject (the shipped GH #79-class 401 footgun, verified live 2026-07-27)", () => {
+    const policy = {
+      network_policies: {
+        claude_code: {
+          endpoints: [
+            { host: "platform.claude.com", rules: [{ allow: { method: "GET", path: "/**" } }] },
+          ],
+        },
+      },
+    };
+    const issues = checkUninjectedCredentialHost(policy);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ file: "policy.yaml", severity: "warning" });
+    expect(issues[0]?.message).toContain("platform.claude.com");
+    expect(issues[0]?.message).toContain("claude_code");
+  });
+
+  test("warns when another endpoint in the same network_policy cred_injects the same host but this one doesn't", () => {
+    const policy = {
+      network_policies: {
+        g: {
+          endpoints: [
+            {
+              host: "api.example.com",
+              cred_inject: { inject: [{ header: "Authorization", from_credential: "X_TOKEN" }] },
+            },
+            { host: "api.example.com", rules: [{ allow: { method: "GET", path: "/other" } }] },
+          ],
+        },
+      },
+    };
+    const issues = checkUninjectedCredentialHost(policy);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toContain("endpoints[1]");
+  });
+
+  test("passes when the endpoint declares its own cred_inject", () => {
+    const policy = {
+      network_policies: {
+        claude_code: {
+          endpoints: [
+            {
+              host: "platform.claude.com",
+              cred_inject: {
+                inject: [{ header: "Authorization", from_credential: "ANTHROPIC_BEARER_TOKEN" }],
+              },
+            },
+          ],
+        },
+      },
+    };
+    expect(checkUninjectedCredentialHost(policy)).toEqual([]);
+  });
+
+  test("passes for a host that is neither a known provider domain nor cred_injected elsewhere in the group", () => {
+    const policy = {
+      network_policies: {
+        npm_packages: {
+          endpoints: [
+            { host: "registry.npmjs.org", rules: [{ allow: { method: "GET", path: "/**" } }] },
+          ],
+        },
+      },
+    };
+    expect(checkUninjectedCredentialHost(policy)).toEqual([]);
+  });
+
+  test("returns [] when policy has no network_policies at all", () => {
+    expect(checkUninjectedCredentialHost({})).toEqual([]);
+  });
+
+  test("the shipped default policy validates clean", () => {
+    const defaultPolicyPath = join(import.meta.dir, "../../policies/default.yaml");
+    const policy = yaml.load(readFileSync(defaultPolicyPath, "utf-8"));
+    expect(
+      checkUninjectedCredentialHost(policy as Parameters<typeof checkUninjectedCredentialHost>[0]),
+    ).toEqual([]);
   });
 });

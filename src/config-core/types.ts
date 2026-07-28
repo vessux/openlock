@@ -1,6 +1,10 @@
 import type { Harness } from "../sandbox/harness";
 
-export type Severity = "error" | "filesystem";
+/** "warning" is non-blocking (doesn't fail `openlock validate`'s exit code) —
+ * reserved for heuristic lints that name a real risk without being certain
+ * enough of a false-positive-free signal to justify erroring, per the project
+ * convention of informing over refusing documented-risk configurations. */
+export type Severity = "error" | "filesystem" | "warning";
 export type ConfigFile = "config.yaml" | "config.local.yaml" | "policy.yaml";
 
 export interface Issue {
