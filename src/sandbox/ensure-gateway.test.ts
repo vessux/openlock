@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   classifyProcNetTcpBind,
+  findGatewayDriverMismatch,
+  formatGatewayDriverMismatchError,
   readGatewayRssKb,
   renderGatewayConfigToml,
   rotateLogIfLarge,
@@ -333,5 +335,40 @@ describe("rotateLogIfLarge", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("findGatewayDriverMismatch (openlock-ox1)", () => {
+  it("no mismatch when the running driver matches the requested runtime", () => {
+    expect(findGatewayDriverMismatch("podman", "podman")).toBeNull();
+    expect(findGatewayDriverMismatch("docker", "docker")).toBeNull();
+  });
+
+  it("returns the running driver when it differs from the requested runtime", () => {
+    expect(findGatewayDriverMismatch("docker", "podman")).toBe("podman");
+    expect(findGatewayDriverMismatch("podman", "docker")).toBe("docker");
+  });
+
+  // Migration/legacy safety (same discipline as openlock-04t's
+  // findUnattachedCredentialBundles): a gateway started by a version of
+  // openlock that predates driver-recording has no recorded driver at all.
+  // undefined must NOT be read as "definitely mismatched" or "definitely
+  // matching" — it means unknown, so never error.
+  it("is never a mismatch when the running driver is undefined (legacy gateway, unknown)", () => {
+    expect(findGatewayDriverMismatch("docker", undefined)).toBeNull();
+    expect(findGatewayDriverMismatch("podman", undefined)).toBeNull();
+  });
+});
+
+describe("formatGatewayDriverMismatchError (openlock-ox1)", () => {
+  it("names BOTH the running driver and the requested runtime", () => {
+    const msg = formatGatewayDriverMismatchError("docker", "podman");
+    expect(msg).toContain("podman");
+    expect(msg).toContain("docker");
+  });
+
+  it("points at `openlock gateway stop` as the remedy", () => {
+    const msg = formatGatewayDriverMismatchError("docker", "podman");
+    expect(msg).toContain("openlock gateway stop");
   });
 });
