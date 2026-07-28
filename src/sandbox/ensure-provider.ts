@@ -100,6 +100,279 @@ function warnOnTypeDrift(providerId: ProviderId, record: ProviderRecord): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Gateway credential health (openlock-7mh / openlock-stj)
+//
+// The gateway silently skips an expired provider credential and hands the
+// sandbox ZERO credentials while its own RPC still reports success (WARN
+// `skipping expired provider credential`, then `status=200`). cred_inject then
+// strips Authorization and injects nothing, so in-sandbox CC sees a 401 /
+// ECONNRESET / misleading connectivity error with no trace beyond a WARN
+// buried in gateway.log. The functions below mirror the gateway's OWN skip
+// check (openshell-server/src/grpc/provider.rs: `credential_expires_at_ms[key]
+// > 0 && <= now`) from the openlock side, using the SAME field the gateway
+// itself reads (`provider list --output json` -> `credential_expires_at_ms`),
+// so this is a faithful shadow of gateway behavior, not a heuristic.
+// ---------------------------------------------------------------------------
+
+interface GatewayProviderJson {
+  name?: unknown;
+  credential_expires_at_ms?: unknown;
+}
+
+/** Fetch `openshell provider list --output json` and parse it. Returns null on
+ * ANY failure (transport error, non-JSON output, non-array shape) — this is an
+ * advisory read on top of the core create/update flow, so a parsing hiccup
+ * degrades to "can't determine" rather than breaking sandbox creation. */
+async function fetchGatewayProviderList(shell: Shell): Promise<GatewayProviderJson[] | null> {
+  let result: ShellResult;
+  try {
+    result = await shell(["provider", "list", "--output", "json"]);
+  } catch {
+    return null;
+  }
+  if (result.exitCode !== 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(result.stdout);
+    return Array.isArray(parsed) ? (parsed as GatewayProviderJson[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Null means the provider itself is absent from the gateway list — distinct
+ * from present-with-no-expiry-data (`{}`), which is the normal shape for a
+ * credential with no expiry (e.g. a static API key). */
+function credentialExpiryFor(
+  list: readonly GatewayProviderJson[],
+  providerId: string,
+): Record<string, number> | null {
+  const entry = list.find((p) => p.name === providerId);
+  if (!entry) return null;
+  const raw = entry.credential_expires_at_ms;
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "number") out[k] = v;
+  }
+  return out;
+}
+
+export type CredentialHealth = "live" | "expired" | "unknown";
+
+/**
+ * "live" iff at least one of `keys` has an expiry tracked in the gateway AND
+ * that expiry is in the future (or explicitly cleared, i.e. 0). "unknown" when
+ * there's no expiry bookkeeping at all for any key (e.g. gateway unreachable,
+ * or a static credential with no expiry — presence is all we know). Only
+ * "expired" when every key that IS tracked has already passed — this is
+ * exactly the condition under which the gateway hands the sandbox zero usable
+ * credentials for this provider.
+ */
+export function credentialHealth(
+  keys: readonly string[],
+  expiryByKey: Record<string, number> | null,
+  nowMs: number,
+): CredentialHealth {
+  if (keys.length === 0 || expiryByKey === null) return "unknown";
+  const tracked = keys.filter((k) => (expiryByKey[k] ?? 0) > 0);
+  if (tracked.length === 0) return "unknown";
+  const live = tracked.some((k) => (expiryByKey[k] ?? 0) > nowMs);
+  return live ? "live" : "expired";
+}
+
+/**
+ * Hard preflight: throws a user-visible error naming the provider, the
+ * expiry, and the exact remediation command when the resolved provider has NO
+ * live credential in the gateway. Runs after the create/update/seed logic
+ * above, so a wedged-but-repairable credential (see isWedgedRefreshCredential)
+ * has already been re-pushed by the time this check runs — it only fires when
+ * that repair didn't happen (or wasn't applicable), i.e. genuinely nothing
+ * would be injected into the sandbox.
+ *
+ * For a refresh-capable provider (record.refresh set) that STILL shows up
+ * expired here, `openlock login` alone is not a promise this code can honor —
+ * seedRefreshProvider already tried the self-heal path and either found the
+ * refresh worker reporting healthy (so never-clobber correctly held off,
+ * deferring to a worker tick that hasn't happened yet) or something else is
+ * still wrong. Rather than advertise a fix that might not take effect on the
+ * very next retry, also give the proven manual recovery: tear down sessions,
+ * delete the gateway-side provider row directly, then log in again.
+ */
+async function assertProviderHasLiveCredential(
+  providerId: ProviderId,
+  shell: Shell,
+): Promise<void> {
+  const keys = PROVIDERS[providerId].credentialEnvVars;
+  if (keys.length === 0) return;
+  const list = await fetchGatewayProviderList(shell);
+  if (list === null) return; // can't determine — advisory only, stay silent
+  const expiryByKey = credentialExpiryFor(list, providerId);
+  if (credentialHealth(keys, expiryByKey, Date.now()) !== "expired") return;
+
+  const expiredEntries = keys
+    .map((key) => ({ key, expiresAtMs: expiryByKey?.[key] ?? 0 }))
+    .filter((e) => e.expiresAtMs > 0);
+  const worst =
+    expiredEntries.length > 0
+      ? expiredEntries.reduce((a, b) => (a.expiresAtMs < b.expiresAtMs ? a : b))
+      : { key: keys[0], expiresAtMs: 0 };
+  const expiredAt =
+    worst.expiresAtMs > 0 ? new Date(worst.expiresAtMs).toISOString() : "unknown time";
+
+  const isRefreshCapable = readProvider(providerId)?.refresh !== undefined;
+  const remediation = isRefreshCapable
+    ? `Run \`openlock login --provider ${providerId}\` and retry. If the SAME sandbox start fails ` +
+      `again with this error, the gateway's own repair path could not resolve it on its own: tear ` +
+      `down every sandbox session using this provider, run \`cd openshell-fork && mise exec -- ` +
+      `openshell provider delete ${providerId}\`, then \`openlock login --provider ${providerId}\` again.`
+    : `Run \`openlock login --provider ${providerId}\` to refresh it, then retry.`;
+  throw new Error(
+    `Provider '${providerId}' has no live credential in the gateway: '${worst.key}' expired at ` +
+      `${expiredAt}. The sandbox would start with ZERO usable credentials for this provider and ` +
+      `every request would fail. ${remediation}`,
+  );
+}
+
+export interface GatewayRefreshHealth {
+  status: string;
+  expiresAtMs: number | null;
+  lastError: string;
+}
+
+function parseGatewayTimestamp(s: string): number | null {
+  if (s === "-" || s === "") return null;
+  const ms = Date.parse(`${s.replace(" ", "T")}Z`);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Parse `openshell provider refresh status <name> --credential-key <key>`
+ * output. Column layout (openshell-cli/src/run.rs `refresh_status_header` /
+ * `refresh_status_row`): PROVIDER, CREDENTIAL_KEY, STRATEGY, STATUS,
+ * EXPIRES_AT, NEXT_REFRESH, LAST_REFRESH, LAST_ERROR, columns left-justified
+ * and separated by (at least) two literal spaces. EXPIRES_AT/NEXT_REFRESH/
+ * LAST_REFRESH render as `YYYY-MM-DD HH:MM:SS` (a single internal space), so
+ * splitting on runs of 2+ spaces recovers the 8 columns without being fooled
+ * by that internal space. Returns null when the gateway reports no refresh
+ * configuration for this provider/key, or the output doesn't parse.
+ */
+export function parseProviderRefreshStatus(stdout: string): GatewayRefreshHealth | null {
+  const lines = stdout
+    .replace(ANSI_RE, "")
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0);
+  if (lines.length < 2) return null;
+  const fields = lines[1].split(/ {2,}/).map((f) => f.trim());
+  if (fields.length < 8) return null;
+  const [, , , status, expiresAtStr, , , lastErrorRaw] = fields;
+  return {
+    status,
+    expiresAtMs: parseGatewayTimestamp(expiresAtStr),
+    lastError: lastErrorRaw === "-" ? "" : lastErrorRaw,
+  };
+}
+
+/**
+ * NEVER-CLOBBER, relaxed NARROWLY (openlock-stj): a gateway-held refresh
+ * credential is "wedged" — genuinely beyond the refresh worker's own ability
+ * to repair — only when it is BOTH (a) expired per the gateway's OWN
+ * bookkeeping (the same `credential_expires_at_ms` field the gateway's skip
+ * check reads — see credentialHealth) AND (b) either the refresh worker's
+ * last attempt ended in "error", OR no refresh status could be established
+ * for this credential AT ALL.
+ *
+ * That second disjunct closes a gap: `fetchRefreshHealth` returns null on
+ * anything from "no refresh configuration was ever pushed for this key" to a
+ * transport error, and treating null as "not wedged" (as an earlier version
+ * of this predicate did) reproduces openlock-stj's own failure class inside
+ * its fix — an expired credential the refresh worker isn't even tracking will
+ * NEVER see a status flip to "error"; it just stays expired forever, `openlock
+ * login` never budges it (the local credentials.json was never the broken
+ * half), and the preflight below throws the same unfixable advice on every
+ * retry. The never-clobber invariant exists to protect a credential the
+ * gateway can still repair on its own; when we can't even establish that a
+ * refresh worker is tracking this key, there is nothing left to protect — the
+ * gateway holds a token that is dead by its own bookkeeping, and the host
+ * holds a strictly better one.
+ *
+ * A live credential is never wedged regardless of status (nothing to repair
+ * yet) — this is the axis that must never widen. An expired credential the
+ * worker reports healthy (a status other than "error", e.g. "configured" or
+ * "refreshed") is also NOT wedged: it may still self-heal on its own next
+ * tick, and broadening this predicate to cover it would re-open the clobber
+ * hazard NEVER-CLOBBER exists to prevent. The remaining transient case this
+ * collapses in — expired, but the worker simply hasn't ticked to "error" yet —
+ * costs at worst a one-tick-early re-push of an equivalent token, which is
+ * harmless.
+ */
+export function isWedgedRefreshCredential(
+  credential: CredentialHealth,
+  refreshStatus: string | null,
+): boolean {
+  if (credential !== "expired") return false;
+  return refreshStatus === null || refreshStatus === "error";
+}
+
+async function fetchRefreshHealth(
+  providerId: ProviderId,
+  credentialKey: string,
+  shell: Shell,
+): Promise<GatewayRefreshHealth | null> {
+  let result: ShellResult;
+  try {
+    result = await shell([
+      "provider",
+      "refresh",
+      "status",
+      providerId,
+      "--credential-key",
+      credentialKey,
+    ]);
+  } catch {
+    return null;
+  }
+  if (result.exitCode !== 0) return null;
+  return parseProviderRefreshStatus(result.stdout);
+}
+
+export interface ProviderGatewayHealth {
+  inGateway: boolean;
+  credential: CredentialHealth;
+  refresh: "ok" | "error" | null;
+}
+
+/** Real gateway credential health for `openlock providers` (openlock-7mh):
+ * presence (`in_gateway`) alone is misleading when the credential behind it is
+ * dead. Reports the SAME expiry signal the gateway's own skip check uses, plus
+ * (for refresh-capable providers) whether the refresh worker's last attempt
+ * errored. */
+export async function getProviderGatewayHealth(
+  providerId: ProviderId,
+): Promise<ProviderGatewayHealth> {
+  return _getProviderGatewayHealthForTests(providerId, realOpenshell);
+}
+
+export async function _getProviderGatewayHealthForTests(
+  providerId: ProviderId,
+  shell: Shell,
+): Promise<ProviderGatewayHealth> {
+  const keys = PROVIDERS[providerId].credentialEnvVars;
+  const list = await fetchGatewayProviderList(shell);
+  const expiryByKey = list ? credentialExpiryFor(list, providerId) : null;
+  const inGateway = expiryByKey !== null;
+  const credential = credentialHealth(keys, expiryByKey, Date.now());
+
+  let refresh: "ok" | "error" | null = null;
+  const record = readProvider(providerId);
+  if (inGateway && record?.refresh && keys.length > 0) {
+    const health = await fetchRefreshHealth(providerId, keys[0], shell);
+    refresh = health ? (health.status === "error" ? "error" : "ok") : null;
+  }
+  return { inGateway, credential, refresh };
+}
+
 // Explicit env var name for `--secret-material-env refresh_token=<name>` below
 // (openshell-cli resolves the value from this exact env var on the spawned
 // process; the name itself is arbitrary, just needs to not collide with
@@ -152,7 +425,24 @@ async function seedRefreshProvider(
     }
   }
 
-  if (!exists) {
+  // See isWedgedRefreshCredential's doc comment for the exact predicate. Only
+  // query the gateway (two extra round trips: the canonical expiry field plus
+  // the refresh worker's own status) when the provider already exists —
+  // there's nothing to clobber-check on a fresh create. "Expired" is read from
+  // the SAME `credential_expires_at_ms` field the gateway's own skip check
+  // uses (not the refresh worker's own tracked expiry, which per a prior
+  // incident can drift from it) so this predicate can't be fooled by that
+  // drift.
+  let shouldPush = !exists;
+  if (exists) {
+    const list = await fetchGatewayProviderList(shell);
+    const expiryByKey = list ? credentialExpiryFor(list, providerId) : null;
+    const credential = credentialHealth(["ANTHROPIC_BEARER_TOKEN"], expiryByKey, Date.now());
+    const health = await fetchRefreshHealth(providerId, "ANTHROPIC_BEARER_TOKEN", shell);
+    shouldPush = isWedgedRefreshCredential(credential, health ? health.status : null);
+  }
+
+  if (shouldPush) {
     const access = record.credentials.ANTHROPIC_BEARER_TOKEN;
     if (!access) {
       throw new Error(
@@ -236,26 +526,35 @@ export async function _ensureProviderForTests(providerId: ProviderId, shell: She
 
   // Gateway-native credential refresh (e.g. the Claude OAuth subscription
   // provider): delegate to seedRefreshProvider, which imports the runtime
-  // profile idempotently and seeds create/update/configure ONCE (never
-  // re-pushing the host token when the provider already exists).
+  // profile idempotently, seeds create/update/configure on a fresh provider,
+  // and re-seeds an existing one ONLY when it's wedged (see
+  // isWedgedRefreshCredential) — never-clobbering a live or healthily-
+  // refreshing credential.
   if (record.refresh) {
     await seedRefreshProvider(providerId, record, exists, shell);
-    return;
+  } else {
+    const { args: credArgs, env: credEnv } = credentialArgsAndEnv(record.credentials);
+    const args = exists
+      ? ["provider", "update", providerId, ...credArgs]
+      : ["provider", "create", "--name", providerId, "--type", record.type, ...credArgs];
+
+    const result = await shell(args, credEnv);
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Failed to ${exists ? "update" : "create"} provider '${providerId}' in gateway: ${result.stderr}`,
+      );
+    }
+
+    warnOnTypeDrift(providerId, record);
   }
 
-  const { args: credArgs, env: credEnv } = credentialArgsAndEnv(record.credentials);
-  const args = exists
-    ? ["provider", "update", providerId, ...credArgs]
-    : ["provider", "create", "--name", providerId, "--type", record.type, ...credArgs];
-
-  const result = await shell(args, credEnv);
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `Failed to ${exists ? "update" : "create"} provider '${providerId}' in gateway: ${result.stderr}`,
-    );
-  }
-
-  warnOnTypeDrift(providerId, record);
+  // Preflight (openlock-7mh): after the above, confirm the gateway actually
+  // holds a live credential for this provider. Fires ONLY when the repair
+  // above didn't happen or wasn't applicable — a wedged refresh credential was
+  // already re-pushed by seedRefreshProvider, so this is a hard, user-visible
+  // failure for the residual case where nothing would be injected into the
+  // sandbox and the gateway would otherwise skip it in silence.
+  await assertProviderHasLiveCredential(providerId, shell);
 }
 
 /** Provision a generic secondary-credential provider (create-or-update) from a

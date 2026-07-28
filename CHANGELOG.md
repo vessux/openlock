@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.11.1
+
+Bugfix release on top of v0.11.0 (fork pin v0.8.1 → v0.8.2). Fixes a release-blocking credential-refresh regression introduced by the v0.8.0 fork sync, plus three post-release bugs affecting sandboxed Claude Code startup and gateway credential recovery.
+
+### Fixed
+
+- **Credential refresh died after upgrading to v0.11.0 (openlock-bb2).** The pinned fork's migration backfilled the `workspace` DB column but not the `workspace` field inside the stored protobuf payload, so after upgrading, no pre-existing provider row could be written again. The gateway could not persist a refreshed token, and because Claude OAuth tokens live about an hour, every upgrading user hit total auth failure within the hour — surfacing as a mid-session `401 Invalid bearer token` while every status surface still looked healthy. Fork pin moves to `v0.8.2`. The fix backfills the field on read rather than through a corrective migration, so it also **repairs a gateway that is already wedged** — a migration could not have, since the original migration is recorded as applied and never re-runs, and every affected user is by definition already past it. **Users on v0.11.0 should upgrade.**
+- **Sandboxed Claude Code could not start on stock defaults (openlock-z08).** The default policy was missing two unconditional CC startup probes (`GET api.anthropic.com/api/hello`, `GET platform.claude.com/v1/oauth/hello`); the second host carries its own `cred_inject`, since `cred_inject` is per-endpoint and never inherited.
+- **Sandboxed Claude Code showed a login selector despite valid credentials (openlock-bp2).** The onboarding file was staged at `$HOME` while `CLAUDE_CONFIG_DIR` pointed elsewhere, so CC ran first-run onboarding it could not complete inside a sandbox.
+- **An expired gateway credential now fails loudly instead of silently (openlock-7mh).** A sandbox would previously start with zero credentials while the RPC reported success; on the reporter's machine this went unnoticed for five weeks. `openlock providers` now reports real credential health (`live`/`expired`, `refresh=ok`/`error`) instead of mere presence.
+- **A wedged gateway provider can now be repaired (openlock-stj).** Never-clobber previously had no failure-path escape, so `openlock login` could not replace an expired, unrenewable gateway credential. It is now re-pushed when the credential is expired and its refresh worker has errored or is absent — never when the credential is live or its worker is healthy.
+
 ## v0.11.0
 
 Feature release on top of v0.10.1 (fork pin v0.7.1 → v0.8.1). Adds a user-local config override layer, config/policy drift detection on reattach, and an uninstall script; closes a silent-loss-of-L7-enforcement gap and an OAuth refresh-token argv leak.

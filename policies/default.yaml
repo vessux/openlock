@@ -38,6 +38,27 @@ network_policies:
           - allow:
               method: POST
               path: /v1/**
+          - allow:
+              method: GET
+              path: /api/hello
+        cred_inject:
+          provider: anthropic
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: Authorization
+              from_credential: ANTHROPIC_BEARER_TOKEN
+              value_prefix: 'Bearer '
+      - host: platform.claude.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /v1/oauth/hello
         cred_inject:
           provider: anthropic
           strip_headers:
