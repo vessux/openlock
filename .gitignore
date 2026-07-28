@@ -5,7 +5,6 @@ openshell-fork/
 
 node_modules/
 dist/
-bun.lock
 .cache/
 .worktrees/
 *.srl

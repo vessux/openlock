@@ -47,7 +47,7 @@ jobs:
         with:
           bun-version: latest
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Compute base tag (same code path as the host)
         id: tag
