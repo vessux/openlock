@@ -7,6 +7,7 @@ import {
   computeBuildInputsHash,
   computeBuildInputsHashFromFiles,
   decideReattachAction,
+  findUnattachedCredentialBundles,
 } from "./drift";
 
 const CF = "FROM openlock-core\nRUN echo hi\n";
@@ -194,6 +195,42 @@ describe("decideReattachAction", () => {
         interactive: false,
       }),
     ).toBe("rebuild");
+  });
+});
+
+describe("findUnattachedCredentialBundles (openlock-04t)", () => {
+  it("returns the declared bundle that was never attached at create time", () => {
+    expect(findUnattachedCredentialBundles(["github"], [])).toEqual(["github"]);
+  });
+
+  it("returns empty when the declared set matches the recorded set exactly", () => {
+    expect(findUnattachedCredentialBundles(["github", "npm"], ["github", "npm"])).toEqual([]);
+  });
+
+  it("returns only the names NOT present in the recorded set (partial overlap)", () => {
+    expect(findUnattachedCredentialBundles(["github", "npm"], ["github"])).toEqual(["npm"]);
+  });
+
+  it("returns empty when nothing is declared, regardless of what was recorded", () => {
+    expect(findUnattachedCredentialBundles([], ["github"])).toEqual([]);
+  });
+
+  // The migration-safety case: a legacy session predates this field entirely.
+  // `undefined` must NOT be read as "recorded empty" (which would warn about
+  // every declared bundle on every legacy session's very next reattach) —
+  // same "can't compare, never a false positive" contract as
+  // decideReattachAction's storedHash.
+  it("returns empty (never warns) when recordedAttached is undefined — a legacy session, not a genuinely-empty one", () => {
+    expect(findUnattachedCredentialBundles(["github"], undefined)).toEqual([]);
+  });
+
+  it("distinguishes undefined (legacy/unknown) from [] (genuinely nothing attached) — [] DOES flag drift", () => {
+    expect(findUnattachedCredentialBundles(["github"], undefined)).toEqual([]);
+    expect(findUnattachedCredentialBundles(["github"], [])).toEqual(["github"]);
+  });
+
+  it("is order-independent for the recorded set", () => {
+    expect(findUnattachedCredentialBundles(["a", "b"], ["b", "a"])).toEqual([]);
   });
 });
 

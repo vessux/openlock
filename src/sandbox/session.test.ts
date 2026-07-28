@@ -2,12 +2,15 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CredentialBundle } from "../config-core";
 import {
+  attachedCredentialBundleNames,
   buildSetupCmd,
   pickSessionHarness,
   resolveRepoPolicy,
   stageProviderSandboxFiles,
   userExplicitlyPickedHarness,
+  warnOnUnattachedCredentialBundles,
 } from "./session";
 
 describe("buildSetupCmd", () => {
@@ -230,5 +233,82 @@ describe("pickSessionHarness", () => {
         resolvedHarness: "opencode",
       }),
     ).toEqual({ harness: "claude_code", mismatch: false });
+  });
+});
+
+describe("attachedCredentialBundleNames (openlock-04t)", () => {
+  const bundle = (name: string): CredentialBundle => ({
+    name,
+    values: { TOKEN: { from_env: "TOKEN" } },
+  });
+
+  it("maps declared bundles to their names, in order", () => {
+    expect(attachedCredentialBundleNames([bundle("github"), bundle("npm")])).toEqual([
+      "github",
+      "npm",
+    ]);
+  });
+
+  it("returns an empty array (not undefined) when no bundles are declared", () => {
+    expect(attachedCredentialBundleNames([])).toEqual([]);
+  });
+});
+
+describe("warnOnUnattachedCredentialBundles (openlock-04t)", () => {
+  const bundle = (name: string): CredentialBundle => ({
+    name,
+    values: { TOKEN: { from_env: "TOKEN" } },
+  });
+
+  function captureWarn(fn: () => void): string[] {
+    const calls: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      calls.push(args.map(String).join(" "));
+    };
+    try {
+      fn();
+    } finally {
+      console.warn = original;
+    }
+    return calls;
+  }
+
+  it("warns when a declared bundle was never attached at create time", () => {
+    const calls = captureWarn(() =>
+      warnOnUnattachedCredentialBundles("my-sess", [bundle("github")], []),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("github");
+    expect(calls[0]).toContain('sandbox "my-sess"');
+    expect(calls[0]).toContain("openlock clean my-sess");
+    expect(calls[0]).toContain("CREATE time");
+  });
+
+  it("stays silent when the declared set matches the recorded set", () => {
+    const calls = captureWarn(() =>
+      warnOnUnattachedCredentialBundles("my-sess", [bundle("github")], ["github"]),
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  // The migration-safety case: must NOT warn on a legacy session (recorded
+  // set absent) even though every declared bundle technically isn't "in" an
+  // absent set — a spurious warning on the very first reattach after this
+  // feature ships would be worse than the doc caveat it replaces.
+  it("stays silent on a legacy session (recordedAttached undefined), even with declared bundles", () => {
+    const calls = captureWarn(() =>
+      warnOnUnattachedCredentialBundles("legacy-sess", [bundle("github")], undefined),
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("pluralizes correctly for multiple unattached bundles", () => {
+    const calls = captureWarn(() =>
+      warnOnUnattachedCredentialBundles("my-sess", [bundle("github"), bundle("npm")], []),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("bundles github, npm are declared");
+    expect(calls[0]).toContain("were never attached");
   });
 });

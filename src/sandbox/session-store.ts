@@ -19,6 +19,17 @@ export interface SessionMeta {
    * before drift-tracking existed (and on the `--policy` override path where
    * inputs can't be read); a missing value means "can't compare, don't prompt". */
   buildInputsHash?: string;
+  /** Names of `credentials:` bundles actually attached to the sandbox's
+   * SandboxSpec at CREATE time (openlock-04t) — providers attach only at
+   * create, never on reattach, so this is the recorded ground truth reattach
+   * compares the currently-declared bundle set against (see
+   * sandbox/drift.ts findUnattachedCredentialBundles). Always set (even to
+   * `[]`) by createSession going forward. Absent on sessions created before
+   * this field existed — that means "unknown", NOT "nothing was attached":
+   * treat it exactly like buildInputsHash's absence, i.e. can't compare, so
+   * don't warn. A present-but-empty array means "genuinely nothing was
+   * declared/attached at create time", which is a real, comparable value. */
+  attachedCredentialBundles?: string[];
 }
 
 // Legacy meta files (pre-slim-images) may carry extra fields like `caps` or

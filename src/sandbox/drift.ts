@@ -86,3 +86,35 @@ export function decideReattachAction(args: {
   if (!drifted) return "proceed";
   return args.interactive ? "prompt" : "warn-stale";
 }
+
+/**
+ * Names of `credentials:` bundles DECLARED in the current .openlock/config
+ * that were never attached to this session's sandbox at CREATE time
+ * (openlock-04t).
+ *
+ * Providers attach to a sandbox only when it is created — `--provider`/the
+ * attached-provider set is baked into the gateway's SandboxSpec at that
+ * point, and reattach can only re-provision the GATEWAY side (restart
+ * safety), never attach a new bundle to an already-created container. A
+ * bundle added to `.openlock/config.yaml` after create therefore looks fine
+ * everywhere (`openlock validate` passes, the gateway provider record
+ * exists) but its `cred_inject` fails closed at egress with no openlock-side
+ * signal — this function exists to surface exactly that gap on reattach.
+ *
+ * `recordedAttached` is `undefined` for sessions created before this field
+ * existed. That must NOT be read as "recorded empty" — same "can't compare,
+ * never a false positive" contract as {@link decideReattachAction}'s
+ * `storedHash`: an absent value means unknown, so it returns no names
+ * (never warns) rather than flagging every declared bundle as unattached on
+ * a legacy session's very first reattach after this feature ships. A
+ * present-but-empty array is a real, comparable value (genuinely nothing
+ * was attached at create) and DOES flag drift against any declared bundle.
+ */
+export function findUnattachedCredentialBundles(
+  declaredNames: readonly string[],
+  recordedAttached: readonly string[] | undefined,
+): string[] {
+  if (recordedAttached === undefined) return [];
+  const attached = new Set(recordedAttached);
+  return declaredNames.filter((name) => !attached.has(name));
+}
