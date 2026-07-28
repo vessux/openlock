@@ -8,24 +8,9 @@ export const SANDBOX_UID = 60000;
 
 function multiHarnessBlock(harnesses: Harness[]): string {
   const installs: string[] = [];
-  const postInstalls: string[] = [];
   for (const h of harnesses) {
     if (h === "claude_code") {
       installs.push(`RUN npm install -g @anthropic-ai/claude-code@2.1.128`);
-      postInstalls.push(`RUN cat > /sandbox/.claude.json <<'JSON'
-{
-  "hasCompletedOnboarding": true,
-  "hasTrustDialogAccepted": true,
-  "lastOnboardingVersion": "9999.99.99",
-  "theme": "dark",
-  "projects": {
-    "/sandbox/repo": {
-      "hasTrustDialogAccepted": true,
-      "hasCompletedProjectOnboarding": true
-    }
-  }
-}
-JSON`);
     } else if (h === "opencode") {
       installs.push(`RUN npm install -g opencode-ai@1.15.5`);
     }
@@ -33,28 +18,20 @@ JSON`);
   return `USER root
 ${installs.join("\n")}
 RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
-USER \${SANDBOX_UID}:\${SANDBOX_GID}${postInstalls.length > 0 ? `\n${postInstalls.join("\n")}` : ""}`;
+USER \${SANDBOX_UID}:\${SANDBOX_GID}`;
 }
 
+// NOTE (openlock-5wk): claude_code used to also bake an onboarding-skip
+// $HOME/.claude.json here. That copy was dead weight — container.ts sets
+// CLAUDE_CONFIG_DIR unconditionally for claude_code, so CC never reads
+// $HOME/.claude.json; the copy that actually takes effect is staged into
+// CLAUDE_CONFIG_DIR by ANTHROPIC.sandboxFiles() (src/providers/anthropic.ts).
+// Removed rather than kept in sync as a decoy.
 const HARNESS_FRAGMENTS: Record<Harness, string> = {
   claude_code: `USER root
 RUN npm install -g @anthropic-ai/claude-code@2.1.128
 RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
-USER \${SANDBOX_UID}:\${SANDBOX_GID}
-RUN cat > /sandbox/.claude.json <<'JSON'
-{
-  "hasCompletedOnboarding": true,
-  "hasTrustDialogAccepted": true,
-  "lastOnboardingVersion": "9999.99.99",
-  "theme": "dark",
-  "projects": {
-    "/sandbox/repo": {
-      "hasTrustDialogAccepted": true,
-      "hasCompletedProjectOnboarding": true
-    }
-  }
-}
-JSON`,
+USER \${SANDBOX_UID}:\${SANDBOX_GID}`,
   opencode: `USER root
 RUN npm install -g opencode-ai@1.15.5
 RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox

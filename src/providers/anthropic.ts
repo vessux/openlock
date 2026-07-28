@@ -26,11 +26,11 @@ const DUMMY_CREDENTIALS_JSON = JSON.stringify({
 
 // Staged into CLAUDE_CONFIG_DIR (see container.ts) alongside .credentials.json.
 // Skips CC's first-run onboarding flow (theme picker, "Select login method")
-// inside the sandbox, which cannot complete a browser login. The image also
-// bakes an onboarding-skip file at $HOME/.claude.json (seed-containerfile.ts),
-// but CC reads onboarding/auth state from CLAUDE_CONFIG_DIR when that env var
-// is set (container.ts sets it for claude_code), never from $HOME — so this
-// staged copy is the one that actually takes effect.
+// inside the sandbox, which cannot complete a browser login. CC reads
+// onboarding/auth state from CLAUDE_CONFIG_DIR when that env var is set
+// (container.ts sets it for claude_code), never from $HOME, so this is the
+// only copy that takes effect — seed-containerfile.ts used to also bake a
+// dead decoy at $HOME/.claude.json; removed in openlock-5wk.
 //
 // The oauthAccount block is REQUIRED: without it CC does not consider itself
 // authenticated even with a valid-shaped .credentials.json present. It is an

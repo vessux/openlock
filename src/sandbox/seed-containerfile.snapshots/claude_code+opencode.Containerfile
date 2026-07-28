@@ -27,17 +27,3 @@ RUN npm install -g @anthropic-ai/claude-code@2.1.128
 RUN npm install -g opencode-ai@1.15.5
 RUN chown -R ${SANDBOX_UID}:${SANDBOX_GID} /sandbox
 USER ${SANDBOX_UID}:${SANDBOX_GID}
-RUN cat > /sandbox/.claude.json <<'JSON'
-{
-  "hasCompletedOnboarding": true,
-  "hasTrustDialogAccepted": true,
-  "lastOnboardingVersion": "9999.99.99",
-  "theme": "dark",
-  "projects": {
-    "/sandbox/repo": {
-      "hasTrustDialogAccepted": true,
-      "hasCompletedProjectOnboarding": true
-    }
-  }
-}
-JSON
