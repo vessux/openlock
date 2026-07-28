@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import type { GatewayStatus } from "../sandbox/ensure-gateway";
 import { GATEWAY_NAME, gatewayStatus } from "../sandbox/ensure-gateway";
 import { formatBytes, formatDuration } from "../sandbox/format";
+import type { Classification } from "../sandbox/reap";
 import { classifyAll } from "../sandbox/session-ops";
 import { printCmdHelp } from "./_help";
 
@@ -41,6 +42,33 @@ function renderGatewayHeader(status: GatewayStatus): string {
     `${GATEWAY_NAME.padEnd(10)}     running  ${pid.padEnd(6)} ${rss.padEnd(9)} ${uptime}`,
     "",
   ].join("\n");
+}
+
+// openlock-vtl: exhaustive switch (not the previous inline ternary chain) so
+// widening Classification again is a compile error here, not a silent
+// fall-through to the empty-string default — exactly the "missed case"
+// failure mode a state union widening invites. "unreachable" must read
+// honestly rather than being folded into "(no container)" (which is what
+// "missing" means: the gateway said this session doesn't exist) or silently
+// showing nothing.
+export function classificationFlag(classification: Classification): string {
+  switch (classification) {
+    case "idle-stale":
+      return "(idle, reapable)";
+    case "attached":
+      return "(attached)";
+    case "missing":
+      return "(no container)";
+    case "unreachable":
+      return "(gateway unreachable)";
+    case "idle-recent":
+    case "exited":
+      return "";
+    default: {
+      const exhaustive: never = classification;
+      return exhaustive;
+    }
+  }
 }
 
 export async function listCmd(args: string[]): Promise<number> {
@@ -89,13 +117,7 @@ export async function listCmd(args: string[]): Promise<number> {
       r.meta.repoPath,
       r.meta.createdAt,
       r.state.containerState,
-      r.classification === "idle-stale"
-        ? "(idle, reapable)"
-        : r.classification === "attached"
-          ? "(attached)"
-          : r.classification === "missing"
-            ? "(no container)"
-            : "",
+      classificationFlag(r.classification),
     ]);
   const widths = headers.map((h, i) => Math.max(h.length, ...data.map((row) => row[i]!.length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");

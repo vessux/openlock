@@ -76,9 +76,23 @@ export async function runBulkClean(
   }
 
   const rows = await classify();
-  const targets = rows.filter((r) =>
-    stale ? r.classification === "exited" || r.classification === "missing" : true,
-  );
+  // openlock-vtl: "unreachable" (we couldn't determine this session's real
+  // state because the gateway call itself failed) must never be treated as
+  // safe to act on, for EITHER --stale or --all — even --all's "clean
+  // everything" intent presumes we know what "everything" currently is.
+  // Excluded up front rather than relying on --stale's classification
+  // filter to happen to omit it, so the refusal holds regardless of flag.
+  const unreachable = rows.filter((r) => r.classification === "unreachable");
+  if (unreachable.length > 0) {
+    console.warn(
+      `clean: skipped ${unreachable.length} session(s) whose container state is unreachable ` +
+        `(gateway call failed, not confirmed absent): ${unreachable.map((r) => r.meta.name).join(", ")}`,
+    );
+  }
+  const targets = rows.filter((r) => {
+    if (r.classification === "unreachable") return false;
+    return stale ? r.classification === "exited" || r.classification === "missing" : true;
+  });
   for (const r of targets) {
     try {
       await clean(r.meta.name, { copyDir });

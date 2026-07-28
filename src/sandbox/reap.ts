@@ -46,7 +46,13 @@ export function heartbeatIntervalMs(idleMs: number): number {
   return Math.max(1000, Math.min(Math.floor(idleMs / 2), 60_000));
 }
 
-export type Classification = "attached" | "idle-recent" | "idle-stale" | "exited" | "missing";
+export type Classification =
+  | "attached"
+  | "idle-recent"
+  | "idle-stale"
+  | "exited"
+  | "missing"
+  | "unreachable";
 
 export interface SessionWithState extends SessionMeta {
   containerState: ContainerState;
@@ -60,6 +66,18 @@ export function classifySession(
   nowMs: number,
   idleMs: number | null,
 ): Classification {
+  // openlock-vtl: "unreachable" (transport-level failure asking the gateway,
+  // e.g. it's down) must NEVER collapse into "missing" (the gateway
+  // affirmatively said this sandbox doesn't exist) — callers like
+  // clean --stale/--all treat "missing" as safe to sweep up, and doing that
+  // to a merely-unreachable session would destroy a healthy container that
+  // was never actually gone. Kept as its own early return, ahead of the
+  // "missing" check, rather than falling into the generic
+  // `!== "running"` -> "exited" bucket below (which "stopped"/"deleting"/
+  // "other" deliberately do collapse into — those really are
+  // not-currently-running, just for different reasons; "unreachable" is not
+  // "not running", it's "don't know").
+  if (s.containerState === "unreachable") return "unreachable";
   if (s.containerState === "missing") return "missing";
   if (s.containerState !== "running") return "exited";
   if (s.attachedPid !== null && s.pidAlive) return "attached";

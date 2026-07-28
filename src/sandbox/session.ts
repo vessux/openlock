@@ -586,9 +586,9 @@ async function reattachSession(
   const containerName = m.name;
   // Self-heal (openlock-ab6): getSandboxState queries the gateway
   // (`openshell sandbox get`), so a dead/never-started gateway makes a
-  // perfectly healthy container look "missing" (transport error, not a real
-  // NotFound) — start/reuse the gateway FIRST so the state query below
-  // reflects reality instead of a false "no container".
+  // perfectly healthy container look unreachable (transport error, not a
+  // real NotFound) — start/reuse the gateway FIRST so the state query below
+  // reflects reality instead of a false read.
   await startGateway();
   const state = await getSandboxState(containerName);
   if (state === "missing") {
@@ -597,12 +597,30 @@ async function reattachSession(
     );
     process.exit(1);
   }
+  // openlock-vtl: distinct from "missing" — the gateway didn't say this
+  // session is gone, we simply couldn't ask it (self-heal above can still
+  // race a gateway that reports "up" but isn't fully answering yet). Fail
+  // fast with an accurate message rather than falling through to the
+  // "already up, attach" branch below: that would proceed into
+  // ensureProvider/waitForSandboxReady on a container we know nothing about,
+  // which (if the gateway stays unreachable) only resolves via the generic
+  // timeout at the end of waitForSandboxReady's full budget.
+  if (state === "unreachable") {
+    console.error(
+      `Session ${m.name}: gateway is unreachable; cannot determine container state. Try again once the gateway is reachable.`,
+    );
+    process.exit(1);
+  }
   exitIfSessionInUse(m);
   // "exited" (Failed/Exited) and "stopped" (an intentional `openlock stop`)
   // both need an explicit resume start; only "running"/"other" are already
   // up. Kept as one combined check (rather than switching the message/start
   // gate to "stopped" alone) so a genuinely-dead container still gets a
-  // resume attempt, matching pre-openlock-weo behavior.
+  // resume attempt, matching pre-openlock-weo behavior. "deleting"
+  // (openlock-ddd) deliberately falls through to the "already up, attach"
+  // branch below rather than getting its own case here: waitForSandboxReady's
+  // assertSandboxNotExited fails fast on it with an accurate "is being
+  // deleted" message, so no extra handling is needed at this call site.
   const needsStart = state === "exited" || state === "stopped";
   if (needsStart) {
     console.log(`Resuming session ${m.name} (container was stopped)...`);

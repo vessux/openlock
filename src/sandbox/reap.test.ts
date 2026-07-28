@@ -92,6 +92,29 @@ describe("classifySession", () => {
   it("missing container → 'missing'", () => {
     expect(classifySession(meta({ containerState: "missing" }), NOW, THIRTY_MIN)).toBe("missing");
   });
+
+  // openlock-vtl: the actual bug this guards against — before the fix,
+  // getSandboxState collapsed a transport-level failure (gateway down) into
+  // "missing", and classifySession then sent it straight down the "missing"
+  // path, which clean --stale/--all treats as safe to sweep up. "unreachable"
+  // must classify as its OWN distinct value, not "missing" and not the
+  // generic "exited" catch-all that "stopped"/"deleting"/"other" fall into.
+  it("unreachable container → 'unreachable' (never 'missing', never 'exited')", () => {
+    const result = classifySession(meta({ containerState: "unreachable" }), NOW, THIRTY_MIN);
+    expect(result).toBe("unreachable");
+    expect(result).not.toBe("missing");
+    expect(result).not.toBe("exited");
+  });
+
+  // Documents the existing, intentional collapse this fix must NOT disturb:
+  // "stopped"/"deleting"/"other" all deliberately fall into "exited" here —
+  // they're all some flavor of "not currently running", just for different
+  // reasons, unlike "unreachable" ("don't know").
+  it("stopped/deleting/other containers all collapse to 'exited' (unchanged by openlock-vtl/ddd)", () => {
+    expect(classifySession(meta({ containerState: "stopped" }), NOW, THIRTY_MIN)).toBe("exited");
+    expect(classifySession(meta({ containerState: "deleting" }), NOW, THIRTY_MIN)).toBe("exited");
+    expect(classifySession(meta({ containerState: "other" }), NOW, THIRTY_MIN)).toBe("exited");
+  });
 });
 
 describe("resolveReapIdleMs", () => {

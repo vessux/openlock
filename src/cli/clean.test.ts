@@ -124,3 +124,41 @@ describe("runBulkClean (openlock-kx8: gateway self-heal ordering)", () => {
     expect(calls).toEqual(["a", "b"]);
   });
 });
+
+describe("runBulkClean (openlock-vtl: refuse to act on 'unreachable')", () => {
+  it("--stale never targets a session classified 'unreachable', even though it also isn't 'exited'/'missing'", async () => {
+    const calls: string[] = [];
+    const exitCode = await runBulkClean(true, undefined, {
+      selfHealGateway: async () => {},
+      classifyAll: async () => [
+        row("healthy-but-unreachable", "unreachable"),
+        row("stale", "missing"),
+      ],
+      cleanSession: async (name) => {
+        calls.push(name);
+      },
+    });
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual(["stale"]);
+  });
+
+  // The more important case: --all's filter is unconditional ("true" for
+  // every row) UNLESS the "unreachable" exclusion is applied ahead of it —
+  // this is the one that would silently regress if that exclusion were ever
+  // dropped or reordered.
+  it("--all never targets a session classified 'unreachable', despite --all's filter otherwise matching everything", async () => {
+    const calls: string[] = [];
+    const exitCode = await runBulkClean(false, undefined, {
+      selfHealGateway: async () => {},
+      classifyAll: async () => [
+        row("healthy-but-unreachable", "unreachable"),
+        row("attached", "attached"),
+      ],
+      cleanSession: async (name) => {
+        calls.push(name);
+      },
+    });
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual(["attached"]);
+  });
+});

@@ -14,7 +14,31 @@ import { filterOpenshellStderr } from "./openshell-stderr";
 // the healthcheck cadence or the gateway's reconcile sweep — not
 // disambiguated). "Stopped" right after StartSandbox returns success can be
 // stale observation, not death. See assertSandboxNotExited/waitForSandboxReady.
-export type ContainerState = "running" | "exited" | "stopped" | "missing" | "other";
+//
+// "unreachable" is split out from "missing" (openlock-vtl): `openshell
+// sandbox get` exiting non-zero is ANY transport-level failure (gateway down,
+// connection refused) just as much as a genuine "no such sandbox" — the two
+// are indistinguishable by exit code alone. Collapsing both into "missing"
+// meant a dead/unreachable gateway made every session in the fleet look
+// deleted, which is dangerous for any caller that treats "missing" as safe to
+// sweep up (see classifySession/reap.ts). getSandboxState now discriminates
+// by stderr shape — same precedent deleteSandbox already used (tolerate only
+// `/sandbox not found|NotFound/`, treat everything else as unknown/failure)
+// — so "missing" now means the gateway affirmatively said this sandbox
+// doesn't exist, and "unreachable" means we couldn't ask at all.
+//
+// "deleting" is split out from "other" (openlock-ddd): phase Deleting means
+// the sandbox is being torn down and will never reach Ready, unlike the rest
+// of the "other" bucket (Provisioning, Unknown) which is a legitimate
+// still-coming-up state worth polling through. See assertSandboxNotExited.
+export type ContainerState =
+  | "running"
+  | "exited"
+  | "stopped"
+  | "missing"
+  | "unreachable"
+  | "deleting"
+  | "other";
 
 // Wrap a command in `env K=V ...` so extra env vars apply without shell
 // quoting risk. Returns the original argv unchanged when env is empty.
@@ -304,7 +328,24 @@ export async function assertSandboxNotExited(
   opts: AssertSandboxNotExitedOpts = {},
 ): Promise<void> {
   const state = await getSandboxState(name);
+  // openlock-ddd: Deleting never resolves to Ready — fail fast with an
+  // accurate message instead of falling through to the generic "other"
+  // keep-polling bucket and burning the full timeout only to report a
+  // meaningless "did not reach Ready state". Deliberately skips
+  // fetchSandboxFailureLogs (unlike the exited/missing/stopped path below):
+  // there was no provisioning failure to explain, and the container may
+  // already be gone by the time logs are requested.
+  if (state === "deleting") {
+    throw new Error(`sandbox ${name} is being deleted`);
+  }
   if (state === "stopped" && opts.tolerateStopped === true) return;
+  // openlock-vtl: "unreachable" (we couldn't ask the gateway at all) is
+  // deliberately NOT treated as a confirmed death here, unlike "missing"
+  // (the gateway affirmatively said this sandbox doesn't exist). A transient
+  // transport hiccup mid-poll must not abort a wait that would otherwise
+  // succeed once the gateway answers again — it falls through to the same
+  // no-op as "running"/"other" below, and a genuinely-down gateway for the
+  // whole budget still surfaces via the caller's own timeout.
   if (state !== "exited" && state !== "missing" && state !== "stopped") return;
   const logs = await fetchSandboxFailureLogs(name);
   throw new Error(formatSandboxExitedError(name, logs));
@@ -414,13 +455,36 @@ export function buildSandboxExecRootArgv(
   return buildOpenshellExecArgv(cliPrefix, name, cmd, { user: "root" });
 }
 
+// Shared discriminator between "the gateway affirmatively said this sandbox
+// doesn't exist" and "we couldn't establish anything" (transport error,
+// connection refused, gateway down, etc) — same stderr shape deleteSandbox
+// already tolerates. Centralized here (openlock-vtl) so getSandboxState and
+// deleteSandbox can't drift apart on what counts as a genuine not-found.
+function isSandboxNotFoundStderr(stderr: string): boolean {
+  return /sandbox not found|NotFound/.test(stderr);
+}
+
 export async function getSandboxState(name: string): Promise<ContainerState> {
   const cli = await getCliInvocation();
   const argv = buildSandboxGetArgv(cli.argv, name);
-  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "pipe", stderr: "ignore" });
-  const out = await new Response(proc.stdout).text();
+  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "pipe", stderr: "pipe" });
+  // Drain both pipes CONCURRENTLY (same pattern as git-sync.ts). Awaiting
+  // stdout to EOF first and stderr only afterwards deadlocks if the child
+  // fills its stderr pipe buffer (~64KB) in the meantime: it blocks on write
+  // and never closes stdout, so neither read completes. openshell can be
+  // chatty on stderr — filterOpenshellStderr exists for exactly that reason.
+  const [out, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   const code = await proc.exited;
-  if (code !== 0) return "missing";
+  if (code !== 0) {
+    // openlock-vtl: a non-zero exit used to collapse unconditionally to
+    // "missing", making a down/unreachable gateway indistinguishable from a
+    // genuinely-absent sandbox — every session in the fleet looked deleted.
+    // Discriminate by stderr shape instead (see isSandboxNotFoundStderr).
+    return isSandboxNotFoundStderr(stderr) ? "missing" : "unreachable";
+  }
   return parseSandboxGetPhase(out);
 }
 
@@ -444,6 +508,15 @@ export async function getSandboxState(name: string): Promise<ContainerState> {
 // still-provisioning) instead of "exited". Fixed here: "Error" is the actual
 // failure phase and now maps to "exited".
 //
+// "Deleting" maps to its own terminal-but-not-failed "deleting" (openlock-ddd)
+// rather than "other": a sandbox being torn down will never reach Ready, so
+// lumping it in with the legitimate still-coming-up bucket (Provisioning,
+// Unknown) meant waitForSandboxReady polled it for the full timeout budget
+// and then reported a generic "did not reach Ready state" instead of the
+// real, knowable cause. "Unknown" deliberately stays in "other" — the driver
+// genuinely couldn't determine state, which isn't proof of death, so keep
+// polling is still the safe read.
+//
 // Falls back to "other" on unparseable/non-object JSON rather than throwing;
 // a genuinely dead/missing sandbox is already caught by the non-zero exit
 // code in getSandboxState before this is ever called.
@@ -457,6 +530,7 @@ export function parseSandboxGetPhase(stdout: string): ContainerState {
   if (phase === "Ready") return "running";
   if (phase === "Error") return "exited";
   if (phase === "Stopped") return "stopped";
+  if (phase === "Deleting") return "deleting";
   return "other";
 }
 
@@ -468,7 +542,7 @@ export async function deleteSandbox(name: string): Promise<void> {
   const code = await proc.exited;
   // NotFound is fine — clean is idempotent; surface other failures so we
   // don't leave orphaned podman containers while pretending success.
-  if (code !== 0 && !/sandbox not found|NotFound/.test(stderr)) {
+  if (code !== 0 && !isSandboxNotFoundStderr(stderr)) {
     throw new Error(`openshell sandbox delete failed (exit ${code}): ${stderr.trim()}`);
   }
 }
