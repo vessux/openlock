@@ -36,6 +36,7 @@ Other:
   doctor             Check system health and prerequisites
   update-images      Rebuild sandbox container images
   update-base        Rewrite .openlock/Containerfile FROM to current base hash
+  update-harness     Resolve harness dist-tags + rewrite pinned npm install versions
   prune-images       Remove stale openlock images (use --legacy for pre-M5)
   refs               Inspect and promote sandbox commits to real branches
   validate           Validate .openlock/ config + policy
@@ -177,6 +178,11 @@ function main(): void {
     case "update-base":
       import("./cli/update-base").then(({ updateBaseCmd }) =>
         updateBaseCmd(args.slice(1)).then(processExit),
+      );
+      return;
+    case "update-harness":
+      import("./cli/update-harness").then(({ updateHarnessCmd }) =>
+        updateHarnessCmd(args.slice(1)).then(processExit),
       );
       return;
     case "prune-images":

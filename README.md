@@ -101,6 +101,8 @@ After the session exits, sandbox commits are in your repo under `refs/sandbox/<s
 | `report` | Collect diagnostic bundle for bug reports |
 | `gateway start\|stop\|status` | Manage the gateway |
 | `update-images [--no-cache]` | Rebuild sandbox container images |
+| `update-base` | Rewrite .openlock/Containerfile FROM to current base hash |
+| `update-harness` | Resolve harness dist-tags + rewrite pinned npm install versions |
 | `complete <bash\|zsh\|fish>` | Print shell completion script |
 | `cred-refresh` | Start the credential refresh service |
 

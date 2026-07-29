@@ -14,7 +14,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "knip": "knip",
-    "render:policies": "bun scripts/render-default-policies.ts"
+    "render:policies": "bun scripts/render-default-policies.ts",
+    "harness:check": "bun scripts/check-harness-versions.ts"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"
