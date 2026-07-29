@@ -1,42 +1,31 @@
 import { computeBaseTag, GHCR_BASE_PREFIX } from "./ensure-base";
 import type { Harness } from "./harness";
+import { HARNESS_VERSIONS, harnessInstallLine } from "./harness-versions";
 import { BASE_CONTAINERFILE } from "./image-build";
 import { HARNESS_SENTINEL } from "./update-containerfile";
 
 /** In-image sandbox user uid; must match the ARG in base.Containerfile / generators. */
 export const SANDBOX_UID = 60000;
 
-function multiHarnessBlock(harnesses: Harness[]): string {
-  const installs: string[] = [];
-  for (const h of harnesses) {
-    if (h === "claude_code") {
-      installs.push(`RUN npm install -g @anthropic-ai/claude-code@2.1.128`);
-    } else if (h === "opencode") {
-      installs.push(`RUN npm install -g opencode-ai@1.15.5`);
-    }
-  }
+function multiHarnessBlock(
+  harnesses: Harness[],
+  versions: Partial<Record<Harness, string>> | undefined,
+): string {
+  const installs = harnesses.map((h) =>
+    harnessInstallLine(h, versions?.[h] ?? HARNESS_VERSIONS[h].version),
+  );
+  // NOTE (openlock-5wk): the claude_code install used to also bake an
+  // onboarding-skip $HOME/.claude.json copy into this rendered block. That
+  // copy was dead weight — container.ts sets CLAUDE_CONFIG_DIR
+  // unconditionally for claude_code, so CC never reads $HOME/.claude.json;
+  // the copy that actually takes effect is staged into CLAUDE_CONFIG_DIR by
+  // ANTHROPIC.sandboxFiles() (src/providers/anthropic.ts). Removed rather
+  // than kept in sync as a decoy.
   return `USER root
 ${installs.join("\n")}
 RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
 USER \${SANDBOX_UID}:\${SANDBOX_GID}`;
 }
-
-// NOTE (openlock-5wk): claude_code used to also bake an onboarding-skip
-// $HOME/.claude.json here. That copy was dead weight — container.ts sets
-// CLAUDE_CONFIG_DIR unconditionally for claude_code, so CC never reads
-// $HOME/.claude.json; the copy that actually takes effect is staged into
-// CLAUDE_CONFIG_DIR by ANTHROPIC.sandboxFiles() (src/providers/anthropic.ts).
-// Removed rather than kept in sync as a decoy.
-const HARNESS_FRAGMENTS: Record<Harness, string> = {
-  claude_code: `USER root
-RUN npm install -g @anthropic-ai/claude-code@2.1.128
-RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
-USER \${SANDBOX_UID}:\${SANDBOX_GID}`,
-  opencode: `USER root
-RUN npm install -g opencode-ai@1.15.5
-RUN chown -R \${SANDBOX_UID}:\${SANDBOX_GID} /sandbox
-USER \${SANDBOX_UID}:\${SANDBOX_GID}`,
-};
 
 function inlineComment(content: string): string {
   return content
@@ -49,6 +38,10 @@ export interface SeedContainerfileArgs {
   harnesses: Harness[];
   baseHash: string;
   baseContent: string;
+  /** Per-harness install version override. Any harness missing from this map
+   * falls back to its pinned constant in ./harness-versions. Overridable so
+   * the fixture tests don't churn on every version bump. */
+  versions?: Partial<Record<Harness, string>>;
 }
 
 /** Full Containerfile contents seeded for a single harness, using the embedded
@@ -62,10 +55,7 @@ export function seedContainerfile(args: SeedContainerfileArgs): string {
   if (args.harnesses.length === 0) {
     throw new Error("seedContainerfile: at least one harness required");
   }
-  const harnessBlock =
-    args.harnesses.length === 1
-      ? HARNESS_FRAGMENTS[args.harnesses[0]]
-      : multiHarnessBlock(args.harnesses);
+  const harnessBlock = multiHarnessBlock(args.harnesses, args.versions);
 
   return `# .openlock/Containerfile — your sandbox image. Edit freely.
 #
