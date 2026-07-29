@@ -1,11 +1,22 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Harness } from "./harness";
+import { HARNESS_VERSIONS } from "./harness-versions";
 import { renderSeedContainerfile, seedContainerfile } from "./seed-containerfile";
 
 const SNAP_DIR = join(import.meta.dir, "seed-containerfile.snapshots");
 const BASE_CONTENT_FIXTURE = "FROM ubuntu:24.04\nRUN echo base\n";
 const FAKE_HASH = "abc123def456";
+// Obviously-fake sentinel versions: fixtures assert rendering shape, not the
+// real pins (that's covered separately below), so nobody mistakes these for
+// production values when a bump doesn't touch the snapshots. Distinct per
+// harness so the two-harness fixture can catch cross-wiring (one harness
+// rendering the other's version).
+const FAKE_VERSIONS: Record<Harness, string> = {
+  claude_code: "0.0.0-fixture-cc",
+  opencode: "0.0.0-fixture-oc",
+};
 
 function snap(name: string): string {
   return readFileSync(join(SNAP_DIR, name), "utf-8");
@@ -17,6 +28,7 @@ describe("seedContainerfile", () => {
       harnesses: ["claude_code"],
       baseHash: FAKE_HASH,
       baseContent: BASE_CONTENT_FIXTURE,
+      versions: FAKE_VERSIONS,
     });
     expect(out).toBe(snap("claude_code.Containerfile"));
   });
@@ -26,6 +38,7 @@ describe("seedContainerfile", () => {
       harnesses: ["opencode"],
       baseHash: FAKE_HASH,
       baseContent: BASE_CONTENT_FIXTURE,
+      versions: FAKE_VERSIONS,
     });
     expect(out).toBe(snap("opencode.Containerfile"));
   });
@@ -35,6 +48,7 @@ describe("seedContainerfile", () => {
       harnesses: ["claude_code", "opencode"],
       baseHash: FAKE_HASH,
       baseContent: BASE_CONTENT_FIXTURE,
+      versions: FAKE_VERSIONS,
     });
     expect(out).toBe(snap("claude_code+opencode.Containerfile"));
   });
@@ -74,6 +88,21 @@ describe("renderSeedContainerfile", () => {
 
   it("installs opencode for the opencode harness", () => {
     expect(renderSeedContainerfile("opencode")).toContain("opencode-ai@");
+  });
+
+  // The snapshot fixtures above pin fake versions to avoid churning on every
+  // real bump, which means a wrong HARNESS_VERSIONS constant would otherwise
+  // be invisible to the suite. Cover the real pins explicitly instead.
+  it("installs the real pinned claude-code version from HARNESS_VERSIONS", () => {
+    expect(renderSeedContainerfile("claude_code")).toContain(
+      `@anthropic-ai/claude-code@${HARNESS_VERSIONS.claude_code.version}`,
+    );
+  });
+
+  it("installs the real pinned opencode version from HARNESS_VERSIONS", () => {
+    expect(renderSeedContainerfile("opencode")).toContain(
+      `opencode-ai@${HARNESS_VERSIONS.opencode.version}`,
+    );
   });
 });
 
