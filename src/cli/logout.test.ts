@@ -25,6 +25,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** Stand-in for an unreachable gateway. Never let a test in this file reach a
+ * real one — it would delete the developer's own provider rows. */
+const noGateway = async (): Promise<boolean> => false;
+
 describe("_logoutForTests", () => {
   it("deletes the named provider", async () => {
     writeProvider("openrouter", {
@@ -35,6 +39,7 @@ describe("_logoutForTests", () => {
     await _logoutForTests({
       providerFlag: "openrouter",
       pick: async () => "openrouter" as ProviderId,
+      clearGateway: noGateway,
     });
     expect(readProvider("openrouter")).toBeNull();
   });
@@ -48,6 +53,7 @@ describe("_logoutForTests", () => {
     await _logoutForTests({
       providerFlag: undefined,
       pick: async () => "anthropic" as ProviderId,
+      clearGateway: noGateway,
     });
     expect(readProvider("anthropic")).toBeNull();
   });
@@ -57,7 +63,45 @@ describe("_logoutForTests", () => {
       _logoutForTests({
         providerFlag: undefined,
         pick: async () => "anthropic" as ProviderId,
+        clearGateway: noGateway,
       }),
     ).rejects.toThrow(/no providers/i);
+  });
+
+  // openlock-9ej: the gateway row is the copy a sandbox actually gets. A
+  // local-only logout left a revoked token in service with no way to remove it.
+  it("also clears the gateway row", async () => {
+    writeProvider("anthropic", {
+      type: "claude-oauth",
+      credentials: { ANTHROPIC_BEARER_TOKEN: "x" },
+      created_at: "t",
+    });
+    const cleared: string[] = [];
+    await _logoutForTests({
+      providerFlag: "anthropic",
+      pick: async () => "anthropic" as ProviderId,
+      clearGateway: async (name) => {
+        cleared.push(name);
+        return true;
+      },
+    });
+    expect(cleared).toEqual(["anthropic"]);
+    expect(readProvider("anthropic")).toBeNull();
+  });
+
+  it("still succeeds locally when the gateway is unreachable", async () => {
+    writeProvider("anthropic", {
+      type: "claude-oauth",
+      credentials: { ANTHROPIC_BEARER_TOKEN: "x" },
+      created_at: "t",
+    });
+    await expect(
+      _logoutForTests({
+        providerFlag: "anthropic",
+        pick: async () => "anthropic" as ProviderId,
+        clearGateway: async () => false,
+      }),
+    ).resolves.toBeUndefined();
+    expect(readProvider("anthropic")).toBeNull();
   });
 });
