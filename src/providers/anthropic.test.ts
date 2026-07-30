@@ -111,7 +111,9 @@ describe("ANTHROPIC plugin (OAuth subscription)", () => {
       // authenticated even with a valid .credentials.json present. This exact
       // shape (all-zero/all-one UUIDs, .local email, null workspaceRole) is
       // live-verified against CC 2.1.128 on 2026-07-27 (authrepro-5edca7
-      // sandbox: started straight into a prompt, reported Claude Max) — assert
+      // sandbox: started straight into a prompt, reported Claude Max) and
+      // re-verified unchanged against CC 2.1.212 on 2026-07-29 (openlock-nna,
+      // sandbox nna-cc-53866a: same result, real inference round-tripped) — assert
       // the precise values, not a substring match, since an unparseable UUID
       // (e.g. non-hex characters in the last group) would silently regress CC
       // to the login selector without failing a loose "is defined" check.

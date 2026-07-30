@@ -38,7 +38,10 @@ const DUMMY_CREDENTIALS_JSON = JSON.stringify({
 // data ever enters the sandbox. Shape (all-zero/all-one UUIDs, .local email,
 // null workspaceRole) is LIVE-VERIFIED against Claude Code 2.1.128 on
 // 2026-07-27 against the still-running `authrepro-5edca7` sandbox: CC started
-// straight into a prompt and reported Claude Max. Do not hand-wave-edit this
+// straight into a prompt and reported Claude Max. RE-VERIFIED unchanged
+// against CC 2.1.212 on 2026-07-29 (openlock-nna, sandbox `nna-cc-53866a`:
+// same result — straight to a prompt, reported Claude Max, real inference
+// round-tripped), so the shape survived 84 patch releases. Do not hand-wave-edit this
 // shape without re-verifying against a real CC startup — an unparseable
 // accountUuid/organizationUuid (e.g. non-hex characters in the last UUID
 // group) silently regresses to the login selector, and nothing in the test
@@ -88,8 +91,8 @@ export const ANTHROPIC: ProviderPlugin = {
     // RAW token stored; gateway adds the "Bearer " prefix at egress. Both
     // endpoints below carry an IDENTICAL cred_inject block deliberately:
     // cred_inject is a per-endpoint field (not inherited across hosts), and
-    // CC 2.1.128 makes an unconditional startup connectivity probe to EACH
-    // host. Allowing platform.claude.com without its own cred_inject would
+    // CC makes a startup connectivity probe to EACH host on its first-run
+    // path. Allowing platform.claude.com without its own cred_inject would
     // forward the in-sandbox placeholder token verbatim; upstream then
     // answers 401 "Invalid bearer token" — strictly worse than a blocked
     // connection, since CC treats a 401 as fatal but tolerates a deny.
@@ -111,15 +114,25 @@ export const ANTHROPIC: ProviderPlugin = {
         protocol: "rest",
         rules: [
           { allow: { method: "POST", path: "/v1/**" } },
-          // CC 2.1.128 unconditional startup connectivity probe. Inside this
-          // endpoint block so cred_inject applies to it.
+          // CC first-run startup connectivity probe. Inside this endpoint
+          // block so cred_inject applies to it.
           { allow: { method: "GET", path: "/api/hello" } },
         ],
         cred_inject: credInject,
       },
-      // CC 2.1.128 also probes platform.claude.com at startup. Separate host
+      // CC also probes platform.claude.com on that path. Separate host
       // => separate endpoint block => needs its own cred_inject (see comment
       // above).
+      //
+      // Both probes are wire-verified for CC 2.1.128 (openlock-z08, via a rig
+      // that deletes the staged .claude.json so onboarding runs for real).
+      // They do NOT fire in steady state, where the staged .claude.json
+      // pre-completes onboarding — confirmed absent from the egress log for
+      // 2.1.128 (v0.11.1 smoke) and again for 2.1.212 (openlock-nna,
+      // 2026-07-29). So these two rules are defence-in-depth for the
+      // first-run/degraded path, not the hot path: cheap to keep, and a CC
+      // upgrade or a lost claude-config puts a user back on it. Don't delete
+      // them just because a steady-state capture shows no traffic.
       {
         host: "platform.claude.com",
         port: 443,

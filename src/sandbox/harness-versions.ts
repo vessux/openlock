@@ -20,12 +20,12 @@ export const HARNESS_VERSIONS: Record<
 > = {
   claude_code: {
     package: "@anthropic-ai/claude-code",
-    version: "2.1.128",
+    version: "2.1.212",
     distTag: "stable",
   },
   opencode: {
     package: "opencode-ai",
-    version: "1.15.5",
+    version: "1.18.9",
     distTag: "latest",
   },
 };
