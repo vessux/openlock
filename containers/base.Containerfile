@@ -20,7 +20,7 @@ RUN ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/') \
       arm64) NODE_SHA256=8cfd5a8b9afae5a2e0bd86b0148ca31d2589c0ea669c2d0b11c132e35d90ed68 ;; \
       *)     echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ARCH}.tar.xz -o /tmp/node.tar.xz \
+ && curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ARCH}.tar.xz -o /tmp/node.tar.xz \
  && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
  && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE' \
@@ -33,7 +33,7 @@ RUN ARCH=$(uname -m) \
       aarch64) UV_SHA256=055c329c38a93c01d378349d51cb4d521d1998c8a79355ddc00f863ce451942f ;; \
       *)       echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSL https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz -o /tmp/uv.tar.gz \
+ && curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${ARCH}-unknown-linux-gnu.tar.gz -o /tmp/uv.tar.gz \
  && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/uv.tar.gz -C /usr/local/bin --strip-components=1 \
     uv-${ARCH}-unknown-linux-gnu/uv uv-${ARCH}-unknown-linux-gnu/uvx \
