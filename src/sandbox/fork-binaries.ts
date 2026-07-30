@@ -202,3 +202,24 @@ export async function getCliInvocation(): Promise<CliInvocation> {
   const bin = await ensureFromRelease("openshell");
   return { argv: [bin], cwd: undefined };
 }
+
+/**
+ * The openshell CLI rendered as a command string for USER-FACING remediation
+ * messages (openlock-17q). Mirrors getCliInvocation's resolution order, but
+ * stays synchronous and never downloads: a message telling someone how to
+ * repair a broken install must not itself fetch a 30MB tarball, and it has to
+ * work when the error being explained is that the fetch failed.
+ *
+ * Keep the three branches in step with getCliInvocation above — pointing a
+ * user at a binary the resolver would not actually use is the bug this
+ * function exists to fix. Previously the remediation hardcoded the dev path
+ * (`cd openshell-fork && mise exec -- openshell`), which does not exist for
+ * anyone who installed via install.sh — i.e. exactly the users most likely to
+ * hit the credential failure that prints it.
+ */
+export function openshellCommandHint(): string {
+  const override = process.env.OPENLOCK_OPENSHELL_BIN;
+  if (override) return override;
+  if (isDevMode()) return `cd ${forkDir()} && mise exec -- openshell`;
+  return join(CACHE_DIR, `openshell-${rustTriple("openshell")}`);
+}

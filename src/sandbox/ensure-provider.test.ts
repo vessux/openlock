@@ -4,14 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeProvider } from "../tokens";
 import {
+  _deleteGatewayProviderForTests,
   _ensureGenericProviderForTests,
   _ensureProviderForTests,
   _getProviderGatewayHealthForTests,
   credentialHealth,
+  hostTokenIsNewer,
   isWedgedRefreshCredential,
   parseProviderRefreshStatus,
   providerExistsInGateway,
 } from "./ensure-provider";
+import { openshellCommandHint } from "./fork-binaries";
 
 let dir: string;
 let originalHome: string | undefined;
@@ -365,7 +368,12 @@ describe("gateway credential health", () => {
   });
 
   describe("_ensureProviderForTests re-push on a wedged credential (openlock-stj)", () => {
-    function writeAnthropic() {
+    // `accessExpiresAt` is explicit per-test because it is now load-bearing in
+    // two independent ways: it seeds the gateway expiry on a push, AND it is
+    // the recency signal hostTokenIsNewer compares against (openlock-9ej). A
+    // test that means to exercise the wedged path must keep the host token
+    // OLDER than the gateway's, or it passes for the wrong reason.
+    function writeAnthropic(accessExpiresAt = "2100-01-01T00:00:00Z") {
       writeProvider("anthropic", {
         type: "claude-oauth",
         credentials: { ANTHROPIC_BEARER_TOKEN: "fresh-token-from-login" },
@@ -376,7 +384,7 @@ describe("gateway credential health", () => {
           scopes: ["user:inference"],
           client_id: "client-abc",
           refresh_token: "rt-fresh",
-          access_expires_at: "2100-01-01T00:00:00Z",
+          access_expires_at: accessExpiresAt,
         },
       });
     }
@@ -399,6 +407,17 @@ describe("gateway credential health", () => {
       refreshStdout: string,
     ): { exitCode: number; stdout: string; stderr: string } {
       const cmd = args.slice(0, 4).join(" ");
+      // The real gateway persists CreateProvider with
+      // WriteCondition::MustCreate and maps the UniqueViolation to
+      // Status::already_exists (openshell-server/src/grpc/provider.rs) — every
+      // test in this describe block is a provider that ALREADY exists, so a
+      // `provider create` here must fail exactly as it would in production.
+      // Mocking it as exit 0 is what let openlock-45h ship: the wedged
+      // self-heal path issued `provider create` against a live provider and
+      // could never have worked.
+      if (cmd.startsWith("provider create")) {
+        return { exitCode: 1, stdout: "", stderr: "error: provider already exists" };
+      }
       if (cmd.startsWith("provider list --output")) {
         return {
           exitCode: 0,
@@ -443,7 +462,12 @@ describe("gateway credential health", () => {
       const { calls, shell } = makeWedgeShell(refreshStdout, Date.parse("2026-06-19T20:30:00Z"));
       await _ensureProviderForTests("anthropic", shell);
 
-      expect(calls.find((c) => c[1] === "create")).toBeDefined();
+      // `update`, not `create`: the provider already exists, and the gateway
+      // rejects create-on-existing (openlock-45h).
+      expect(calls.find((c) => c[1] === "create")).toBeUndefined();
+      expect(
+        calls.find((c) => c[1] === "update" && c.includes("ANTHROPIC_BEARER_TOKEN")),
+      ).toBeDefined();
       expect(calls.find((c) => c[1] === "refresh" && c[2] === "configure")).toBeDefined();
     });
 
@@ -463,12 +487,18 @@ describe("gateway credential health", () => {
       const { calls, shell } = makeWedgeShell(refreshStdout, Date.parse("2026-06-19T20:30:00Z"));
       await _ensureProviderForTests("anthropic", shell);
 
-      expect(calls.find((c) => c[1] === "create")).toBeDefined();
+      expect(calls.find((c) => c[1] === "create")).toBeUndefined();
+      expect(
+        calls.find((c) => c[1] === "update" && c.includes("ANTHROPIC_BEARER_TOKEN")),
+      ).toBeDefined();
       expect(calls.find((c) => c[1] === "refresh" && c[2] === "configure")).toBeDefined();
     });
 
     it("does NOT re-push when expired but the refresh worker is still healthy, and the preflight failure names the manual escape hatch", async () => {
-      writeAnthropic();
+      // Host token deliberately NOT newer than the gateway's, so this isolates
+      // the never-clobber-on-healthy-worker rule rather than tripping the
+      // openlock-9ej recency push.
+      writeAnthropic("2026-06-19T20:30:00Z");
       const refreshStdout = refreshStatusStdout({
         provider: "anthropic",
         key: "ANTHROPIC_BEARER_TOKEN",
@@ -486,8 +516,11 @@ describe("gateway credential health", () => {
       await expect(_ensureProviderForTests("anthropic", shell)).rejects.toThrow(
         /no live credential/,
       );
+      // Assert against the resolver, not a hardcoded dev path: the whole point
+      // of openlock-17q is that this string differs between a dev checkout and
+      // an install.sh machine (and so does CI, which has no openshell-fork/).
       await expect(_ensureProviderForTests("anthropic", shell)).rejects.toThrow(
-        /mise exec -- openshell provider delete anthropic/,
+        `${openshellCommandHint()} provider delete anthropic`,
       );
       expect(calls.find((c) => c[1] === "create")).toBeUndefined();
       expect(calls.find((c) => c[1] === "refresh" && c[2] === "configure")).toBeUndefined();
@@ -506,6 +539,149 @@ describe("gateway credential health", () => {
       await _ensureProviderForTests("anthropic", shell);
       expect(calls.find((c) => c[1] === "create")).toBeUndefined();
       expect(calls.find((c) => c[1] === "refresh" && c[2] === "configure")).toBeUndefined();
+    });
+
+    // openlock-9ej: the reported failure. A gateway token that is live by the
+    // clock but already rejected on the wire (a second `claude auth login`
+    // rotated the session) is invisible to every expiry-based check, so the
+    // sandbox injected it and the agent's first request came back
+    // `401 Invalid bearer token`. The user had just run `openlock login` — but
+    // that only writes the local credentials.json, and never-clobber then
+    // declined to push it because the gateway credential still read `live`.
+    it("re-pushes when the host token is strictly newer, even though the gateway credential is still live", async () => {
+      writeAnthropic("2100-06-01T00:00:00Z"); // fresh interactive login
+      const gatewayExpiry = Date.parse("2100-01-01T00:00:00Z"); // live, but older
+      const refreshStdout = refreshStatusStdout({
+        provider: "anthropic",
+        key: "ANTHROPIC_BEARER_TOKEN",
+        status: "refreshed",
+        expiresAt: "2100-01-01 00:00:00",
+      });
+      const { calls, shell } = makeWedgeShell(refreshStdout, gatewayExpiry);
+      await _ensureProviderForTests("anthropic", shell);
+
+      expect(
+        calls.find((c) => c[1] === "update" && c.includes("ANTHROPIC_BEARER_TOKEN")),
+      ).toBeDefined();
+      expect(calls.find((c) => c[1] === "refresh" && c[2] === "configure")).toBeDefined();
+      // Never `create` — the provider exists (openlock-45h).
+      expect(calls.find((c) => c[1] === "create")).toBeUndefined();
+    });
+
+    // The direction never-clobber actually protects: the gateway's own refresh
+    // worker has minted a token NEWER than the host's, so the host must not
+    // overwrite it. This is what keeps the openlock-9ej recency push safe.
+    it("does NOT re-push when the gateway token is newer than the host's (worker already refreshed)", async () => {
+      writeAnthropic("2026-06-19T20:30:00Z"); // stale host record
+      const refreshStdout = refreshStatusStdout({
+        provider: "anthropic",
+        key: "ANTHROPIC_BEARER_TOKEN",
+        status: "refreshed",
+        expiresAt: "2100-01-01 00:00:00",
+      });
+      const { calls, shell } = makeWedgeShell(refreshStdout, Date.parse("2100-01-01T00:00:00Z"));
+      await _ensureProviderForTests("anthropic", shell);
+
+      expect(calls.find((c) => c[1] === "create")).toBeUndefined();
+      expect(
+        calls.find((c) => c[1] === "update" && c.includes("ANTHROPIC_BEARER_TOKEN")),
+      ).toBeUndefined();
+      expect(calls.find((c) => c[1] === "refresh" && c[2] === "configure")).toBeUndefined();
+    });
+
+    // Pushing must converge: after the recency push the gateway expiry equals
+    // the host's, so a second `openlock sandbox` is a no-op. Without this the
+    // fix would re-push (and re-`refresh configure`) on every single start.
+    it("converges — a second ensure after a recency push does not push again", async () => {
+      writeAnthropic("2100-06-01T00:00:00Z");
+      const refreshStdout = refreshStatusStdout({
+        provider: "anthropic",
+        key: "ANTHROPIC_BEARER_TOKEN",
+        status: "refreshed",
+        expiresAt: "2100-01-01 00:00:00",
+      });
+      const { calls, shell } = makeWedgeShell(refreshStdout, Date.parse("2100-01-01T00:00:00Z"));
+      await _ensureProviderForTests("anthropic", shell);
+      const pushesAfterFirst = calls.filter(
+        (c) => c[1] === "refresh" && c[2] === "configure",
+      ).length;
+      await _ensureProviderForTests("anthropic", shell);
+      const pushesAfterSecond = calls.filter(
+        (c) => c[1] === "refresh" && c[2] === "configure",
+      ).length;
+
+      expect(pushesAfterFirst).toBe(1);
+      expect(pushesAfterSecond).toBe(1);
+    });
+  });
+
+  describe("_deleteGatewayProviderForTests (openlock-9ej)", () => {
+    function shellFor(responses: Record<string, { exitCode: number; stdout?: string }>) {
+      const calls: string[][] = [];
+      const shell = async (args: string[]) => {
+        calls.push(args);
+        const key = `${args[0]} ${args[1]}`;
+        const r = responses[key] ?? { exitCode: 0 };
+        return { exitCode: r.exitCode, stdout: r.stdout ?? "", stderr: "" };
+      };
+      return { calls, shell };
+    }
+
+    it("deletes the row and reports true when the provider is present", async () => {
+      const { calls, shell } = shellFor({
+        "provider list": { exitCode: 0, stdout: "NAME  TYPE\nanthropic  claude-oauth\n" },
+        "provider delete": { exitCode: 0 },
+      });
+      expect(await _deleteGatewayProviderForTests("anthropic", shell)).toBe(true);
+      expect(calls.find((c) => c[1] === "delete")).toEqual(["provider", "delete", "anthropic"]);
+    });
+
+    it("reports false without attempting a delete when the provider is absent", async () => {
+      const { calls, shell } = shellFor({
+        "provider list": { exitCode: 0, stdout: "NAME  TYPE\nopenrouter  generic\n" },
+      });
+      expect(await _deleteGatewayProviderForTests("anthropic", shell)).toBe(false);
+      expect(calls.find((c) => c[1] === "delete")).toBeUndefined();
+    });
+
+    it("reports false (never throws) when the gateway is unreachable", async () => {
+      const { shell } = shellFor({ "provider list": { exitCode: 1 } });
+      expect(await _deleteGatewayProviderForTests("anthropic", shell)).toBe(false);
+
+      const throwing = async () => {
+        throw new Error("connection refused");
+      };
+      expect(await _deleteGatewayProviderForTests("anthropic", throwing)).toBe(false);
+    });
+
+    it("reports false when the delete itself fails", async () => {
+      const { shell } = shellFor({
+        "provider list": { exitCode: 0, stdout: "NAME  TYPE\nanthropic  claude-oauth\n" },
+        "provider delete": { exitCode: 1 },
+      });
+      expect(await _deleteGatewayProviderForTests("anthropic", shell)).toBe(false);
+    });
+  });
+
+  describe("hostTokenIsNewer (openlock-9ej)", () => {
+    const gatewayMs = Date.parse("2026-06-19T20:30:00Z");
+
+    it("is true when the host access token outlives the gateway's", () => {
+      expect(hostTokenIsNewer("2026-06-19T21:30:00Z", gatewayMs)).toBe(true);
+    });
+    it("is false when the gateway's outlives the host's (the clobber never-clobber prevents)", () => {
+      expect(hostTokenIsNewer("2026-06-19T19:30:00Z", gatewayMs)).toBe(false);
+    });
+    it("is false on an exact tie (already in sync — pushing would never converge)", () => {
+      expect(hostTokenIsNewer("2026-06-19T20:30:00Z", gatewayMs)).toBe(false);
+    });
+    it("is false when the gateway tracks no expiry for the key — no evidence the host is ahead", () => {
+      expect(hostTokenIsNewer("2100-01-01T00:00:00Z", undefined)).toBe(false);
+      expect(hostTokenIsNewer("2100-01-01T00:00:00Z", 0)).toBe(false);
+    });
+    it("is false when the host record has no or an unparseable expiry", () => {
+      expect(hostTokenIsNewer(undefined, gatewayMs)).toBe(false);
+      expect(hostTokenIsNewer("not-a-date", gatewayMs)).toBe(false);
     });
   });
 
@@ -540,7 +716,9 @@ describe("gateway credential health", () => {
       // No `refresh` material stored -> there's no gateway-side self-heal path
       // to have failed, so the manual escape hatch (which only makes sense for
       // a refresh-capable provider) must NOT be advertised here.
-      await expect(_ensureProviderForTests("anthropic", shell)).rejects.not.toThrow(/mise exec/);
+      await expect(_ensureProviderForTests("anthropic", shell)).rejects.not.toThrow(
+        /provider delete/,
+      );
     });
 
     it("passes when the gateway credential is live", async () => {

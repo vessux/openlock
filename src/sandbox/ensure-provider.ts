@@ -6,7 +6,7 @@ import type { ProviderId } from "../providers/types";
 import type { ProviderRecord } from "../tokens";
 import { readProvider } from "../tokens";
 import { buildClaudeOAuthProfileYaml, CLAUDE_OAUTH_PROFILE_ID } from "./claude-oauth-profile";
-import { getCliInvocation } from "./fork-binaries";
+import { getCliInvocation, openshellCommandHint } from "./fork-binaries";
 
 interface ShellResult {
   exitCode: number;
@@ -224,8 +224,8 @@ async function assertProviderHasLiveCredential(
   const remediation = isRefreshCapable
     ? `Run \`openlock login --provider ${providerId}\` and retry. If the SAME sandbox start fails ` +
       `again with this error, the gateway's own repair path could not resolve it on its own: tear ` +
-      `down every sandbox session using this provider, run \`cd openshell-fork && mise exec -- ` +
-      `openshell provider delete ${providerId}\`, then \`openlock login --provider ${providerId}\` again.`
+      `down every sandbox session using this provider, run \`${openshellCommandHint()} provider ` +
+      `delete ${providerId}\`, then \`openlock login --provider ${providerId}\` again.`
     : `Run \`openlock login --provider ${providerId}\` to refresh it, then retry.`;
   throw new Error(
     `Provider '${providerId}' has no live credential in the gateway: '${worst.key}' expired at ` +
@@ -313,6 +313,48 @@ export function isWedgedRefreshCredential(
 ): boolean {
   if (credential !== "expired") return false;
   return refreshStatus === null || refreshStatus === "error";
+}
+
+/**
+ * The OTHER half of never-clobber (openlock-9ej): push when the HOST holds a
+ * strictly newer token than the gateway does.
+ *
+ * `isWedgedRefreshCredential` above only fires on an EXPIRED gateway
+ * credential, because it asks "can the gateway still repair this itself?".
+ * That misses the case this predicate exists for: a gateway credential that is
+ * live by the clock but DEAD on the wire — an access token the issuer
+ * invalidated (e.g. a second `claude auth login` rotating the session) rather
+ * than one that timed out. Every openlock health signal is expiry-based, not
+ * validity-based, so such a token reads `live`, sails through
+ * `assertProviderHasLiveCredential`, and gets injected into the sandbox, where
+ * the agent's very first request comes back `401 Invalid bearer token` with
+ * nothing on the openlock side to explain it. Before this predicate there was
+ * no supported way out: `openlock login` writes only the local
+ * credentials.json, `openlock logout` leaves the gateway row intact, and
+ * neither has a --force.
+ *
+ * Expiry is a sound proxy for recency here because both tokens come from the
+ * same issuer with the same TTL, so a later expiry means a later mint. That
+ * makes the comparison SAFE in the direction never-clobber actually cares
+ * about: when the gateway's refresh worker mints a token, the gateway expiry
+ * moves PAST the host's and this returns false — a freshly-refreshed gateway
+ * credential is never overwritten by a stale host one, which is the whole
+ * point of the invariant. It only returns true when the host demonstrably has
+ * the newer material, i.e. right after an interactive login.
+ *
+ * Returns false when the gateway tracks no expiry for the key (`undefined`, or
+ * the explicit 0 meaning "cleared"): with nothing to compare against, there is
+ * no evidence the host is ahead, so stay never-clobber.
+ */
+export function hostTokenIsNewer(
+  hostAccessExpiresAt: string | undefined,
+  gatewayExpiryMs: number | undefined,
+): boolean {
+  if (!hostAccessExpiresAt) return false;
+  if (gatewayExpiryMs === undefined || gatewayExpiryMs <= 0) return false;
+  const hostMs = Date.parse(hostAccessExpiresAt);
+  if (Number.isNaN(hostMs)) return false;
+  return hostMs > gatewayExpiryMs;
 }
 
 async function fetchRefreshHealth(
@@ -439,7 +481,11 @@ async function seedRefreshProvider(
     const expiryByKey = list ? credentialExpiryFor(list, providerId) : null;
     const credential = credentialHealth(["ANTHROPIC_BEARER_TOKEN"], expiryByKey, Date.now());
     const health = await fetchRefreshHealth(providerId, "ANTHROPIC_BEARER_TOKEN", shell);
-    shouldPush = isWedgedRefreshCredential(credential, health ? health.status : null);
+    shouldPush =
+      isWedgedRefreshCredential(credential, health ? health.status : null) ||
+      // Second disjunct (openlock-9ej): the gateway credential can be live by
+      // the clock yet already rejected on the wire. See hostTokenIsNewer.
+      hostTokenIsNewer(refresh.access_expires_at, expiryByKey?.ANTHROPIC_BEARER_TOKEN);
   }
 
   if (shouldPush) {
@@ -452,9 +498,20 @@ async function seedRefreshProvider(
     const { args: createCredArgs, env: createCredEnv } = credentialArgsAndEnv({
       ANTHROPIC_BEARER_TOKEN: access,
     });
+    // create-or-update, mirroring the generic branch below (openlock-45h).
+    // `shouldPush` is true in two situations — the provider is ABSENT, or it
+    // exists and needs re-pushing — and only the first can use `provider
+    // create`: the gateway persists CreateProvider with
+    // WriteCondition::MustCreate and answers `already_exists` otherwise
+    // (openshell-server/src/grpc/provider.rs), so issuing `create` against a
+    // live provider hard-fails. That made every re-push path unreachable:
+    // a credential the gateway could no longer repair on its own threw
+    // `provider already exists` on each retry instead of self-healing.
     await mustOk(
       shell,
-      ["provider", "create", "--name", providerId, "--type", record.type, ...createCredArgs],
+      exists
+        ? ["provider", "update", providerId, ...createCredArgs]
+        : ["provider", "create", "--name", providerId, "--type", record.type, ...createCredArgs],
       createCredEnv,
     );
     await mustOk(shell, [
@@ -555,6 +612,35 @@ export async function _ensureProviderForTests(providerId: ProviderId, shell: She
   // failure for the residual case where nothing would be injected into the
   // sandbox and the gateway would otherwise skip it in silence.
   await assertProviderHasLiveCredential(providerId, shell);
+}
+
+/**
+ * Remove a provider row from the GATEWAY (openlock-9ej). Distinct from
+ * `deleteProvider` in tokens.ts, which only removes the host-side
+ * credentials.json entry — the two together are what "log out" has to mean,
+ * because the gateway row is the copy that actually gets injected into a
+ * sandbox. Leaving it behind is how a revoked token kept being served long
+ * after the user believed they had logged out.
+ *
+ * Best-effort by contract: returns false (never throws) when the gateway is
+ * unreachable or has no such provider, so `openlock logout` still succeeds at
+ * clearing local state on a machine whose gateway is stopped. Callers report
+ * the outcome rather than failing on it.
+ */
+export async function deleteGatewayProvider(name: string): Promise<boolean> {
+  return _deleteGatewayProviderForTests(name, realOpenshell);
+}
+
+export async function _deleteGatewayProviderForTests(name: string, shell: Shell): Promise<boolean> {
+  try {
+    const list = await shell(["provider", "list"]);
+    if (list.exitCode !== 0) return false;
+    if (!providerExistsInGateway(list.stdout, name)) return false;
+    const result = await shell(["provider", "delete", name]);
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Provision a generic secondary-credential provider (create-or-update) from a
