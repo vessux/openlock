@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
+  asAmbiguousWarning,
   buildCmakeCheck,
   buildGatewayReachabilityCheck,
   buildReachabilityProbeArgv,
@@ -92,19 +93,25 @@ describe("doctor global config check", () => {
   });
 
   it(
-    "passes when ~/.config/openlock/config.yaml is absent",
+    // openlock-ucm: the check's own label names a path ("global config
+    // (<path>)"), which reads as "present and valid" when green. Absent must
+    // still PASS (it's the default, fresh-install state, not an error) but
+    // now says so explicitly in the detail line rather than rendering
+    // identically to a present-and-valid file.
+    "passes AND reports 'not present' when ~/.config/openlock/config.yaml is absent",
     async () => {
       const results = await runDoctorChecks("podman");
       const r = results.find((x) => x.name.includes("global config"));
       expect(r).toBeDefined();
       expect(r?.ok).toBe(true);
-      expect(r?.detail).toBeUndefined();
+      expect(r?.detail).toBeDefined();
+      expect(r?.detail).toMatch(/not present/);
     },
     TIMEOUT_MS,
   );
 
   it(
-    "passes when ~/.config/openlock/config.yaml is valid",
+    "passes with no 'not present' detail when ~/.config/openlock/config.yaml is valid",
     async () => {
       const dir = join(tmp, "openlock");
       mkdirSync(dir, { recursive: true });
@@ -113,6 +120,7 @@ describe("doctor global config check", () => {
       const r = results.find((x) => x.name.includes("global config"));
       expect(r).toBeDefined();
       expect(r?.ok).toBe(true);
+      expect(r?.detail).toBeUndefined();
     },
     TIMEOUT_MS,
   );
@@ -202,9 +210,41 @@ describe("buildCmakeCheck (dev-mode-only, openlock-e7q)", () => {
 });
 
 describe("buildRuntimeChecks", () => {
-  it("reports BOTH runtimes (presence + readiness) when both are installed", () => {
-    const names = buildRuntimeChecks({ podman: true, docker: true }, false).map((c) => c.name);
-    expect(names).toEqual([
+  // openlock-ucm regression coverage: readiness (machine/socket/daemon) must
+  // gate on the RESOLVED runtime only. Both being installed used to add a
+  // readiness check for BOTH — so a healthy podman-only Mac with the Docker
+  // CLI merely present (no daemon) failed doctor on "docker daemon reachable"
+  // even though docker was never going to be used.
+  it("gates readiness on the resolved runtime (podman) when both are installed", () => {
+    const checks = buildRuntimeChecks({ podman: true, docker: true }, false, "podman");
+    expect(checks.map((c) => c.name)).toEqual(["podman", "podman API socket active", "docker"]);
+  });
+
+  it("the non-resolved installed runtime is reported informational (never a failure)", async () => {
+    const checks = buildRuntimeChecks({ podman: true, docker: true }, false, "podman");
+    const dockerCheck = checks.find((c) => c.name === "docker");
+    const outcome = await dockerCheck?.test();
+    expect(outcome).not.toBe(false);
+    expect(outcome).toMatchObject({ ok: true });
+    expect((outcome as { detail?: string }).detail).toContain("not in use");
+    expect((outcome as { detail?: string }).detail).toContain("podman");
+  });
+
+  it("gates readiness on the resolved runtime (docker) when both are installed", () => {
+    const checks = buildRuntimeChecks({ podman: true, docker: true }, false, "docker");
+    expect(checks.map((c) => c.name)).toEqual(["podman", "docker", "docker daemon reachable"]);
+  });
+
+  // Operator follow-up to the ucm fix: a fresh install with BOTH runtimes
+  // present and neither resolvable used to skip readiness on both, which is
+  // itself a false PASS — a stopped podman machine on such a box got an
+  // all-green `doctor` and then `openlock sandbox` failed anyway. The fix:
+  // probe readiness for every installed runtime in this case too, but the
+  // probe outcome must NEVER be allowed to fail doctor's exit code (that
+  // would re-open ucm) — see asAmbiguousWarning below for the mechanism.
+  it("in the ambiguous case (both installed, neither resolves), readiness IS probed for BOTH", () => {
+    const checks = buildRuntimeChecks({ podman: true, docker: true }, false, null);
+    expect(checks.map((c) => c.name)).toEqual([
       "podman",
       "podman API socket active",
       "docker",
@@ -212,20 +252,102 @@ describe("buildRuntimeChecks", () => {
     ]);
   });
 
+  it(
+    "in the ambiguous case, every check's ok bit is true regardless of this machine's real " +
+      "runtime state — a real failure here would re-open openlock-ucm",
+    async () => {
+      const checks = buildRuntimeChecks({ podman: true, docker: true }, false, null);
+      for (const c of checks) {
+        const outcome = await c.test();
+        expect(typeof outcome === "boolean" ? outcome : outcome.ok).toBe(true);
+      }
+    },
+  );
+
   it("reports only the installed runtime", () => {
-    const names = buildRuntimeChecks({ podman: false, docker: true }, false).map((c) => c.name);
+    const names = buildRuntimeChecks({ podman: false, docker: true }, false, "docker").map(
+      (c) => c.name,
+    );
     expect(names).toEqual(["docker", "docker daemon reachable"]);
   });
 
   it("emits a single install-a-runtime failure when neither is installed", () => {
-    const checks = buildRuntimeChecks({ podman: false, docker: false }, false);
+    const checks = buildRuntimeChecks({ podman: false, docker: false }, false, null);
     expect(checks.map((c) => c.name)).toEqual(["container runtime (podman/docker)"]);
     expect(checks[0]?.fix).toContain("podman");
   });
 
   it("uses the podman machine check on macOS instead of the API socket", () => {
-    const names = buildRuntimeChecks({ podman: true, docker: false }, true).map((c) => c.name);
+    const names = buildRuntimeChecks({ podman: true, docker: false }, true, "podman").map(
+      (c) => c.name,
+    );
     expect(names).toEqual(["podman", "podman machine (running)"]);
+  });
+});
+
+describe("asAmbiguousWarning (openlock-ucm ambiguous-case follow-up)", () => {
+  // Synthetic checks decoupled from real podman/docker state, so these are
+  // deterministic on any machine regardless of what's actually installed or
+  // running — the property under test is the wrapper's own ok-forcing logic,
+  // not any real runtime probe.
+  const failingBoolCheck = { name: "docker daemon reachable", test: async () => false };
+  const failingOutcomeCheck = {
+    name: "docker daemon reachable",
+    test: async () => ({ ok: false, detail: "connection refused", fix: "start Docker" }),
+    fix: "start Docker Desktop",
+  };
+  const passingBoolCheck = { name: "docker daemon reachable", test: async () => true };
+  const passingOutcomeCheck = {
+    name: "docker daemon reachable",
+    test: async () => ({ ok: true }),
+  };
+
+  it("THE CONTRACT: a failing boolean check's wrapped ok bit is true (never fails doctor's exit code)", async () => {
+    const wrapped = asAmbiguousWarning("docker", failingBoolCheck);
+    const outcome = await wrapped.test();
+    expect(typeof outcome === "boolean" ? outcome : outcome.ok).toBe(true);
+  });
+
+  it("THE CONTRACT: a failing CheckOutcome's wrapped ok bit is true (never fails doctor's exit code)", async () => {
+    const wrapped = asAmbiguousWarning("docker", failingOutcomeCheck);
+    const outcome = await wrapped.test();
+    expect(typeof outcome === "boolean" ? outcome : outcome.ok).toBe(true);
+  });
+
+  it("renderDoctorResults counts zero failures for a wrapped-failing check (the actual exit-code path)", async () => {
+    // This is the property that matters end-to-end: doctor() calls
+    // process.exit(1) iff renderDoctorResults reports failures > 0. Feed its
+    // real input shape (a DoctorResult array) rather than asserting on the
+    // Check's raw outcome, so this test breaks if that wiring ever changes.
+    const wrapped = asAmbiguousWarning("docker", failingOutcomeCheck);
+    const outcome = await wrapped.test();
+    const result = {
+      name: wrapped.name,
+      ok: typeof outcome === "boolean" ? outcome : outcome.ok,
+      detail: typeof outcome === "boolean" ? undefined : outcome.detail,
+    };
+    const { failures } = renderDoctorResults([result]);
+    expect(failures).toBe(0);
+  });
+
+  it("a failing outcome's detail is unmistakably a warning and stays actionable", async () => {
+    const wrapped = asAmbiguousWarning("docker", failingOutcomeCheck);
+    const outcome = await wrapped.test();
+    const detail = typeof outcome === "boolean" ? undefined : outcome.detail;
+    expect(detail).toContain("WARNING");
+    expect(detail).toContain("connection refused"); // original detail preserved
+    expect(detail).toContain("start Docker"); // original fix preserved (renderDoctorResults hides `fix:` on ok:true)
+    expect(detail).toContain("OPENLOCK_RUNTIME=docker"); // actionable: names the concrete env var + value
+  });
+
+  it("a passing boolean check passes through untouched (no warning noise on a healthy probe)", async () => {
+    const wrapped = asAmbiguousWarning("docker", passingBoolCheck);
+    expect(await wrapped.test()).toEqual({ ok: true });
+  });
+
+  it("a passing CheckOutcome passes through untouched", async () => {
+    const wrapped = asAmbiguousWarning("docker", passingOutcomeCheck);
+    expect(await wrapped.test()).toEqual({ ok: true });
   });
 });
 
@@ -240,6 +362,107 @@ describe("doctor non-interactive runtime", () => {
     );
     expect(runtimeSpecific).toBe(false);
   });
+
+  // openlock-ucm end-to-end regression: `openlock doctor` (i.e. runDoctorChecks
+  // called with NO explicit runtime, the standalone-CLI path) must resolve a
+  // runtime itself via resolveRuntimeNonInteractive (env > config > single-
+  // binary autodetect) and gate readiness on ONLY that one, exactly like the
+  // explicit-runtime path session preflight already got right. This dev box
+  // has both podman and docker binaries on PATH, so it exercises the real
+  // "both present" case the bug report was filed against — OPENLOCK_RUNTIME
+  // pins the resolution deterministically without needing either daemon to
+  // actually be reachable.
+  const oldEnv = { ...process.env };
+  afterEach(() => {
+    process.env = oldEnv;
+  });
+
+  it(
+    "gates readiness on OPENLOCK_RUNTIME=podman even when the docker CLI is also present",
+    async () => {
+      process.env = { ...oldEnv, OPENLOCK_RUNTIME: "podman" };
+      const results = await runDoctorChecks(undefined);
+      const docker = results.find((r) => r.name === "docker");
+      // The docker CLI being present must still show up (informational)...
+      expect(docker).toBeDefined();
+      expect(docker?.ok).toBe(true);
+      expect(docker?.detail).toContain("not in use");
+      // ...but its readiness (daemon reachability) must never be checked, so
+      // a dead/absent docker daemon can't fail doctor on a podman machine.
+      const dockerReadiness = results.find((r) => r.name === "docker daemon reachable");
+      expect(dockerReadiness).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "gates readiness on OPENLOCK_RUNTIME=docker even when the podman CLI is also present",
+    async () => {
+      process.env = { ...oldEnv, OPENLOCK_RUNTIME: "docker" };
+      const results = await runDoctorChecks(undefined);
+      const podman = results.find((r) => r.name === "podman");
+      expect(podman).toBeDefined();
+      expect(podman?.ok).toBe(true);
+      expect(podman?.detail).toContain("not in use");
+      const podmanReadiness = results.find(
+        (r) => r.name === "podman API socket active" || r.name === "podman machine (running)",
+      );
+      expect(podmanReadiness).toBeUndefined();
+    },
+    TIMEOUT_MS,
+  );
+
+  // Operator follow-up, full end-to-end: a genuinely fresh install (no
+  // OPENLOCK_RUNTIME, no config.yaml at all) with both binaries on PATH must
+  // NOT get a silent all-green pass on readiness — it must probe both, and
+  // whatever it finds must still leave doctor's exit code at 0. This dev box
+  // has a real ~/.config/openlock/config.yaml with default_runtime set, so
+  // XDG_CONFIG_HOME is redirected to an empty temp dir to reproduce a truly
+  // unconfigured machine rather than relying on this box's actual state.
+  let ambiguousTmp = "";
+  beforeEach(() => {
+    ambiguousTmp = mkdtempSync(join(tmpdir(), "openlock-doctor-ambiguous-"));
+  });
+  afterEach(() => {
+    rmSync(ambiguousTmp, { recursive: true, force: true });
+  });
+
+  it(
+    "a fresh install (no env, no config) with both runtimes installed probes BOTH and stays exit-0-safe",
+    async () => {
+      process.env = { ...oldEnv, XDG_CONFIG_HOME: ambiguousTmp };
+      delete process.env.OPENLOCK_RUNTIME;
+      const results = await runDoctorChecks(undefined);
+      const runtimeRelevant = results.filter((r) =>
+        [
+          "podman",
+          "podman API socket active",
+          "podman machine (running)",
+          "docker",
+          "docker daemon reachable",
+        ].includes(r.name),
+      );
+      // Both runtimes' readiness checks are actually present (not skipped) —
+      // this is exactly what silently regresses to a false pass if the
+      // ambiguous branch stops probing.
+      expect(runtimeRelevant.some((r) => r.name === "podman")).toBe(true);
+      expect(runtimeRelevant.some((r) => r.name === "docker")).toBe(true);
+      const hasPodmanReadiness = runtimeRelevant.some(
+        (r) => r.name === "podman API socket active" || r.name === "podman machine (running)",
+      );
+      const hasDockerReadiness = runtimeRelevant.some((r) => r.name === "docker daemon reachable");
+      expect(hasPodmanReadiness).toBe(true);
+      expect(hasDockerReadiness).toBe(true);
+      // THE CONTRACT: no matter what those probes actually found on this
+      // machine, none of the runtime-relevant results may be a failure — and
+      // feeding them through the real renderDoctorResults (what doctor()
+      // bases process.exit(1) on) must report zero failures among them.
+      for (const r of runtimeRelevant) expect(r.ok).toBe(true);
+      const { failures } = renderDoctorResults(runtimeRelevant);
+      expect(failures).toBe(0);
+    },
+    TIMEOUT_MS,
+  );
 });
 
 describe("rootless podman subuid check", () => {

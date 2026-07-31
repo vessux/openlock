@@ -96,6 +96,28 @@ export function buildHarnessExecArgv(
   });
 }
 
+// Harness-specific env that must be present for the harness binary to find
+// its staged config, independent of provider. Claude Code reads OAuth/config
+// state (the staged .credentials.json) from CLAUDE_CONFIG_DIR; opencode
+// doesn't use it. The dir is staged under /sandbox/.openlock/ and provisioned
+// by createSession's bootstrap.
+//
+// Pulled out of buildSandboxEnv (openlock-04x) so `openlock exec` can inject
+// it too. exec only has SessionMeta.harness to work with (session-store.ts
+// doesn't record providerId), so this is keyed on harness alone rather than
+// folded into buildSandboxEnv's full {providerId, harness, repoConfigEnv}
+// shape — that shape needs a providerId exec's session record can't supply.
+// Before this fix, exec ran the harness with NO env injection at all (it
+// calls buildOpenshellExecArgv directly, never buildHarnessExecArgv), so
+// `openlock exec <s> -- claude -p ...` reported "Not logged in · Please run
+// /login" on a fully healthy install — the same first line as a real
+// credential bug, costing real debugging time (openlock-04x). Both the attach
+// path (buildSandboxEnv below) and the exec path (execCmd) now call this one
+// function so they can't drift apart again.
+export function harnessEnvFor(harness: Harness): Record<string, string> {
+  return harness === "claude_code" ? { CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config" } : {};
+}
+
 export interface BuildSandboxEnvArgs {
   providerId: ProviderId;
   harness: Harness;
@@ -104,11 +126,7 @@ export interface BuildSandboxEnvArgs {
 
 export function buildSandboxEnv(args: BuildSandboxEnvArgs): Record<string, string> {
   const placeholders = PROVIDERS[args.providerId].sandboxEnvPlaceholders(args.harness);
-  // Claude Code reads OAuth/config state (the staged .credentials.json) from
-  // CLAUDE_CONFIG_DIR. opencode doesn't use it. The dir is staged under
-  // /sandbox/.openlock/ and provisioned by createSession's bootstrap.
-  const harnessEnv: Record<string, string> =
-    args.harness === "claude_code" ? { CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config" } : {};
+  const harnessEnv = harnessEnvFor(args.harness);
   return { ...placeholders, ...harnessEnv, ...args.repoConfigEnv };
 }
 
@@ -144,9 +162,29 @@ export async function execBash(sessionName: string): Promise<number> {
   return await proc.exited;
 }
 
-export async function execCmd(sessionName: string, cmd: string[]): Promise<number> {
+// Pure argv builder for execCmd, mirroring buildHarnessExecArgv's shape
+// (wrapCmdWithEnv then buildOpenshellExecArgv) so the env-injection logic is
+// unit-testable without spawning anything (openlock-04x). `openlock exec`
+// runs an arbitrary command rather than a known harness launch argv, so it
+// can't reuse buildHarnessExecArgv itself (that hardcodes harnessLaunchArgv),
+// but the env-wrapping step is identical.
+export function buildExecCmdArgv(
+  cliPrefix: readonly string[],
+  sessionName: string,
+  cmd: readonly string[],
+  extraEnv: Readonly<Record<string, string>> = {},
+): string[] {
+  const wrapped = wrapCmdWithEnv(cmd, extraEnv);
+  return buildOpenshellExecArgv(cliPrefix, sessionName, wrapped, { workdir: "/sandbox/repo" });
+}
+
+export async function execCmd(
+  sessionName: string,
+  cmd: string[],
+  extraEnv: Readonly<Record<string, string>> = {},
+): Promise<number> {
   const cli = await getCliInvocation();
-  const argv = buildOpenshellExecArgv(cli.argv, sessionName, cmd, { workdir: "/sandbox/repo" });
+  const argv = buildExecCmdArgv(cli.argv, sessionName, cmd, extraEnv);
   const proc = Bun.spawn(argv, {
     cwd: cli.cwd,
     stdin: "inherit",
