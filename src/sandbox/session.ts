@@ -52,6 +52,7 @@ import {
   stagingPathFor,
   workdirMount,
 } from "./mounts";
+import { gateOpencodeOpenRouterModel } from "./opencode-openrouter-model-gate";
 import { resolveOpenlockFolder } from "./openlock-folder";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
@@ -1049,6 +1050,23 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     await autoReapOrNudge(sessionName);
     handleGatewayShutdown(listAllSessions(sessionsDir()).length);
     process.exit(0);
+  }
+
+  // openlock-4g1: opencode's own default model (chosen from OpenRouter's full
+  // public catalog with no regard for tool-use support) has shipped an
+  // image-only model whose first prompt fails outright. Gate only this one
+  // harness+provider combination — anthropic isn't opencode-compatible
+  // (providers/resolve.ts) and claude_code has no analogous default-model
+  // problem. See opencode-openrouter-model-gate.ts for the full rationale.
+  if (harness === "opencode" && providerId === "openrouter") {
+    const gate = await gateOpencodeOpenRouterModel(resolved.args);
+    if (gate.action === "block") {
+      console.error(gate.message);
+      process.exit(1);
+    }
+    if (gate.action === "warn") {
+      console.warn(gate.message);
+    }
   }
 
   const launch: LaunchOpts = {
