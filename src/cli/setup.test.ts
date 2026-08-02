@@ -13,6 +13,13 @@ describe("compatibleProviders", () => {
     expect(ids).toContain("anthropic");
     expect(ids.every((id) => typeof id === "string")).toBe(true);
   });
+
+  // openlock-1ho: pi is OpenRouter-only — anthropic's plugin stages a
+  // Claude-Code-format OAuth credential file pi doesn't consume, so pi must
+  // NOT show anthropic as compatible.
+  it("returns only openrouter for pi (not anthropic)", () => {
+    expect(compatibleProviders("pi")).toEqual(["openrouter"]);
+  });
 });
 
 describe("runSetup", () => {

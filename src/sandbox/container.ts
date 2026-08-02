@@ -100,7 +100,11 @@ export function buildHarnessExecArgv(
 // its staged config, independent of provider. Claude Code reads OAuth/config
 // state (the staged .credentials.json) from CLAUDE_CONFIG_DIR; opencode
 // doesn't use it. The dir is staged under /sandbox/.openlock/ and provisioned
-// by createSession's bootstrap.
+// by createSession's bootstrap. pi (openlock-1ho) reads no staged config file
+// but needs PI_OFFLINE=1: unset, it makes startup network calls for a pi.dev
+// version check, install/update telemetry, and a provider-catalog refresh
+// whose host isn't verified — none of which the default policy allowlists,
+// so they'd fail closed at egress instead of being skipped outright.
 //
 // Pulled out of buildSandboxEnv (openlock-04x) so `openlock exec` can inject
 // it too. exec only has SessionMeta.harness to work with (session-store.ts
@@ -114,8 +118,21 @@ export function buildHarnessExecArgv(
 // credential bug, costing real debugging time (openlock-04x). Both the attach
 // path (buildSandboxEnv below) and the exec path (execCmd) now call this one
 // function so they can't drift apart again.
+//
+// Written as an exhaustive switch, not the binary ternary this used to be —
+// that ternary silently returned {} for any harness other than claude_code,
+// which is exactly how a 3rd harness (pi) would have gotten NO env at all
+// with no compiler signal (openlock-1ho). A switch over the full Harness
+// union fails to typecheck the moment a case goes unhandled.
 export function harnessEnvFor(harness: Harness): Record<string, string> {
-  return harness === "claude_code" ? { CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config" } : {};
+  switch (harness) {
+    case "claude_code":
+      return { CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config" };
+    case "opencode":
+      return {};
+    case "pi":
+      return { PI_OFFLINE: "1" };
+  }
 }
 
 export interface BuildSandboxEnvArgs {

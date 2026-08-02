@@ -158,13 +158,22 @@ describe("harnessEnvFor (openlock-04x)", () => {
     expect(harnessEnvFor("opencode")).toEqual({});
   });
 
+  // openlock-1ho: pi otherwise makes startup network calls (pi.dev version
+  // check, telemetry, provider-catalog refresh) the default policy doesn't
+  // allowlist; PI_OFFLINE disables all of it. harnessEnvFor was a binary
+  // ternary on claude_code before this, so this is also a regression guard
+  // for a 3rd harness silently getting {} the way a ternary would produce.
+  it("sets PI_OFFLINE=1 for pi", () => {
+    expect(harnessEnvFor("pi")).toEqual({ PI_OFFLINE: "1" });
+  });
+
   it("buildSandboxEnv (attach path) and buildExecCmdArgv (exec path) agree on claude_code's env, by construction", () => {
     // Regression guard for the actual openlock-04x defect: both paths must
     // derive CLAUDE_CONFIG_DIR from the SAME function, not two copies that
     // can silently drift. This doesn't just assert equal values — it asserts
     // buildSandboxEnv's own harness-keyed slice against harnessEnvFor for
-    // both harnesses.
-    for (const harness of ["claude_code", "opencode"] as const) {
+    // all harnesses.
+    for (const harness of ["claude_code", "opencode", "pi"] as const) {
       const env = buildSandboxEnv({ providerId: "anthropic", harness, repoConfigEnv: {} });
       expect(env.CLAUDE_CONFIG_DIR).toBe(harnessEnvFor(harness).CLAUDE_CONFIG_DIR);
     }
@@ -252,13 +261,18 @@ describe("buildHarnessExecArgv (harness binary selection)", () => {
     expect(argv[argv.length - 1]).toBe("opencode");
   });
 
+  it("uses 'pi' binary for pi harness", () => {
+    const argv = buildHarnessExecArgv(CLI, "pi", "sb-foo", [], {});
+    expect(argv[argv.length - 1]).toBe("pi");
+  });
+
   it("appends extra args after the harness binary for opencode", () => {
     const argv = buildHarnessExecArgv(CLI, "opencode", "sb-foo", ["run", "hello"], {});
     expect(argv.slice(-3)).toEqual(["opencode", "run", "hello"]);
   });
 
-  it("places `env K=V` immediately after the `--` separator for both harnesses", () => {
-    for (const harness of ["claude_code", "opencode"] as const) {
+  it("places `env K=V` immediately after the `--` separator for all harnesses", () => {
+    for (const harness of ["claude_code", "opencode", "pi"] as const) {
       const argv = buildHarnessExecArgv(CLI, harness, "sb-foo", [], { FOO: "bar" });
       const sepIdx = argv.indexOf("--");
       expect(argv[sepIdx + 1]).toBe("env");
@@ -267,7 +281,7 @@ describe("buildHarnessExecArgv (harness binary selection)", () => {
   });
 
   it("never emits raw `podman exec` (regression-proof for openlock-hnp)", () => {
-    for (const harness of ["claude_code", "opencode"] as const) {
+    for (const harness of ["claude_code", "opencode", "pi"] as const) {
       const argv = buildHarnessExecArgv(CLI, harness, "sb-foo", [], { FOO: "bar" });
       expect(argv.join(" ")).not.toMatch(/\bpodman\s+exec\b/);
     }

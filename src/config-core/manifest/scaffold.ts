@@ -92,6 +92,17 @@ function renderArgs(args: string[], harness: Harness): string {
         "  # The model MUST support tool use (opencode's build agent enables tools).",
       ].join("\n");
     }
+    if (harness === "pi") {
+      return [
+        "args: []",
+        "  # pi + OpenRouter: pin a tool-use-capable model your OpenRouter token allows.",
+        "  # Free models rotate often — pick a current free model from:",
+        "  #   https://openrouter.ai/models?max_price=0",
+        "  # Example (verify it's still listed above before relying on it):",
+        "  # - --model",
+        "  # - openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+      ].join("\n");
+    }
     return ["args: []", "  # - --model", "  # - claude-sonnet-4-6"].join("\n");
   }
   return ["args:", ...args.map((a) => `  - ${JSON.stringify(a)}`)].join("\n");

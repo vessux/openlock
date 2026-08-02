@@ -8,6 +8,7 @@ import { HARNESSES, type Harness } from "../src/sandbox/harness";
 const HARNESS_BIN: Record<Harness, string> = {
   claude_code: "/usr/local/bin/claude",
   opencode: "/usr/local/bin/opencode",
+  pi: "/usr/local/bin/pi",
 };
 
 function harnessBinaries(harness: Harness): Array<{ path: string }> {
