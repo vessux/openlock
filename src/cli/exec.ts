@@ -1,6 +1,7 @@
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
-import { getSandboxState, execCmd as runExec } from "../sandbox/container";
+import { getSandboxState, harnessEnvFor, execCmd as runExec } from "../sandbox/container";
+import { loadSessionByName } from "../sandbox/session-ops";
 import { printCmdHelp } from "./_help";
 import { resolveSessionName } from "./_resolve";
 
@@ -32,5 +33,21 @@ export async function execCmd(args: string[]): Promise<number> {
     console.error(`session ${name} has no container`);
     return 1;
   }
-  return await runExec(name, after);
+  // openlock-04x: without this, `openlock exec <s> -- claude -p ...` ran with
+  // NO env injection at all (unlike the attach path, which always goes
+  // through buildSandboxEnv/execHarness), so Claude Code couldn't find its
+  // staged .credentials.json under /sandbox/.openlock/claude-config and
+  // reported "Not logged in · Please run /login" on a fully healthy install.
+  // harnessEnvFor is the single function both the attach path (container.ts
+  // buildSandboxEnv) and this exec path call, so they can't drift apart
+  // again. The session record's `harness` field (not a hardcoded claude_code)
+  // is the source of truth here — a session may be opencode, which needs no
+  // such var, and injecting it unconditionally would be silently wrong for
+  // that harness too. loadSessionByName can return null only on a narrow
+  // TOCTOU (session deleted between resolveSessionName and here); fall back
+  // to no extra env rather than failing the exec outright — the underlying
+  // `openshell sandbox exec` call below will surface the real error anyway.
+  const meta = await loadSessionByName(name);
+  const harnessEnv = meta ? harnessEnvFor(meta.harness) : {};
+  return await runExec(name, after, harnessEnv);
 }

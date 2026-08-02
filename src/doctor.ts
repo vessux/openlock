@@ -5,7 +5,7 @@ import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
-import { type BinaryProbes, RUNTIMES, type Runtime } from "./runtime";
+import { type BinaryProbes, RUNTIMES, type Runtime, resolveRuntimeNonInteractive } from "./runtime";
 import { GATEWAY_PORT, gatewayStatus } from "./sandbox/ensure-gateway";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { SANDBOX_UID } from "./sandbox/seed-containerfile";
@@ -312,7 +312,25 @@ export interface DoctorResult {
 
 async function checkGlobalConfig(): Promise<CheckOutcome> {
   try {
-    readGlobalConfig();
+    const cfg = readGlobalConfig();
+    if (cfg === null) {
+      // openlock-ucm: readGlobalConfig() returns null (not a throw) when the
+      // file — and its whole directory — simply doesn't exist yet, which is
+      // the NORMAL state for a fresh install (defaults apply exactly as if
+      // an empty file were present; see global-config/index.ts). That's not
+      // an error, so this must stay ok:true. But the check's own name embeds
+      // the path ("global config (<path>)"), and a label naming a path reads
+      // as "this exists and is valid" when it renders green — a real user
+      // during the 2026-07-31 clean-install verification read it exactly
+      // that way. Surface the absent/valid distinction in the detail line
+      // instead of the pass/fail bit, so a fresh install still shows all-green
+      // (absent config is not a failure condition) while the status text
+      // stays honest about what was actually found.
+      return {
+        ok: true,
+        detail: "not present — using built-in defaults (normal for a fresh install)",
+      };
+    }
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -350,12 +368,116 @@ function runtimeChecksFor(rt: Runtime, isMac: boolean): Check[] {
   ];
 }
 
-/** Report EVERY installed runtime and its readiness. A host with both podman
- * and docker shows both — the prior code collapsed "two present" into the same
- * null result as "none present", a false negative (the resolver only
- * auto-picks when exactly one is installed). Only when neither is present do we
- * emit the single install-a-runtime failure. */
-export function buildRuntimeChecks(probes: BinaryProbes, isMac: boolean): Check[] {
+// Small outcome-shape helpers used by asAmbiguousWarning below. `test()` can
+// return either a bare boolean or a full CheckOutcome ({ok, detail?, fix?}) —
+// these normalize across both without asAmbiguousWarning itself needing to
+// branch on the union more than once.
+function outcomeFailed(outcome: boolean | CheckOutcome): boolean {
+  return typeof outcome === "boolean" ? !outcome : !outcome.ok;
+}
+
+function outcomeDetail(outcome: boolean | CheckOutcome): string | undefined {
+  return typeof outcome === "boolean" ? undefined : outcome.detail;
+}
+
+function outcomeFix(outcome: boolean | CheckOutcome): string | undefined {
+  return typeof outcome === "boolean" ? undefined : outcome.fix;
+}
+
+/** Builds the WARNING-shaped CheckOutcome asAmbiguousWarning falls back to
+ * on a failing probe. Split out purely to keep asAmbiguousWarning's own
+ * cognitive complexity under the linter's threshold — no behavior of its
+ * own beyond string assembly. */
+function buildAmbiguousWarningOutcome(
+  rt: Runtime,
+  outcome: boolean | CheckOutcome,
+  fallbackFix: string | undefined,
+): CheckOutcome {
+  const innerDetail = outcomeDetail(outcome);
+  const fix = outcomeFix(outcome) ?? fallbackFix;
+  return {
+    ok: true,
+    detail:
+      `WARNING: ${rt} does not look ready` +
+      (innerDetail !== undefined ? ` (${innerDetail})` : "") +
+      (fix !== undefined ? ` — fix: ${fix}` : "") +
+      ". Not failing doctor because multiple runtimes are installed and none is selected yet " +
+      `— set OPENLOCK_RUNTIME=${rt} (or another) or defaultRuntime in config once you've picked one.`,
+  };
+}
+
+/** Runs an existing readiness Check's test, but never lets it report failure —
+ * a failing probe renders as an ok:true check with an unmistakable
+ * WARNING-prefixed detail line instead.
+ *
+ * openlock-ucm follow-up: the genuinely AMBIGUOUS case (≥2 runtimes
+ * installed, none resolves — no OPENLOCK_RUNTIME, no configured
+ * defaultRuntime, i.e. a fresh install with both podman and docker present)
+ * used to skip readiness on both runtimes entirely, rendering an all-green
+ * `doctor`. That's a false PASS: a user in exactly that state with a stopped
+ * podman machine got a clean doctor run and then watched `openlock sandbox`
+ * fail outright. This repo's v0.11.2 sweep theme was specifically "openlock
+ * did the wrong thing silently while every surface reported success" — a
+ * silently-skipped readiness check is that same failure mode wearing a
+ * doctor costume. So in the ambiguous case we DO run every installed
+ * runtime's readiness probe (see ambiguousRuntimeChecksFor below) — but a
+ * failure there means "this particular runtime isn't ready", not "your
+ * machine is broken", since the user hasn't told openlock which one they
+ * even want yet. Reintroducing a real failure here would re-open
+ * openlock-ucm (that fix's whole point was to stop failing doctor over a
+ * runtime nobody selected), so it must warn, never fail — hence this wrapper
+ * forces ok:true unconditionally while keeping the underlying detail/fix
+ * text visible (renderDoctorResults only prints `fix:` for actual failures,
+ * so any actionable fix text has to be folded into the detail line to
+ * survive here). */
+export function asAmbiguousWarning(rt: Runtime, inner: Check): Check {
+  return {
+    name: inner.name,
+    test: async () => {
+      const outcome = await inner.test();
+      if (!outcomeFailed(outcome)) return typeof outcome === "boolean" ? { ok: true } : outcome;
+      return buildAmbiguousWarningOutcome(rt, outcome, inner.fix);
+    },
+  };
+}
+
+/** Presence + readiness for a single installed runtime IN THE AMBIGUOUS CASE
+ * (see asAmbiguousWarning): unlike runtimeChecksFor's normal readiness check,
+ * this one can never fail doctor's exit code — a failing probe still shows
+ * up, just as a warning. */
+function ambiguousRuntimeChecksFor(rt: Runtime, isMac: boolean): Check[] {
+  const [presence, readiness] = runtimeChecksFor(rt, isMac);
+  return [presence, asAmbiguousWarning(rt, readiness)];
+}
+
+/** Report EVERY installed runtime's presence, but gate hard-FAILING readiness
+ * (podman machine running / docker daemon reachable) on the RESOLVED runtime
+ * only (openlock-ucm).
+ *
+ * Before that fix, a host with both the docker CLI and podman installed —
+ * extremely common on a Mac, since Docker Desktop puts `docker` on PATH
+ * whether or not it's running — got a readiness check for EVERY installed
+ * runtime, so `openlock doctor` failed on "docker daemon reachable" even
+ * when podman (the runtime openlock actually resolved and would use) was
+ * fully healthy. That's the documented golden path's very first command
+ * (README: install → doctor → init → validate → sandbox) reporting failure
+ * on a genuinely healthy machine, which also hard-stops any scripted
+ * `openlock doctor && openlock init ...`.
+ *
+ * Still surfacing presence for non-resolved runtimes (rather than omitting
+ * them outright) keeps the check "genuinely useful info, not just deleted" —
+ * a user with two runtimes installed can see both and see which one
+ * openlock picked, without a stale daemon on the unused one ever counting
+ * against them.
+ *
+ * A host with both installed and neither auto-resolvable (resolvedRuntime is
+ * null) is the ambiguous case above: readiness IS probed for both, but as a
+ * non-failing warning rather than skipped outright or hard-failed. */
+export function buildRuntimeChecks(
+  probes: BinaryProbes,
+  isMac: boolean,
+  resolvedRuntime: Runtime | null,
+): Check[] {
   const present = RUNTIMES.filter((r) => probes[r]);
   if (present.length === 0) {
     return [
@@ -366,7 +488,19 @@ export function buildRuntimeChecks(probes: BinaryProbes, isMac: boolean): Check[
       },
     ];
   }
-  return present.flatMap((r) => runtimeChecksFor(r, isMac));
+  return present.flatMap((r): Check[] => {
+    if (r === resolvedRuntime) return runtimeChecksFor(r, isMac);
+    if (resolvedRuntime === null) return ambiguousRuntimeChecksFor(r, isMac);
+    return [
+      {
+        name: r,
+        test: async () => ({
+          ok: true,
+          detail: `installed, but not in use (resolved runtime is ${resolvedRuntime}); readiness not checked`,
+        }),
+      },
+    ];
+  });
 }
 
 /** Rootless podman (Linux only): verify the host subuid range covers SANDBOX_UID.
@@ -449,12 +583,42 @@ export async function runDoctorChecks(
   const isMac = process.platform === "darwin";
   const dev = isDevMode();
 
-  const runtimeChecks = buildRuntimeChecks(probes, isMac);
+  // openlock-ucm: figure out which runtime is actually going to be used so
+  // readiness-style checks below can gate on THAT one, not merely on "is it
+  // installed". An explicit `runtime` argument (session preflight, which has
+  // already run the real resolveRuntime()) IS the resolved runtime — trust it
+  // directly rather than re-resolving, and note the `probes` computed just
+  // above already narrow to that single runtime in that case, so nothing
+  // below changes behavior for that call path. Standalone `openlock doctor`/
+  // `openlock report` (runtime === undefined) haven't resolved anything yet;
+  // resolveRuntimeNonInteractive mirrors what `openlock sandbox` would pick
+  // (env var > config default > single-binary autodetect) WITHOUT ever
+  // launching the interactive runtime picker — doctor must stay a pure,
+  // side-effect-free read, and report.ts can run unattended in CI/scripts.
+  // It returns null when resolution is genuinely ambiguous (both installed,
+  // no default configured) or nothing is installed; buildRuntimeChecks/
+  // buildSubuidCheck/buildGatewayReachabilityCheck all treat null as "don't
+  // gate on anything" rather than guessing.
+  const resolvedRuntime = runtime === undefined ? await resolveRuntimeNonInteractive() : runtime;
+  const podmanIsResolved = resolvedRuntime === "podman";
+
+  const runtimeChecks = buildRuntimeChecks(probes, isMac, resolvedRuntime);
   // Rootless podman (Linux only) requires the host's subuid range to cover
-  // the in-image sandbox UID so `--userns=keep-id:uid=N` can map it.
-  const subuidChecks = buildSubuidCheck(probes.podman, isMac, readSubuid, process.getuid?.() === 0);
+  // the in-image sandbox UID so `--userns=keep-id:uid=N` can map it. Gated on
+  // podman being the RESOLVED runtime, not merely installed (openlock-ucm) —
+  // a Linux box with podman on PATH but docker actually in use shouldn't fail
+  // doctor over a podman subuid range nobody's relying on.
+  const subuidChecks = buildSubuidCheck(
+    podmanIsResolved,
+    isMac,
+    readSubuid,
+    process.getuid?.() === 0,
+  );
+  // Same principle: this probe spins up a real podman container to test
+  // sandbox->gateway reachability on podman's network — meaningless (and
+  // wasted work) unless podman is the runtime actually in play.
   const reachabilityChecks = buildGatewayReachabilityCheck(
-    probes.podman,
+    podmanIsResolved,
     gatewayStatus().running,
     GATEWAY_PORT,
     readNetworkAutoReload(),

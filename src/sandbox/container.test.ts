@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assertSandboxNotExited,
+  buildExecCmdArgv,
   buildHarnessExecArgv,
   buildOpenshellCreateArgv,
   buildOpenshellExecArgv,
@@ -18,6 +19,7 @@ import {
   buildSandboxUploadArgv,
   formatSandboxExitedError,
   getSandboxState,
+  harnessEnvFor,
   parseSandboxGetPhase,
   TETHER_STDIO,
   waitForSandboxReady,
@@ -106,6 +108,66 @@ describe("buildOpenshellExecArgv", () => {
     const argv = buildOpenshellExecArgv(CLI, "sb-foo", ["/bin/bash"], { workdir: "/sandbox/repo" });
     const joined = argv.join(" ");
     expect(joined).not.toMatch(/\bpodman\s+exec\b/);
+  });
+});
+
+describe("buildExecCmdArgv (openlock-04x)", () => {
+  it("routes through buildOpenshellExecArgv unchanged when extraEnv is empty", () => {
+    expect(buildExecCmdArgv(CLI, "sb-foo", ["echo", "hi"])).toEqual([
+      "openshell",
+      "sandbox",
+      "exec",
+      "--name",
+      "sb-foo",
+      "--workdir",
+      "/sandbox/repo",
+      "--",
+      "echo",
+      "hi",
+    ]);
+  });
+
+  // This is the exact defect openlock-04x reported: `openlock exec <s> --
+  // claude -p ...` ran with NO env injection at all, unlike the attach path
+  // (buildHarnessExecArgv above), because execCmd called buildOpenshellExecArgv
+  // directly and never wrapCmdWithEnv. buildExecCmdArgv now always wraps, so
+  // exec and attach can't drift apart on this again.
+  it("wraps the command in `env K=V ...` when extraEnv has entries, same as the attach path", () => {
+    const argv = buildExecCmdArgv(CLI, "sb-foo", ["claude", "-p", "hi"], {
+      CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config",
+    });
+    const dashIdx = argv.indexOf("--");
+    expect(argv.slice(dashIdx + 1)).toEqual([
+      "env",
+      "CLAUDE_CONFIG_DIR=/sandbox/.openlock/claude-config",
+      "claude",
+      "-p",
+      "hi",
+    ]);
+  });
+});
+
+describe("harnessEnvFor (openlock-04x)", () => {
+  it("sets CLAUDE_CONFIG_DIR for claude_code", () => {
+    expect(harnessEnvFor("claude_code")).toEqual({
+      CLAUDE_CONFIG_DIR: "/sandbox/.openlock/claude-config",
+    });
+  });
+
+  it("is empty for opencode (doesn't read CLAUDE_CONFIG_DIR)", () => {
+    expect(harnessEnvFor("opencode")).toEqual({});
+  });
+
+  it("buildSandboxEnv (attach path) and buildExecCmdArgv (exec path) agree on claude_code's env, by construction", () => {
+    // Regression guard for the actual openlock-04x defect: both paths must
+    // derive CLAUDE_CONFIG_DIR from the SAME function, not two copies that
+    // can silently drift. This doesn't just assert equal values — it asserts
+    // buildSandboxEnv's own harness-keyed slice against harnessEnvFor for
+    // both harnesses.
+    for (const harness of ["claude_code", "opencode"] as const) {
+      const env = buildSandboxEnv({ providerId: "anthropic", harness, repoConfigEnv: {} });
+      expect(env.CLAUDE_CONFIG_DIR).toBe(harnessEnvFor(harness).CLAUDE_CONFIG_DIR);
+    }
   });
 });
 
