@@ -22,6 +22,60 @@ The binary is removed last, and is deliberately **kept** when sessions or leftov
 
 Pass `--purge` to remove everything, including config, credentials, sandbox containers, and **workspace volumes**. Since a workspace volume can hold uncommitted work, `--purge` warns and asks for an explicit `[y/N]` confirmation whenever sessions still exist (mentioning `openlock clean --all --copy <dir>` as the salvage route); `--yes` skips the prompt for scripted use, and `--dry-run` prints the plan without changing anything.
 
+## Clean reinstall
+
+Reinstalling the binary alone does **not** give you a clean slate. openlock's
+durable state lives outside the binary, and the piece that matters most is the
+gateway database at `~/.local/state/openlock/gateway.db` — it holds the
+credential rows that actually get injected into your sandboxes. A default
+`uninstall.sh` keeps that file on purpose (it can hold credentials), so an
+uninstall/reinstall cycle inherits the old provider rows. If you are
+reinstalling *because* authentication is misbehaving, that is exactly the state
+you need to clear, and only `--purge` clears it.
+
+Back up anything unrecoverable first. An expired Anthropic subscription token
+is fine to discard — `openlock login` mints a new one — but an API key you
+pasted in (for example an OpenRouter key, or any `credentials:` bundle value)
+exists only in this file:
+
+```bash
+cp ~/.config/openlock/credentials.json ~/openlock-credentials.bak.json
+```
+
+Then tear down in this order. The gateway is stopped **first and explicitly**,
+because it is a host process holding port 18081 that outlives the state
+directory it was started from:
+
+```bash
+openlock gateway stop
+curl -fsSL https://raw.githubusercontent.com/vessux/openlock/main/uninstall.sh | bash -s -- --purge
+curl -fsSL https://raw.githubusercontent.com/vessux/openlock/main/install.sh | bash
+openlock doctor
+openlock login
+```
+
+Run `--purge` with `--dry-run` first if you want to see the plan. Note that
+`uninstall.sh` tears down *through* `openlock`, so it must be able to find and
+run the binary; if it prints `openlock binary missing or not runnable`, it has
+fallen back to deleting directories and has **not** removed sandbox containers,
+workspace volumes, or the gateway process. That happens when openlock is on
+your `PATH` somewhere other than `~/.local/bin` (a `bun link` development
+install, for instance) — set `OPENLOCK_INSTALL_DIR` to the directory actually
+containing the binary, or clean up with `openlock clean --all` and
+`openlock gateway stop` by hand before purging.
+
+Container images, containers, and volumes belong to podman rather than to
+openlock, and a purge does not reclaim them. To check what is left:
+
+```bash
+podman ps -a --filter name=openshell-
+podman volume ls
+podman system df
+```
+
+A full `podman machine rm` / `podman machine init` is only necessary when you
+suspect the VM itself, and it forces every base layer to download again.
+
 ## Prerequisites
 
 - [podman](https://podman.io) — `podman machine` started on macOS, or a reachable rootless socket on Linux (`systemctl --user enable --now podman.socket`)
