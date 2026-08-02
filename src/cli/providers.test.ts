@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeProvider } from "../tokens";
-import { _renderProvidersTable } from "./providers";
+import { _renderProvidersTable, providersCmd } from "./providers";
 
 let dir: string;
 let originalHome: string | undefined;
@@ -77,5 +77,45 @@ describe("_renderProvidersTable", () => {
     const line = lines.find((l) => l.startsWith("anthropic"))!;
     expect(line).toContain("credential=live");
     expect(line).toContain("refresh=ok");
+  });
+});
+
+// These only exercise the argument-validation paths that throw BEFORE any
+// network call would happen — `providersCmd(["models", "openrouter"])` with
+// a real stored credential is deliberately NOT tested here, since that would
+// reach getPermittedModels with the real fetchOpenRouterUserModelsFromApi
+// and hit the live OpenRouter API (see openrouter-user-models.test.ts for
+// the network-free coverage of that path via dependency injection).
+describe("providersCmd models subcommand (argument validation only)", () => {
+  it("throws a usage error when the provider id is omitted", async () => {
+    await expect(providersCmd(["models"])).rejects.toThrow("Usage: openlock providers models <id>");
+  });
+
+  it("throws on an unrecognized provider id", async () => {
+    await expect(providersCmd(["models", "bogus"])).rejects.toThrow(/not a recognized provider/);
+  });
+
+  // Regression guard: a positional that isn't "models" must NOT silently fall
+  // through to the status table and exit 0 — a typo'd subcommand or a
+  // plausible-guess syntax would otherwise report success while doing
+  // something the user didn't ask for.
+  it("throws on an unrecognized subcommand instead of silently printing the status table", async () => {
+    await expect(providersCmd(["modles", "openrouter"])).rejects.toThrow(
+      'Unknown providers subcommand "modles"',
+    );
+  });
+
+  it("throws when a bare provider id is given without the 'models' verb", async () => {
+    await expect(providersCmd(["openrouter"])).rejects.toThrow(
+      'Unknown providers subcommand "openrouter"',
+    );
+  });
+
+  // Regression guard: trailing junk after the id must error, not be silently
+  // ignored.
+  it("throws on an extra trailing argument after the id", async () => {
+    await expect(providersCmd(["models", "openrouter", "junk"])).rejects.toThrow(
+      "unexpected extra argument(s): junk",
+    );
   });
 });
