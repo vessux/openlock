@@ -4,10 +4,10 @@ Audience: an AI agent configuring openlock in a user's project. This is the comp
 
 ## `.openlock/config.yaml` (manifest)
 
-Top-level keys (exactly these; unknown keys are rejected): `harness`, `mounts`, `args`, `env`, `credentials`.
+Top-level keys (exactly these; unknown keys are rejected): `harness`, `mounts`, `args`, `env`, `credentials`, `cpu`, `memory`.
 
 A gitignored sibling `config.local.yaml` (same keys, all optional) overlays this
-file: `harness` and unknown keys — local wins; `env` — per-key merge; `mounts` /
+file: `harness`, `cpu`, `memory`, and unknown keys — local wins; `env` — per-key merge; `mounts` /
 `args` / `credentials` — appended (base then local). It is merged before
 validation, so the effective config is what gets checked.
 
@@ -17,6 +17,8 @@ validation, so the effective config is what gets checked.
 - `args[]` — extra argv appended to the in-container agent launch. Common use: the harness's own permission-bypass flag — e.g. Claude Code's `--dangerously-skip-permissions` — since the sandbox (not the harness's in-process prompts) is the security boundary. See the worked example in [Mounts, args & env](./mounts.md) and [Security & runtime](./security.md).
 - `env{}` — extra environment variables on the agent process.
 - `credentials[]` — secondary tool-credentials injected at egress (e.g. a GitHub PAT for `api.github.com`). Each entry: `name` (the gateway provider name attached to the sandbox) and `values` (a mapping of credential-env-key → source). The only source form is `{ from_env: VAR }` — the value is read from the host environment at `openlock sandbox` time, provisioned into the gateway, and injected per `policy.yaml` `cred_inject`. The value is never committed and never enters the sandbox env. The gateway provider type is always `generic`. Pair each entry with a `cred_inject` + `allowed_secrets` block in `policy.yaml` (see below); `openlock validate` errors if a `cred_inject.from_credential` is not supplied by a declared `credentials:` entry (or the primary provider).
+- `cpu` — CPU limit forwarded verbatim to `openshell sandbox create --cpu` (e.g. `"2"`, `"500m"`, `"0.5"`). Omitted: openlock passes no `--cpu` at all, so the sandbox inherits openshell's own default rather than a value openlock invents.
+- `memory` — memory limit forwarded verbatim to `openshell sandbox create --memory` (e.g. `"4Gi"`, `"512Mi"`, `"8G"`). Omitted: same inherit-openshell's-default behavior as `cpu`.
 
 (There is no `caps` field — it is a rejected legacy key.)
 

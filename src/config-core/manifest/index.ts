@@ -87,5 +87,10 @@ export function parseManifest(raw: unknown, projectRoot: string): ManifestConfig
   const config: ManifestConfig = { mounts, args, env, credentials };
   // Validated by lintManifest above, so this is a known harness or absent.
   if (typeof obj.harness === "string") config.harness = obj.harness as ManifestConfig["harness"];
+  // Validated by lintManifest above (validateResourceLimit), so these are
+  // non-empty strings or absent — the actual quantity grammar is openshell's
+  // own to validate at create time (openlock-251).
+  if (typeof obj.cpu === "string") config.cpu = obj.cpu;
+  if (typeof obj.memory === "string") config.memory = obj.memory;
   return config;
 }

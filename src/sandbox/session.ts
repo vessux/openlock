@@ -110,6 +110,15 @@ interface ResolvedRepo {
    * resolveHarness so `openlock init --harness X` carries into later `sandbox`
    * runs. Absent on the --policy override path (no .openlock/ is read). */
   harness?: Harness;
+  /** CPU limit persisted in config.yaml, if any; passed to `openshell sandbox
+   * create --cpu`. Absent (including on the --policy override path) means
+   * openlock passes no --cpu at all, so the sandbox inherits openshell's own
+   * default rather than a value openlock invents (openlock-251). */
+  cpu?: string;
+  /** Memory limit persisted in config.yaml, if any; passed to `openshell
+   * sandbox create --memory`. Same absent-means-inherit reasoning as `cpu`
+   * above (openlock-251). */
+  memory?: string;
 }
 
 export function resolveRepoPolicy(projectPath: string, policyOverride?: string): ResolvedRepo {
@@ -131,6 +140,8 @@ export function resolveRepoPolicy(projectPath: string, policyOverride?: string):
     credentials: folder.credentials,
   };
   if (folder.harness !== undefined) repo.harness = folder.harness;
+  if (folder.cpu !== undefined) repo.cpu = folder.cpu;
+  if (folder.memory !== undefined) repo.memory = folder.memory;
   return repo;
 }
 
@@ -273,7 +284,7 @@ async function createSession(
   debugEgress: boolean,
   rebuild: boolean,
 ): Promise<NewSession> {
-  const { policy, mounts } = resolved;
+  const { policy, mounts, cpu, memory } = resolved;
 
   await startGateway();
   await ensureProvider(providerId);
@@ -343,6 +354,8 @@ async function createSession(
         volumeArgs: bindMountArgs(mounts),
         debugEgress,
         attachProviders,
+        cpu,
+        memory,
       });
 
       // Don't await handle.exited — it blocks until the container stops.

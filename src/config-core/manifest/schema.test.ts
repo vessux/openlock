@@ -79,6 +79,36 @@ describe("validateManifestSchema", () => {
   it("rejects a non-string harness", () => {
     expect(validateManifestSchema({ harness: 1 })[0]?.path).toBe("harness");
   });
+
+  // openlock-251: cpu/memory are passed through verbatim to openshell, so
+  // schema validation only guards the shape openlock cares about (present,
+  // non-empty string) — the actual quantity grammar is openshell's own.
+  it("accepts valid cpu/memory keys", () => {
+    expect(validateManifestSchema({ cpu: "2" })).toEqual([]);
+    expect(validateManifestSchema({ memory: "4Gi" })).toEqual([]);
+    expect(validateManifestSchema({ cpu: "500m", memory: "512Mi" })).toEqual([]);
+  });
+
+  it("accepts an empty manifest without cpu/memory (absent means inherit openshell's default)", () => {
+    expect(validateManifestSchema({})).toEqual([]);
+  });
+
+  it("rejects a non-string cpu", () => {
+    const issues = validateManifestSchema({ cpu: 2 });
+    expect(issues[0]?.path).toBe("cpu");
+    expect(issues[0]?.message).toMatch(/'cpu' must be a non-empty string/);
+  });
+
+  it("rejects a non-string memory", () => {
+    const issues = validateManifestSchema({ memory: 4 });
+    expect(issues[0]?.path).toBe("memory");
+    expect(issues[0]?.message).toMatch(/'memory' must be a non-empty string/);
+  });
+
+  it("rejects an empty-string cpu/memory", () => {
+    expect(validateManifestSchema({ cpu: "" })[0]?.path).toBe("cpu");
+    expect(validateManifestSchema({ memory: "  " })[0]?.path).toBe("memory");
+  });
 });
 
 describe("credentials schema", () => {

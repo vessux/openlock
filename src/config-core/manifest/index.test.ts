@@ -92,6 +92,23 @@ describe("parseManifest", () => {
     expect(() => parseManifest({ caps: ["js"] }, root)).toThrow(/unknown key "caps"/);
   });
 
+  // openlock-251
+  it("extracts valid cpu/memory keys", () => {
+    const cfg = parseManifest({ cpu: "2", memory: "4Gi" }, root);
+    expect(cfg.cpu).toBe("2");
+    expect(cfg.memory).toBe("4Gi");
+  });
+
+  it("leaves cpu/memory undefined when absent (inherit openshell's default)", () => {
+    const cfg = parseManifest({ mounts: [] }, root);
+    expect(cfg.cpu).toBeUndefined();
+    expect(cfg.memory).toBeUndefined();
+  });
+
+  it("throws on a non-string cpu", () => {
+    expect(() => parseManifest({ cpu: 2 }, root)).toThrow(/'cpu' must be a non-empty string/);
+  });
+
   it("throws on a missing source (filesystem)", () => {
     expect(() =>
       parseManifest(

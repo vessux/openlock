@@ -209,6 +209,17 @@ export interface OpenshellCreateArgs {
   /** Opt-in: run the in-container supervisor at debug so the L7 egress
    * request/response header lines surface via `openlock logs`. Off by default. */
   debugEgress?: boolean;
+  /** CPU limit forwarded to `openshell sandbox create --cpu` (e.g. "2",
+   * "500m"). Omitted emits no --cpu flag at all, so the sandbox inherits
+   * openshell's own default rather than a value openlock invents — openlock
+   * previously set no limit anywhere, so every sandbox silently inherited
+   * openshell's cpu_limit=2 regardless of the host's actual resources
+   * (openlock-251). */
+  cpu?: string;
+  /** Memory limit forwarded to `openshell sandbox create --memory` (e.g.
+   * "4Gi", "512Mi"). Same omitted-means-inherit reasoning as `cpu` above
+   * (openlock-251). */
+  memory?: string;
 }
 
 export interface OpenshellHandle {
@@ -234,6 +245,8 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
     args.providerId,
     ...(args.attachProviders ?? []).flatMap((name) => ["--provider", name]),
     ...(args.debugEgress === true ? ["--log-level", "debug"] : []),
+    ...(args.cpu !== undefined ? ["--cpu", args.cpu] : []),
+    ...(args.memory !== undefined ? ["--memory", args.memory] : []),
     "--no-tty",
     ...(args.volumeArgs ?? []),
     "--",

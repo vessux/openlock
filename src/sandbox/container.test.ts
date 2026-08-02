@@ -824,4 +824,52 @@ describe("buildOpenshellCreateArgv", () => {
     const count = argv.filter((t) => t === "--provider").length;
     expect(count).toBe(1);
   });
+
+  // openlock-251: openlock set no resource limits anywhere, so every sandbox
+  // silently inherited openshell's own cpu_limit=2 regardless of the host's
+  // actual resources. --cpu/--memory must reach the argv when set...
+  it("emits --cpu when set", () => {
+    const argv = buildOpenshellCreateArgv({ ...base, cpu: "2" });
+    const idx = argv.indexOf("--cpu");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv[idx + 1]).toBe("2");
+  });
+
+  it("emits --memory when set", () => {
+    const argv = buildOpenshellCreateArgv({ ...base, memory: "4Gi" });
+    const idx = argv.indexOf("--memory");
+    expect(idx).toBeGreaterThan(-1);
+    expect(argv[idx + 1]).toBe("4Gi");
+  });
+
+  // ...and this is the regression guard proving the fix doesn't silently
+  // start pinning limits for everyone: unset must produce byte-identical
+  // argv to today, so every existing sandbox keeps inheriting openshell's
+  // default exactly as before.
+  it("omits --cpu and --memory entirely when unset (regression guard)", () => {
+    const argv = buildOpenshellCreateArgv(base);
+    expect(argv).not.toContain("--cpu");
+    expect(argv).not.toContain("--memory");
+    // Full-argv fixture (not just "not.toContain") so an unset cpu/memory
+    // provably produces the exact same argv as before this feature existed —
+    // proving openlock did not silently start pinning limits for everyone.
+    expect(argv).toEqual([
+      "sandbox",
+      "create",
+      "--name",
+      "s",
+      "--from",
+      "img",
+      "--upload",
+      "/tmp/staging:/sandbox/",
+      "--no-git-ignore",
+      "--policy",
+      "/tmp/policy.yaml",
+      "--provider",
+      "anthropic",
+      "--no-tty",
+      "--",
+      "/bin/bash",
+    ]);
+  });
 });

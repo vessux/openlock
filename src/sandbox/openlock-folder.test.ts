@@ -51,6 +51,27 @@ describe("resolveOpenlockFolder", () => {
     expect(resolveOpenlockFolder(proj).harness).toBeUndefined();
   });
 
+  // openlock-251
+  it("surfaces persisted cpu/memory from config.yaml", () => {
+    const proj = tmpProject();
+    const folder = join(proj, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), 'cpu: "2"\nmemory: "4Gi"\nmounts: []\n');
+    writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+    writeFileSync(join(folder, "Containerfile"), "FROM scratch\n");
+    const r = resolveOpenlockFolder(proj);
+    expect(r.cpu).toBe("2");
+    expect(r.memory).toBe("4Gi");
+  });
+
+  it("leaves cpu/memory undefined when config.yaml omits them (inherit openshell's default)", () => {
+    const proj = tmpProject();
+    writeComplete(join(proj, ".openlock"));
+    const r = resolveOpenlockFolder(proj);
+    expect(r.cpu).toBeUndefined();
+    expect(r.memory).toBeUndefined();
+  });
+
   it("surfaces declared credentials", () => {
     const proj = tmpProject();
     const folder = join(proj, ".openlock");
