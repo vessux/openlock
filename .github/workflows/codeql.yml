@@ -3,8 +3,13 @@ name: CodeQL
 on:
   push:
     branches: [main]
+  # Deliberately NOT filtered to `branches: [main]`. CodeQL is a required
+  # status check on main, so a PR that never runs it can never merge — and
+  # with a base filter, only a PR based directly on main ever triggers it.
+  # That makes stacked PRs unmergeable: every layer above the bottom one is
+  # based on the layer below, so it stays permanently BLOCKED waiting for a
+  # check that will never run.
   pull_request:
-    branches: [main]
   schedule:
     - cron: "23 4 * * 1"
 
