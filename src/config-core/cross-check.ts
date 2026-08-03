@@ -6,9 +6,15 @@ interface ManifestLike {
   credentials?: { name: string; values: Record<string, unknown> }[];
 }
 
+interface PolicyInjectLike {
+  header?: string;
+  from_credential?: string;
+  value_prefix?: string;
+}
+
 interface PolicyEndpointLike {
   host?: string;
-  cred_inject?: { inject?: { from_credential?: string }[] };
+  cred_inject?: { inject?: PolicyInjectLike[] };
 }
 
 interface PolicyLike {
@@ -188,5 +194,147 @@ export function checkCredentialNameCollisions(
       });
     }
   });
+  return issues;
+}
+
+function injectKey(host: string, header: string, credential: string): string {
+  return `${host}\0${header.toLowerCase()}\0${credential}`;
+}
+
+interface DeclaredPrefixes {
+  /** Every value_prefix any provider declares for this triple. */
+  prefixes: Set<string>;
+  /** Provider ids declaring it, for the diagnostic message. */
+  providers: Set<string>;
+}
+
+/** Every (host, header, credential) triple a registered provider declares in
+ * its own `policyEndpoints()`, mapped to the `value_prefix` it declares there.
+ * An absent prefix maps to "": the fork reads `value_prefix` with
+ * `unwrap_or_default()` and concatenates it verbatim ahead of the credential
+ * (openshell-supervisor-network l7/mod.rs + openshell-core secrets.rs), so
+ * absent and empty produce the same header on the wire.
+ *
+ * Values are Sets rather than single strings so the check stays correct if two
+ * providers ever declare the same triple with different prefixes: every
+ * declared prefix is then accepted instead of one arbitrarily winning and
+ * turning the other provider's correct policy into a false error. */
+function providerInjectPrefixes(): Map<string, DeclaredPrefixes> {
+  const out = new Map<string, DeclaredPrefixes>();
+  for (const id of PROVIDER_IDS) {
+    for (const harness of HARNESSES) {
+      for (const ep of PROVIDERS[id].policyEndpoints(harness)) {
+        for (const inj of ep.cred_inject?.inject ?? []) {
+          const key = injectKey(ep.host, inj.header, inj.from_credential);
+          const entry = out.get(key) ?? {
+            prefixes: new Set<string>(),
+            providers: new Set<string>(),
+          };
+          entry.prefixes.add(inj.value_prefix ?? "");
+          entry.providers.add(id);
+          out.set(key, entry);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+const quotePrefix = (p: string): string => (p === "" ? "none" : `'${p}'`);
+
+function valuePrefixIssue(args: {
+  groupKey: string;
+  endpointIndex: number;
+  injectIndex: number;
+  host: string;
+  header: string;
+  credential: string;
+  actual: string;
+  declared: DeclaredPrefixes;
+  /** A config.yaml bundle also supplies this credential — see below. */
+  softened: boolean;
+}): Issue {
+  const wanted = [...args.declared.prefixes].map(quotePrefix).join(" or ");
+  const providers = [...args.declared.providers].join(", ");
+  const detail =
+    `cred_inject for host "${args.host}" injects ${args.credential} into ${args.header} with ` +
+    `value_prefix ${quotePrefix(args.actual)}, but the ${providers} provider that supplies that ` +
+    `credential stores a value expecting ${wanted}. The gateway concatenates value_prefix and the ` +
+    `stored value verbatim, so the header goes out malformed and the real service answers 401 — ` +
+    `which agent harnesses treat as fatal.`;
+  return {
+    file: "policy.yaml",
+    severity: args.softened ? "warning" : "error",
+    path: `network_policies.${args.groupKey}.endpoints[${args.endpointIndex}].cred_inject.inject[${args.injectIndex}].value_prefix`,
+    message: args.softened
+      ? `${detail} Downgraded to a warning because a credentials: bundle in config.yaml also supplies ` +
+        `${args.credential}, and a bundle's value shape is yours to choose — ignore this if your bundle ` +
+        `stores the prefix inline.`
+      : detail,
+    fix:
+      args.declared.prefixes.size === 1 && args.declared.prefixes.has("")
+        ? `remove value_prefix from this inject entry`
+        : `set value_prefix: ${wanted} on this inject entry`,
+  };
+}
+
+/** A `cred_inject` whose `value_prefix` disagrees with the provider that
+ * actually supplies the credential. Third member of the family alongside
+ * checkCredentialsSupplied (credential injected but supplied by nothing) and
+ * checkUninjectedCredentialHost (credential-bearing host with no cred_inject
+ * at all) — this one covers a cred_inject that is present and resolvable but
+ * composes the wrong header value.
+ *
+ * Field-reported 2026-08-03: a committed `.openlock/policy.yaml` whose
+ * api.anthropic.com inject lacked `value_prefix: 'Bearer '`. The anthropic
+ * provider stores the subscription OAuth token RAW (src/providers/anthropic.ts,
+ * src/tokens.ts) precisely because the scheme comes from the policy, so the
+ * sandbox shipped `Authorization: sk-ant-oat01-…` and drew a 401 while
+ * `openlock validate` passed clean. The mirror-image mistake is equally fatal:
+ * openrouter stores "Bearer " INLINE, so adding a value_prefix there yields
+ * `Bearer Bearer sk-or-…`. Both are exact-equality violations of a spec
+ * openlock already owns in the provider registry.
+ *
+ * Hard error, unlike checkUninjectedCredentialHost's warning: this is not a
+ * heuristic. The host, header and credential name all match a registered
+ * provider's own declaration, and openlock itself wrote the stored value — so
+ * there is exactly one correct prefix. The one soft case is a `credentials:`
+ * bundle that also supplies the same credential name: a bundle's value is
+ * user-supplied and may legitimately carry the prefix inline, so that
+ * degrades to a warning rather than blocking a policy that may be correct. */
+export function checkCredInjectValuePrefix(manifest: ManifestLike, policy: PolicyLike): Issue[] {
+  const declaredByTriple = providerInjectPrefixes();
+  const bundleSupplied = new Set<string>();
+  for (const bundle of manifest.credentials ?? []) {
+    for (const key of Object.keys(bundle.values)) bundleSupplied.add(key);
+  }
+  const issues: Issue[] = [];
+  for (const [groupKey, group] of Object.entries(policy.network_policies ?? {})) {
+    (group.endpoints ?? []).forEach((endpoint, endpointIndex) => {
+      const host = endpoint.host;
+      if (!host) return;
+      (endpoint.cred_inject?.inject ?? []).forEach((inj, injectIndex) => {
+        const { header, from_credential: credential } = inj;
+        if (!header || !credential) return;
+        const declared = declaredByTriple.get(injectKey(host, header, credential));
+        if (!declared) return;
+        const actual = inj.value_prefix ?? "";
+        if (declared.prefixes.has(actual)) return;
+        issues.push(
+          valuePrefixIssue({
+            groupKey,
+            endpointIndex,
+            injectIndex,
+            host,
+            header,
+            credential,
+            actual,
+            declared,
+            softened: bundleSupplied.has(credential),
+          }),
+        );
+      });
+    });
+  }
   return issues;
 }
