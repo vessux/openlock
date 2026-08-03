@@ -85,7 +85,10 @@ esac
 
 # Mirrors install.sh's `${OPENLOCK_INSTALL_DIR:-${HOME}/.local/bin}` — `:-`
 # falls back on unset OR empty, so a stray `OPENLOCK_INSTALL_DIR=` in the
-# environment can't collapse this.
+# environment can't collapse this. This is the FIRST choice for where the
+# binary lives; the openlock-usable check below falls back further to PATH
+# for installs that don't live here (e.g. `bun link`), so this stays the
+# common case and existing behavior for normal installs is unchanged.
 INSTALL_DIR="${OPENLOCK_INSTALL_DIR:-${HOME_DIR}/.local/bin}"
 OPENLOCK_BIN="${INSTALL_DIR}/openlock"
 
@@ -165,10 +168,23 @@ safe_rm_rf() {
 #
 # Teardown must go through openlock while it still works. If it's missing or
 # broken, degrade to printed manual commands rather than failing outright.
-
+#
+# OPENLOCK_INSTALL_DIR (or its default) is checked first so a normal install
+# behaves exactly as before. Only when that binary is absent or fails
+# `--version` do we fall back to whatever `openlock` resolves to on PATH —
+# this is what a `bun link` dev install needs, since it symlinks into
+# ~/.cache/.bun/bin (or wherever bun's global bin dir is), never under
+# OPENLOCK_INSTALL_DIR. Only when neither works do we degrade to the
+# manual-instructions path below (openlock-ujv).
 openlock_usable=0
 if [ -x "${OPENLOCK_BIN}" ] && "${OPENLOCK_BIN}" --version >/dev/null 2>&1; then
   openlock_usable=1
+else
+  path_bin="$(command -v openlock 2>/dev/null || true)"
+  if [ -n "${path_bin}" ] && "${path_bin}" --version >/dev/null 2>&1; then
+    OPENLOCK_BIN="${path_bin}"
+    openlock_usable=1
+  fi
 fi
 
 run_openlock() {
@@ -214,9 +230,9 @@ done
 # Shared manual-teardown guidance for when the binary can't be used to do
 # this itself (missing/broken). Containers/volumes only — images get their
 # own guidance where callers already know whether any were actually found
-# (images_present), so it isn't duplicated here. Excludes the gateway
-# pidfile line too — callers print that separately since its phrasing
-# differs slightly by context.
+# (images_present), so it isn't duplicated here. No gateway line: both call
+# sites already run stop_gateway() up front, independent of openlock_usable,
+# so there's nothing left to tell the user to do about the gateway here.
 print_manual_container_volume_hint() {
   echo "  Sandbox containers are named openshell-sandbox-<session-name>:"
   echo "    podman ps -a --filter name=openshell-sandbox-"
@@ -235,6 +251,94 @@ print_manual_image_hint() {
   echo "    podman image rm <image>   # or: docker image rm <image>"
 }
 
+# Sends SIGTERM to the process named in $GATEWAY_PID_FILE, but only after
+# confirming it's alive and actually looks like an openlock gateway (its
+# command line contains the openshell-gateway binary — see
+# src/sandbox/fork-binaries.ts / ensure-gateway.ts). A pid can be recycled by
+# the OS between the gateway writing it and this script running; killing
+# whatever unrelated process now holds that pid would be worse than leaving
+# a stale gateway running. This is the backstop for when the openlock binary
+# is missing/broken and can't run `gateway stop` itself (openlock-ujv).
+stop_gateway_via_pidfile() {
+  [ -f "${GATEWAY_PID_FILE}" ] || return 0
+  local pid
+  pid="$(cat "${GATEWAY_PID_FILE}" 2>/dev/null || true)"
+  case "${pid}" in
+    '' | *[!0-9]*)
+      echo "  gateway pid file (${GATEWAY_PID_FILE}) doesn't contain a valid pid — leaving it alone"
+      return 0
+      ;;
+  esac
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    echo "  gateway pid file points to pid ${pid}, which isn't running (stale) — nothing to stop"
+    return 0
+  fi
+  local cmd
+  cmd="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+  case "${cmd}" in
+    *openshell-gateway*) ;;
+    *)
+      echo "  gateway pid file points to pid ${pid}, but that process doesn't look like an"
+      echo "  openlock gateway (recycled pid?) — leaving it alone"
+      return 0
+      ;;
+  esac
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    echo "  would stop gateway process directly via pid file (pid ${pid})"
+    return 0
+  fi
+  kill -TERM "${pid}" 2>/dev/null || true
+  # SIGTERM is asynchronous. The caller is about to rm -rf the very state
+  # directory this process still owns (gateway.db, gateway.pid, gateway.log,
+  # pki/) — if it flushes or reopens any of those on its way down after that
+  # removal, it can recreate the directory we just deleted, leaving a
+  # half-purged machine that reports success. So wait for actual exit before
+  # returning, bounded since this is always a local process (openlock-ujv).
+  local waited_ms=0
+  local timeout_ms=3000
+  local interval_s=0.15
+  local interval_ms=150
+  while [ "${waited_ms}" -lt "${timeout_ms}" ]; do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      echo "  stopped gateway process directly via pid file (pid ${pid})"
+      return 0
+    fi
+    sleep "${interval_s}"
+    waited_ms=$((waited_ms + interval_ms))
+  done
+  # Still alive 3s after SIGTERM. An uninstaller's whole job here is to
+  # guarantee the state it's about to delete isn't still owned by a live
+  # process, so escalate rather than print a warning and proceed anyway —
+  # a SIGKILL is far cheaper than a "purge complete" that silently wasn't.
+  echo "  gateway process (pid ${pid}) didn't exit within 3s of SIGTERM — sending SIGKILL"
+  kill -KILL "${pid}" 2>/dev/null || true
+  sleep 0.2
+  if kill -0 "${pid}" 2>/dev/null; then
+    echo "  warning: gateway process (pid ${pid}) is STILL running after SIGKILL — state" >&2
+    echo "  removal below may leave files it still holds open. This shouldn't be possible" >&2
+    echo "  for a normal process; investigate manually before trusting the purge report." >&2
+  else
+    echo "  stopped gateway process directly via pid file (pid ${pid}, required SIGKILL)"
+  fi
+}
+
+# Stops the gateway through `openlock gateway stop` when the binary is
+# usable, then ALWAYS falls through to the pid-file check too. The subcommand
+# above is best-effort (run_openlock swallows a non-zero exit) and is skipped
+# entirely when the binary is missing/broken, so stop_gateway_via_pidfile is
+# what keeps a dead or misbehaving binary from stranding a running gateway
+# process (openlock-ujv).
+stop_gateway() {
+  if [ "${openlock_usable}" -eq 1 ]; then
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      echo "  would run: ${OPENLOCK_BIN} gateway stop"
+    else
+      run_openlock gateway stop
+    fi
+  fi
+  stop_gateway_via_pidfile
+}
+
 # --- --purge -----------------------------------------------------------------
 
 if [ "${PURGE}" -eq 1 ]; then
@@ -249,15 +353,20 @@ if [ "${PURGE}" -eq 1 ]; then
       for n in "${session_names[@]}"; do echo "  - ${n}"; done
       echo
     fi
+    echo "Stopping gateway..."
+    stop_gateway
     if [ "${openlock_usable}" -eq 1 ]; then
       echo "Would run: ${OPENLOCK_BIN} clean --all"
       echo "Would run: ${OPENLOCK_BIN} prune-images"
       echo "Would run (best-effort): remove base + supervisor images directly (prune-images keeps the current base tag)"
-      echo "Would run: ${OPENLOCK_BIN} gateway stop"
     else
-      echo "openlock binary not usable — would print manual teardown commands instead of running them."
+      echo "openlock binary not usable (checked \$OPENLOCK_INSTALL_DIR and PATH) — would print manual teardown commands instead of running them."
     fi
-    echo "Would remove binary: ${OPENLOCK_BIN}"
+    if [ -e "${OPENLOCK_BIN}" ] || [ -L "${OPENLOCK_BIN}" ]; then
+      echo "Would remove binary: ${OPENLOCK_BIN}"
+    else
+      echo "No openlock binary found to remove (checked \$OPENLOCK_INSTALL_DIR and PATH)."
+    fi
     echo "Would remove config dir (config.yaml + credentials.json): ${CONFIG_DIR}"
     echo "Would remove state dir (sessions + gateway pid/log + pki): ${STATE_DIR}"
     echo "Would remove cache dir: ${CACHE_DIR}"
@@ -285,6 +394,9 @@ if [ "${PURGE}" -eq 1 ]; then
     echo
   fi
 
+  echo "Stopping gateway..."
+  stop_gateway
+
   if [ "${openlock_usable}" -eq 1 ]; then
     echo "Tearing down sessions (containers + workspace volumes)..."
     run_openlock clean --all
@@ -310,23 +422,15 @@ if [ "${PURGE}" -eq 1 ]; then
       fi
       "${rt}" image rm "openlock/supervisor:latest" >/dev/null 2>&1 || true
     done
-
-    echo "Stopping gateway..."
-    run_openlock gateway stop
   else
-    echo "openlock binary missing or not runnable — cannot enumerate sessions through it."
-    echo "Manual cleanup needed for runtime resources:"
+    echo "openlock binary missing or not runnable (checked \$OPENLOCK_INSTALL_DIR and PATH) —"
+    echo "cannot enumerate sessions through it. Manual cleanup needed for runtime resources"
+    echo "(the gateway process itself was already handled above):"
     if [ "${#session_names[@]}" -gt 0 ]; then
       echo "  Known session names (from ${SESSIONS_DIR}):"
       for n in "${session_names[@]}"; do echo "    - ${n}"; done
     fi
     print_manual_container_volume_hint
-    echo "  Gateway process (if still running):"
-    if [ -f "${GATEWAY_PID_FILE}" ]; then
-      echo "    kill \"\$(cat ${GATEWAY_PID_FILE})\""
-    else
-      echo "    (no ${GATEWAY_PID_FILE} found — likely already stopped)"
-    fi
     if [ "${images_present}" -eq 1 ]; then
       echo "  Images:"
       print_manual_image_hint
@@ -359,19 +463,8 @@ if [ "${DRY_RUN}" -eq 1 ]; then
   echo
 fi
 
-if [ "${openlock_usable}" -eq 1 ]; then
-  echo "Stopping gateway..."
-  if [ "${DRY_RUN}" -eq 1 ]; then
-    echo "  would run: ${OPENLOCK_BIN} gateway stop"
-  else
-    run_openlock gateway stop
-  fi
-else
-  echo "openlock binary missing or not runnable — skipping gateway stop."
-  if [ -f "${GATEWAY_PID_FILE}" ]; then
-    echo "  If a gateway is still running: kill \"\$(cat ${GATEWAY_PID_FILE})\""
-  fi
-fi
+echo "Stopping gateway..."
+stop_gateway
 
 # Deleting the binary first would strand every runtime resource with no tool
 # left to clean it up (the failure mode this whole script exists to avoid) —
