@@ -4,6 +4,7 @@ import yaml from "js-yaml";
 import {
   checkCredentialNameCollisions,
   checkCredentialsSupplied,
+  checkCredInjectValuePrefix,
   checkUninjectedCredentialHost,
 } from "./cross-check";
 import {
@@ -140,10 +141,11 @@ function collectNameCollisionIssues(
   return issues;
 }
 
-/** Policy.yaml cross-checks: one config+policy cross-file check
- * (checkCredentialsSupplied — needs both files schema-clean) plus one
- * policy-only check (checkUninjectedCredentialHost — openlock-s15, needs only
- * policy.yaml schema-clean, independent of config.yaml's state). */
+/** Policy.yaml cross-checks: two config+policy cross-file checks
+ * (checkCredentialsSupplied and checkCredInjectValuePrefix — both need the
+ * declared `credentials:` bundles, so both need config.yaml schema-clean too)
+ * plus one policy-only check (checkUninjectedCredentialHost — openlock-s15,
+ * needs only policy.yaml schema-clean, independent of config.yaml's state). */
 function collectPolicyCrossCheckIssues(
   folder: string,
   configPath: string,
@@ -163,12 +165,9 @@ function collectPolicyCrossCheckIssues(
   }
   if (!hasConfigErr && !hasPolicyErr && existsSync(configPath)) {
     const credentials = loadDeclaredCredentialsMerged(folder);
-    issues.push(
-      ...checkCredentialsSupplied(
-        { credentials } as Parameters<typeof checkCredentialsSupplied>[0],
-        policyDoc,
-      ),
-    );
+    const manifestLike = { credentials } as Parameters<typeof checkCredentialsSupplied>[0];
+    issues.push(...checkCredentialsSupplied(manifestLike, policyDoc));
+    issues.push(...checkCredInjectValuePrefix(manifestLike, policyDoc));
   }
   return issues;
 }

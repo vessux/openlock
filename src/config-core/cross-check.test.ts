@@ -2,11 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import yaml from "js-yaml";
+import { defaultPolicyContent } from "../sandbox/default-policies";
+import { HARNESSES } from "../sandbox/harness";
 import {
   checkCredentialNameCollisions,
   checkCredentialsSupplied,
+  checkCredInjectValuePrefix,
   checkUninjectedCredentialHost,
 } from "./cross-check";
+import { scaffoldPolicy } from "./policy/scaffold";
 
 const policyInjecting = (cred: string) => ({
   version: 1,
@@ -213,5 +217,148 @@ describe("checkUninjectedCredentialHost", () => {
     expect(
       checkUninjectedCredentialHost(policy as Parameters<typeof checkUninjectedCredentialHost>[0]),
     ).toEqual([]);
+  });
+});
+
+describe("checkCredInjectValuePrefix", () => {
+  const anthropicPolicy = (inject: Record<string, unknown>) => ({
+    version: 1,
+    network_policies: {
+      claude_code: {
+        endpoints: [{ host: "api.anthropic.com", cred_inject: { inject: [inject] } }],
+      },
+    },
+  });
+
+  test("errors when a provider-owned inject omits the required value_prefix", () => {
+    // The exact field-report shape: a committed policy.yaml whose
+    // api.anthropic.com inject lacks `value_prefix: 'Bearer '`. The anthropic
+    // provider stores the OAuth token RAW, so the header ships as
+    // `Authorization: sk-ant-oat01-...` and upstream answers 401.
+    const issues = checkCredInjectValuePrefix(
+      { credentials: [] },
+      anthropicPolicy({ header: "Authorization", from_credential: "ANTHROPIC_BEARER_TOKEN" }),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe("error");
+    expect(issues[0].file).toBe("policy.yaml");
+    expect(issues[0].message).toContain("Bearer ");
+    expect(issues[0].fix).toContain("value_prefix");
+  });
+
+  test("errors on a value_prefix the provider does not declare (double-prefix)", () => {
+    // openrouter stores "Bearer " INLINE in the credential value, so adding a
+    // value_prefix yields `Authorization: Bearer Bearer sk-or-...`.
+    const policy = {
+      version: 1,
+      network_policies: {
+        opencode: {
+          endpoints: [
+            {
+              host: "openrouter.ai",
+              cred_inject: {
+                inject: [
+                  {
+                    header: "Authorization",
+                    from_credential: "OPENROUTER_BEARER_TOKEN",
+                    value_prefix: "Bearer ",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    };
+    const issues = checkCredInjectValuePrefix({ credentials: [] }, policy);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe("error");
+  });
+
+  test("passes when the value_prefix matches the provider spec", () => {
+    const issues = checkCredInjectValuePrefix(
+      { credentials: [] },
+      anthropicPolicy({
+        header: "Authorization",
+        from_credential: "ANTHROPIC_BEARER_TOKEN",
+        value_prefix: "Bearer ",
+      }),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  test("matches the header case-insensitively (HTTP header names are)", () => {
+    const issues = checkCredInjectValuePrefix(
+      { credentials: [] },
+      anthropicPolicy({ header: "authorization", from_credential: "ANTHROPIC_BEARER_TOKEN" }),
+    );
+    expect(issues).toHaveLength(1);
+  });
+
+  test("ignores a credential/host pair no provider owns", () => {
+    const policy = {
+      version: 1,
+      network_policies: {
+        g: {
+          endpoints: [
+            {
+              host: "api.github.com",
+              cred_inject: {
+                inject: [{ header: "Authorization", from_credential: "GITHUB_TOKEN" }],
+              },
+            },
+          ],
+        },
+      },
+    };
+    const issues = checkCredInjectValuePrefix(
+      { credentials: [{ name: "gh", values: { GITHUB_TOKEN: { from_env: "GH" } } }] },
+      policy,
+    );
+    expect(issues).toEqual([]);
+  });
+
+  test("warns instead of erroring when a declared bundle also supplies the credential", () => {
+    // A bundle owns its own value shape (the user chooses whether to store the
+    // prefix inline), so openlock cannot be certain the provider spec applies.
+    const issues = checkCredInjectValuePrefix(
+      {
+        credentials: [
+          { name: "myclaude", values: { ANTHROPIC_BEARER_TOKEN: { from_env: "TOK" } } },
+        ],
+      },
+      anthropicPolicy({ header: "Authorization", from_credential: "ANTHROPIC_BEARER_TOKEN" }),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe("warning");
+  });
+
+  test("returns [] when policy has no network_policies at all", () => {
+    expect(checkCredInjectValuePrefix({ credentials: [] }, {})).toEqual([]);
+  });
+
+  test("the shipped default policy validates clean", () => {
+    const defaultPolicyPath = join(import.meta.dir, "../../policies/default.yaml");
+    const policy = yaml.load(readFileSync(defaultPolicyPath, "utf-8"));
+    expect(
+      checkCredInjectValuePrefix(
+        { credentials: [] },
+        policy as Parameters<typeof checkCredInjectValuePrefix>[1],
+      ),
+    ).toEqual([]);
+  });
+
+  test("every harness's scaffolded policy.yaml validates clean", () => {
+    // Guards the real `openlock init` output, not a hand-written fixture: the
+    // scaffold is what lands in a user's repo and then drifts.
+    for (const harness of HARNESSES) {
+      const scaffolded = yaml.load(scaffoldPolicy(harness, defaultPolicyContent()));
+      expect(
+        checkCredInjectValuePrefix(
+          { credentials: [] },
+          scaffolded as Parameters<typeof checkCredInjectValuePrefix>[1],
+        ),
+      ).toEqual([]);
+    }
   });
 });
