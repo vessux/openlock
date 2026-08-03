@@ -86,7 +86,7 @@ After the session exits, sandbox commits are in your repo under `refs/sandbox/<s
 | `setup` | Configure machine defaults (runtime, harness, provider) |
 | `login` | Authenticate with the gateway |
 | `logout` | Remove stored provider credentials |
-| `providers` | List configured providers |
+| `providers [models <id>]` | List configured providers, or check which OpenRouter models a stored key is allowed to use |
 | `init [path]` | Scaffold .openlock/ for a project (interactive) |
 | `validate [path]` | Validate .openlock/ config + policy |
 | `sandbox [path]` | Create or resume a sandbox session |
@@ -103,6 +103,7 @@ After the session exits, sandbox commits are in your repo under `refs/sandbox/<s
 | `update-images [--no-cache]` | Rebuild sandbox container images |
 | `update-base` | Rewrite .openlock/Containerfile FROM to current base hash |
 | `update-harness` | Resolve harness dist-tags + rewrite pinned npm install versions |
+| `prune-images [--legacy] [--dry-run]` | Remove stale openlock images |
 | `complete <bash\|zsh\|fish>` | Print shell completion script |
 | `cred-refresh` | Start the credential refresh service |
 
@@ -110,6 +111,9 @@ After the session exits, sandbox commits are in your repo under `refs/sandbox/<s
 
 ## Documentation
 
+- [Quickstart](./docs/quickstart.md) — the golden path, end to end
+- [Tutorial: fix a bug in a sandbox](./docs/tutorial.md) — a full session walkthrough
+- [Recipes](./docs/recipes.md) — copy-paste config snippets + a custom Containerfile walkthrough
 - [Installation & shell completion](./docs/installation.md)
 - [Sessions: picker & lifecycle](./docs/sessions.md)
 - [Mounts, args & env](./docs/mounts.md)
@@ -120,14 +124,16 @@ After the session exits, sandbox commits are in your repo under `refs/sandbox/<s
 ## Repo layout
 
 ```
-containers/           Containerfiles for the four sandbox images
+containers/           base.Containerfile — the one shared base image
 policies/             YAML egress + trust policies
 providers/            Credential refresh config
 src/cli.ts            Entry point
 src/sandbox/          Sandbox orchestration
 src/cred-refresh/     Credential refresh service
-src/validate-policy/  Policy linter
+src/config-core/policy/  Policy linter
 ```
+
+Per-harness installs (Claude Code / opencode / pi) aren't in `containers/` — they happen in each project's own `.openlock/Containerfile`, in the block after the `# ---- Harness ----` sentinel (see [Recipes](./docs/recipes.md) for a worked example of extending it).
 
 ## Development
 
