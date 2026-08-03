@@ -73,6 +73,25 @@ describe("resolveRepoPolicy", () => {
     expect(resolveRepoPolicy("/nonexistent", "/tmp/some-policy.yaml").harness).toBeUndefined();
   });
 
+  // openlock-251
+  it("carries the persisted cpu/memory limits from config.yaml", () => {
+    const proj = projectWith('cpu: "2"\nmemory: "4Gi"\nmounts: []\n');
+    const repo = resolveRepoPolicy(proj);
+    expect(repo.cpu).toBe("2");
+    expect(repo.memory).toBe("4Gi");
+  });
+
+  it("leaves cpu/memory undefined when config.yaml omits them, and on the --policy override path", () => {
+    const proj = projectWith("mounts: []\n");
+    const repo = resolveRepoPolicy(proj);
+    expect(repo.cpu).toBeUndefined();
+    expect(repo.memory).toBeUndefined();
+
+    const overridden = resolveRepoPolicy("/whatever", "/tmp/some-policy.yaml");
+    expect(overridden.cpu).toBeUndefined();
+    expect(overridden.memory).toBeUndefined();
+  });
+
   it("carries credentials from the folder; empty on --policy override", () => {
     const proj = projectWith(
       "mounts: []\ncredentials:\n  - name: github\n    values:\n      GITHUB_TOKEN: { from_env: GITHUB_TOKEN }\n",

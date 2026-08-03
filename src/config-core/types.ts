@@ -51,6 +51,19 @@ export interface ManifestConfig {
   args: string[];
   env: Record<string, string>;
   credentials: CredentialBundle[];
+  /** CPU limit passed through verbatim to `openshell sandbox create --cpu`
+   * (e.g. "2", "500m", "0.5"). Absent means openlock does not pass --cpu at
+   * all, so the sandbox inherits openshell's own default — openlock does not
+   * fork that default without a reason; it only makes it overridable and
+   * visible (openlock-251: openlock previously set no limit anywhere, so
+   * every sandbox silently inherited openshell's cpu_limit=2 regardless of
+   * the host's actual resources). */
+  cpu?: string;
+  /** Memory limit passed through verbatim to `openshell sandbox create
+   * --memory` (e.g. "4Gi", "512Mi", "8G"). Absent means openlock does not
+   * pass --memory at all, so the sandbox inherits openshell's own default —
+   * same reasoning as `cpu` above (openlock-251). */
+  memory?: string;
 }
 
 export const SANDBOX_OPENLOCK_PREFIX = "/sandbox/.openlock/";

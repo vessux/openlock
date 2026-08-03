@@ -1,7 +1,15 @@
 import { HARNESSES } from "../../sandbox/harness";
 import type { Issue, MountType } from "../types";
 
-export const MANIFEST_KEYS = new Set(["harness", "mounts", "args", "env", "credentials"]);
+export const MANIFEST_KEYS = new Set([
+  "harness",
+  "mounts",
+  "args",
+  "env",
+  "credentials",
+  "cpu",
+  "memory",
+]);
 export const MOUNT_ENTRY_KEYS = new Set(["source", "target", "type", "readOnly"]);
 export const MOUNT_TYPES: readonly MountType[] = [
   "copy-once",
@@ -168,6 +176,24 @@ function validateCredentials(doc: Record<string, unknown>, issues: Issue[]): voi
   }
 }
 
+// `cpu`/`memory` are passed through verbatim to `openshell sandbox create
+// --cpu`/`--memory` (container.ts buildOpenshellCreateArgv). openshell's own
+// CLI is the authority on the actual quantity grammar (cores/millicores like
+// "2"/"500m" for cpu; byte quantities like "4Gi"/"512Mi" for memory — see
+// validate_cpu_quantity/validate_memory_quantity in the fork's run.rs), so
+// this only guards the shape openlock cares about: present and non-empty.
+function validateResourceLimit(
+  doc: Record<string, unknown>,
+  key: "cpu" | "memory",
+  issues: Issue[],
+): void {
+  const v = doc[key];
+  if (v === undefined || v === null) return;
+  if (typeof v !== "string" || v.trim().length === 0) {
+    issues.push(err(key, `'${key}' must be a non-empty string`));
+  }
+}
+
 export function validateManifestSchema(doc: unknown): Issue[] {
   const issues: Issue[] = [];
   if (!isPlainObject(doc)) {
@@ -190,5 +216,7 @@ export function validateManifestSchema(doc: unknown): Issue[] {
   validateArgs(doc, issues);
   validateEnv(doc, issues);
   validateCredentials(doc, issues);
+  validateResourceLimit(doc, "cpu", issues);
+  validateResourceLimit(doc, "memory", issues);
   return issues;
 }

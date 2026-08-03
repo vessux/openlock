@@ -58,6 +58,12 @@ export interface ResolveResult {
   credentials: CredentialBundle[];
   /** Harness persisted in config.yaml, or undefined if the manifest omits it. */
   harness?: Harness;
+  /** CPU limit persisted in config.yaml, or undefined if the manifest omits
+   * it — undefined means inherit openshell's own default (openlock-251). */
+  cpu?: string;
+  /** Memory limit persisted in config.yaml, or undefined if the manifest
+   * omits it — undefined means inherit openshell's own default (openlock-251). */
+  memory?: string;
 }
 
 function folderPathFor(projectPath: string): string {
@@ -94,6 +100,8 @@ export function resolveOpenlockFolder(projectPath: string): ResolveResult {
       credentials: cfg.credentials,
     };
     if (cfg.harness !== undefined) result.harness = cfg.harness;
+    if (cfg.cpu !== undefined) result.cpu = cfg.cpu;
+    if (cfg.memory !== undefined) result.memory = cfg.memory;
     return result;
   }
   const missing = [
