@@ -1,6 +1,6 @@
-export type Harness = "claude_code" | "opencode";
+export type Harness = "claude_code" | "opencode" | "pi";
 
-export const HARNESSES: ReadonlySet<Harness> = new Set<Harness>(["claude_code", "opencode"]);
+export const HARNESSES: ReadonlySet<Harness> = new Set<Harness>(["claude_code", "opencode", "pi"]);
 
 export function validateHarness(value: string, source: string): Harness {
   if (!HARNESSES.has(value as Harness)) {
@@ -18,6 +18,8 @@ export function harnessLaunchArgv(harness: Harness, args: readonly string[]): st
       return ["claude", ...args];
     case "opencode":
       return ["opencode", ...args];
+    case "pi":
+      return ["pi", ...args];
   }
 }
 
@@ -27,6 +29,8 @@ export function harnessBinaryPath(harness: Harness): string {
       return "/usr/local/bin/claude";
     case "opencode":
       return "/usr/local/bin/opencode";
+    case "pi":
+      return "/usr/local/bin/pi";
   }
 }
 

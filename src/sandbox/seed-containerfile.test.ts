@@ -16,6 +16,7 @@ const FAKE_HASH = "abc123def456";
 const FAKE_VERSIONS: Record<Harness, string> = {
   claude_code: "0.0.0-fixture-cc",
   opencode: "0.0.0-fixture-oc",
+  pi: "0.0.0-fixture-pi",
 };
 
 function snap(name: string): string {
@@ -41,6 +42,16 @@ describe("seedContainerfile", () => {
       versions: FAKE_VERSIONS,
     });
     expect(out).toBe(snap("opencode.Containerfile"));
+  });
+
+  it("matches snapshot for pi only", () => {
+    const out = seedContainerfile({
+      harnesses: ["pi"],
+      baseHash: FAKE_HASH,
+      baseContent: BASE_CONTENT_FIXTURE,
+      versions: FAKE_VERSIONS,
+    });
+    expect(out).toBe(snap("pi.Containerfile"));
   });
 
   it("matches snapshot for both harnesses", () => {
@@ -90,6 +101,15 @@ describe("renderSeedContainerfile", () => {
     expect(renderSeedContainerfile("opencode")).toContain("opencode-ai@");
   });
 
+  it("installs pi (the real scoped package, not the unscoped placeholder) for the pi harness", () => {
+    const out = renderSeedContainerfile("pi");
+    expect(out).toContain("@earendil-works/pi-coding-agent@");
+    // openlock-1ho: the unscoped `pi-coding-agent` name is an unrelated
+    // placeholder reservation, not the real package — this is a regression
+    // guard against ever pinning it by mistake.
+    expect(out).not.toMatch(/[^/]pi-coding-agent@/);
+  });
+
   // The snapshot fixtures above pin fake versions to avoid churning on every
   // real bump, which means a wrong HARNESS_VERSIONS constant would otherwise
   // be invisible to the suite. Cover the real pins explicitly instead.
@@ -102,6 +122,12 @@ describe("renderSeedContainerfile", () => {
   it("installs the real pinned opencode version from HARNESS_VERSIONS", () => {
     expect(renderSeedContainerfile("opencode")).toContain(
       `opencode-ai@${HARNESS_VERSIONS.opencode.version}`,
+    );
+  });
+
+  it("installs the real pinned pi version from HARNESS_VERSIONS", () => {
+    expect(renderSeedContainerfile("pi")).toContain(
+      `@earendil-works/pi-coding-agent@${HARNESS_VERSIONS.pi.version}`,
     );
   });
 });
@@ -135,6 +161,21 @@ describe("chown after root harness installs (openlock-ef6)", () => {
     });
     expect(out).toContain(CHOWN_LINE);
     const installIdx = out.indexOf("RUN npm install -g @anthropic-ai/claude-code@");
+    const chownIdx = out.indexOf(CHOWN_LINE);
+    const userIdx = out.lastIndexOf(USER_SWITCH);
+    expect(installIdx).toBeGreaterThan(-1);
+    expect(chownIdx).toBeGreaterThan(installIdx);
+    expect(userIdx).toBeGreaterThan(chownIdx);
+  });
+
+  it("pi: chown appears after npm install and before USER switch", () => {
+    const out = seedContainerfile({
+      harnesses: ["pi"],
+      baseHash: FAKE_HASH,
+      baseContent: BASE_CONTENT_FIXTURE,
+    });
+    expect(out).toContain(CHOWN_LINE);
+    const installIdx = out.indexOf("RUN npm install -g @earendil-works/pi-coding-agent@");
     const chownIdx = out.indexOf(CHOWN_LINE);
     const userIdx = out.lastIndexOf(USER_SWITCH);
     expect(installIdx).toBeGreaterThan(-1);

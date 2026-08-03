@@ -103,6 +103,30 @@ network_policies:
               path: /**
     allowed_secrets:
       - OPENROUTER_BEARER_TOKEN
+  pi:
+    binaries:
+      - path: /usr/local/bin/pi
+      - path: /usr/local/bin/node
+    endpoints:
+      - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: /api/v1/**
+        cred_inject:
+          provider: openrouter
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: Authorization
+              from_credential: OPENROUTER_BEARER_TOKEN
+    allowed_secrets:
+      - OPENROUTER_BEARER_TOKEN
   npm_packages:
     binaries:
       - path: /usr/local/bin/npm

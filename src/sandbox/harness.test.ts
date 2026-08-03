@@ -8,9 +8,10 @@ import {
 } from "./harness";
 
 describe("HARNESSES", () => {
-  it("contains the two MVP harnesses", () => {
+  it("contains the three harnesses", () => {
     expect(HARNESSES.has("claude_code")).toBe(true);
     expect(HARNESSES.has("opencode")).toBe(true);
+    expect(HARNESSES.has("pi")).toBe(true);
   });
 });
 
@@ -18,6 +19,7 @@ describe("validateHarness", () => {
   it("returns the value when valid", () => {
     expect(validateHarness("opencode", "--harness")).toBe("opencode");
     expect(validateHarness("claude_code", "OPENLOCK_HARNESS")).toBe("claude_code");
+    expect(validateHarness("pi", "--harness")).toBe("pi");
   });
 
   it("throws with source named for invalid values", () => {
@@ -25,6 +27,7 @@ describe("validateHarness", () => {
     expect(() => validateHarness("foo", "--harness")).toThrow(/"foo"/);
     expect(() => validateHarness("foo", "--harness")).toThrow(/claude_code/);
     expect(() => validateHarness("foo", "--harness")).toThrow(/opencode/);
+    expect(() => validateHarness("foo", "--harness")).toThrow(/pi/);
   });
 });
 
@@ -38,6 +41,11 @@ describe("harnessLaunchArgv", () => {
     expect(harnessLaunchArgv("opencode", [])).toEqual(["opencode"]);
     expect(harnessLaunchArgv("opencode", ["run", "hello"])).toEqual(["opencode", "run", "hello"]);
   });
+
+  it("returns pi argv for pi", () => {
+    expect(harnessLaunchArgv("pi", [])).toEqual(["pi"]);
+    expect(harnessLaunchArgv("pi", ["-p", "hello"])).toEqual(["pi", "-p", "hello"]);
+  });
 });
 
 describe("harnessBinaryPath", () => {
@@ -47,6 +55,10 @@ describe("harnessBinaryPath", () => {
 
   it("returns /usr/local/bin/opencode for opencode", () => {
     expect(harnessBinaryPath("opencode")).toBe("/usr/local/bin/opencode");
+  });
+
+  it("returns /usr/local/bin/pi for pi", () => {
+    expect(harnessBinaryPath("pi")).toBe("/usr/local/bin/pi");
   });
 });
 

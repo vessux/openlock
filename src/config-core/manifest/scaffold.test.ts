@@ -11,11 +11,17 @@ describe("scaffoldManifest", () => {
     expect(scaffoldManifest({ workdir: "bind", harness: "claude_code" })).toMatch(
       /^harness: claude_code$/m,
     );
+    expect(scaffoldManifest({ workdir: "bind", harness: "pi" })).toMatch(/^harness: pi$/m);
   });
 
   it("the persisted harness round-trips through parseManifest", () => {
     const out = scaffoldManifest({ workdir: "bind", harness: "opencode" });
     expect(parseManifest(out, "/tmp").harness).toBe("opencode");
+  });
+
+  it("the persisted pi harness round-trips through parseManifest", () => {
+    const out = scaffoldManifest({ workdir: "bind", harness: "pi" });
+    expect(parseManifest(out, "/tmp").harness).toBe("pi");
   });
 
   it("documents harness in the supported-keys header comment", () => {
@@ -114,6 +120,17 @@ describe("scaffoldManifest", () => {
     expect(out).toContain("small_model");
     expect(out).toContain("MUST support tool use");
     expect(out).not.toContain("claude-sonnet-4-6");
+  });
+
+  it("pi empty args scaffold contains OpenRouter model guidance, not the opencode-only small_model note", () => {
+    const out = scaffoldManifest({ workdir: "bind", harness: "pi" });
+    // Assert on the durable guidance, not a specific free-tier slug — free
+    // models rotate on OpenRouter, so pinning one in the test rots too (openlock-1kt).
+    expect(out).toContain("https://openrouter.ai/models");
+    expect(out).not.toContain("claude-sonnet-4-6");
+    // small_model is an opencode-specific quirk (title sub-agent config) that
+    // does not apply to pi — must not leak into pi's scaffold (openlock-1ho).
+    expect(out).not.toContain("small_model");
   });
 
   it("opencode non-empty args are rendered verbatim (no per-harness branching)", () => {

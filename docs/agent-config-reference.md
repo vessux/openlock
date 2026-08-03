@@ -44,7 +44,7 @@ Top-level keys: `version` (required, integer) plus optional `filesystem_policy`,
 
 ## Harnesses
 
-Supported `harness` values: `claude_code`, `opencode`. The harness shapes the generated `policy.yaml` and `Containerfile`.
+Supported `harness` values: `claude_code`, `opencode`, `pi`. The harness shapes the generated `policy.yaml` and `Containerfile`. `pi` (installed binary: `pi`, package `@earendil-works/pi-coding-agent`) is OpenRouter-only — its `compatibleHarnesses` does not include `anthropic`.
 
 ## Internals (why / how)
 
@@ -59,7 +59,7 @@ See [Security & runtime](./security.md) for the human-facing depth and [Mounts, 
 
 1. **Inspect `.openlock/`** for `config.yaml`, `policy.yaml`, `Containerfile`: none present → scaffold all (`openlock init`); some present → gap-fill the missing ones; all present → leave alone (use `--force` to regenerate).
 2. **Workdir mount type:** default `bind` (live; host edits <-> sandbox). Choose `git-bundle` for an isolated snapshot (required for `--branch` and sync-back).
-3. **Harness:** pick `claude_code` or `opencode`; it determines the generated policy + Containerfile.
+3. **Harness:** pick `claude_code`, `opencode`, or `pi`; it determines the generated policy + Containerfile.
 4. **Provider:** explicit only — never inferred. Source it from an explicit flag/env/config/manifest; if none is given, error rather than guess.
 5. **Extra mounts:** `copy-once` / `copy-refresh` (target under `/sandbox/.openlock/`), `bind` (anywhere; `readOnly` allowed), or `git-bundle`.
 

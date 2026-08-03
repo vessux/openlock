@@ -20,8 +20,9 @@ describe("OPENROUTER plugin", () => {
     expect(OPENROUTER.credentialEnvVars).toEqual(["OPENROUTER_BEARER_TOKEN"]);
   });
 
-  it("is compatible with opencode (not claude_code)", () => {
+  it("is compatible with opencode and pi (not claude_code)", () => {
     expect(OPENROUTER.compatibleHarnesses.has("opencode")).toBe(true);
+    expect(OPENROUTER.compatibleHarnesses.has("pi")).toBe(true);
     expect(OPENROUTER.compatibleHarnesses.has("claude_code")).toBe(false);
   });
 
@@ -81,6 +82,24 @@ describe("OPENROUTER plugin", () => {
       expect(modelsDev?.rules).toEqual([{ allow: { method: "GET", path: "/**" } }]);
       // public read-only metadata carries no credential
       expect(modelsDev?.cred_inject).toBeUndefined();
+    });
+
+    // openlock-1ho: policyEndpoints used to ignore its harness argument
+    // entirely and emit models.dev unconditionally. pi has its own built-in
+    // model catalogs and never touches models.dev, so wiring pi to openrouter
+    // must NOT grant it that egress domain.
+    it("does NOT emit models.dev for pi (only opencode needs it)", () => {
+      const endpoints = OPENROUTER.policyEndpoints("pi");
+      expect(endpoints.find((e) => e.host === "models.dev")).toBeUndefined();
+    });
+
+    it("still emits openrouter.ai with the same Authorization Bearer cred_inject for pi", () => {
+      const endpoints = OPENROUTER.policyEndpoints("pi");
+      const openrouter = endpoints.find((e) => e.host === "openrouter.ai");
+      expect(openrouter).toBeDefined();
+      expect(openrouter?.cred_inject?.inject).toEqual([
+        { header: "Authorization", from_credential: "OPENROUTER_BEARER_TOKEN" },
+      ]);
     });
   });
 

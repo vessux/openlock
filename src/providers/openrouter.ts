@@ -18,7 +18,14 @@ export const OPENROUTER: ProviderPlugin = {
   displayName: "OpenRouter",
   openshellType: "generic",
   credentialEnvVars: ["OPENROUTER_BEARER_TOKEN"],
-  compatibleHarnesses: new Set<Harness>(["opencode"]),
+  // pi (openlock-1ho): OpenRouter-only per the accepted design — openlock
+  // already stages OPENROUTER_API_KEY (below), exactly the env var pi reads,
+  // at a host (openrouter.ai) the policy already allows. Anthropic does NOT
+  // extend to pi: the anthropic plugin stages a Claude-Code-format OAuth
+  // credential file, which pi doesn't consume (it wants an x-api-key-style
+  // key or its own auth.json) — wiring that would be a provider change, out
+  // of scope here.
+  compatibleHarnesses: new Set<Harness>(["opencode", "pi"]),
 
   async loginInteractive(io: LoginIO): Promise<LoginResult> {
     const raw = await io.readLine("Paste your OpenRouter API key (starts with sk-or-):\n> ");
@@ -26,26 +33,30 @@ export const OPENROUTER: ProviderPlugin = {
     return { credentials: { OPENROUTER_BEARER_TOKEN: `Bearer ${key}` } };
   },
 
-  policyEndpoints(_harness: Harness): readonly PolicyEndpointSpec[] {
-    return [
-      {
-        host: "openrouter.ai",
-        port: 443,
-        protocol: "rest",
-        rules: [{ allow: { method: "POST", path: "/api/v1/**" } }],
-        cred_inject: {
-          provider: "openrouter",
-          strip_headers: ["Authorization", "x-api-key", "Cookie"],
-          inject: [{ header: "Authorization", from_credential: "OPENROUTER_BEARER_TOKEN" }],
-        },
+  policyEndpoints(harness: Harness): readonly PolicyEndpointSpec[] {
+    const openrouterApi: PolicyEndpointSpec = {
+      host: "openrouter.ai",
+      port: 443,
+      protocol: "rest",
+      rules: [{ allow: { method: "POST", path: "/api/v1/**" } }],
+      cred_inject: {
+        provider: "openrouter",
+        strip_headers: ["Authorization", "x-api-key", "Cookie"],
+        inject: [{ header: "Authorization", from_credential: "OPENROUTER_BEARER_TOKEN" }],
       },
+    };
+    if (harness !== "opencode") return [openrouterApi];
+    return [
+      openrouterApi,
       // models.dev is an opencode model-metadata requirement, NOT an OpenRouter
       // API endpoint. opencode resolves model metadata from models.dev; models
       // absent from its bundled registry (cloaked/new models) fail with
-      // UnknownError unless this read-only GET egress is allowed. opencode is
-      // currently the only openrouter-compatible harness so this is emitted
-      // unconditionally; if a second opencode-compatible provider is ever added,
-      // move this to a harness-level egress source to avoid duplication.
+      // UnknownError unless this read-only GET egress is allowed. Gated to
+      // opencode specifically (openlock-1ho) — pi has its own built-in model
+      // catalogs and never touches models.dev, so granting it this egress
+      // domain would be an unused, unverified allowance. If a second
+      // models.dev-dependent harness is ever added, move this to a
+      // harness-level egress source to avoid duplication.
       //
       // opencode's startup @opencode-ai/plugin npm install (registry.npmjs.org)
       // is intentionally NOT allowed — it's non-fatal (opencode runs without the

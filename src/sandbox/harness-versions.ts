@@ -13,6 +13,13 @@ import type { Harness } from "./harness";
  * - `opencode-ai` publishes NO `stable` tag at all — verified 2026-07-29
  *   against the registry, it has only `latest` plus ~40 `snapshot-*` tags —
  *   so its resolution target is `latest`.
+ * - `@earendil-works/pi-coding-agent` (installed binary: `pi`) also publishes
+ *   NO `stable` tag — verified 2026-08-02 against the registry, its dist-tags
+ *   are only `latest` (0.83.0) and `legacy-node20` (0.74.2, a Node 20
+ *   compatibility line) — so `latest` is its resolution target too. Do not
+ *   pin the unscoped `pi-coding-agent` package name: that is an unrelated
+ *   placeholder reservation (version 0.0.1, zero dependencies), not the real
+ *   package (openlock-1ho).
  */
 export const HARNESS_VERSIONS: Record<
   Harness,
@@ -26,6 +33,11 @@ export const HARNESS_VERSIONS: Record<
   opencode: {
     package: "opencode-ai",
     version: "1.18.9",
+    distTag: "latest",
+  },
+  pi: {
+    package: "@earendil-works/pi-coding-agent",
+    version: "0.83.0",
     distTag: "latest",
   },
 };
