@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   computeBaseTag,
+  detectBaseImageDrift,
   ensureBase,
   GHCR_BASE_PREFIX,
   isOpenlockBaseRef,
@@ -67,6 +68,38 @@ describe("isOpenlockBaseRef", () => {
 describe("GHCR_BASE_PREFIX", () => {
   it("is the canonical prefix", () => {
     expect(GHCR_BASE_PREFIX).toBe("ghcr.io/vessux/openlock-base:");
+  });
+});
+
+describe("detectBaseImageDrift (openlock-x83q)", () => {
+  it("reports match when the pinned hash equals the current content's hash", () => {
+    const baseContent = "FROM ubuntu:24.04\n";
+    const hash = computeBaseTag(baseContent).slice(GHCR_BASE_PREFIX.length);
+    const containerfile = `FROM ${GHCR_BASE_PREFIX}${hash}\nARG SANDBOX_UID=60000\n`;
+    expect(detectBaseImageDrift(containerfile, baseContent)).toEqual({ kind: "match" });
+  });
+
+  it("reports drift when the pinned hash differs from the current content's hash", () => {
+    const oldBaseContent = "FROM ubuntu:24.04\n";
+    const newBaseContent = "FROM ubuntu:24.04\nRUN apt-get install -y nftables\n";
+    const pinnedHash = computeBaseTag(oldBaseContent).slice(GHCR_BASE_PREFIX.length);
+    const expectedHash = computeBaseTag(newBaseContent).slice(GHCR_BASE_PREFIX.length);
+    const containerfile = `FROM ${GHCR_BASE_PREFIX}${pinnedHash}\n`;
+    expect(detectBaseImageDrift(containerfile, newBaseContent)).toEqual({
+      kind: "drift",
+      pinnedHash,
+      expectedHash,
+    });
+  });
+
+  it("reports custom when the active FROM isn't an openlock-base ref (documented customization path)", () => {
+    const containerfile = "# FROM ghcr.io/vessux/openlock-base:abc\nFROM ubuntu:24.04\n";
+    expect(detectBaseImageDrift(containerfile, "anything")).toEqual({ kind: "custom" });
+  });
+
+  it("reports unparseable when there's no active FROM line, rather than throwing", () => {
+    const containerfile = "# FROM ghcr.io/vessux/openlock-base:abc\nRUN echo hi\n";
+    expect(detectBaseImageDrift(containerfile, "anything")).toEqual({ kind: "unparseable" });
   });
 });
 

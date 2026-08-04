@@ -4,6 +4,8 @@ import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
   asAmbiguousWarning,
+  BASE_IMAGE_DRIFT_CHECK_NAME,
+  buildBaseImageDriftCheck,
   buildCmakeCheck,
   buildGatewayReachabilityCheck,
   buildReachabilityProbeArgv,
@@ -16,6 +18,8 @@ import {
   runDoctorChecks,
 } from "./doctor";
 import { globalConfigPath } from "./global-config/paths";
+import { computeBaseTag, GHCR_BASE_PREFIX } from "./sandbox/ensure-base";
+import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
 // runner `podman info` alone can take a few seconds; the bun-test default
@@ -207,6 +211,92 @@ describe("buildCmakeCheck (dev-mode-only, openlock-e7q)", () => {
     expect(checks[0]?.fix).toContain("cmake");
     expect(checks[0]?.fix).not.toContain("apt install");
   });
+});
+
+describe("buildBaseImageDriftCheck (openlock-x83q)", () => {
+  it("is absent when .openlock/Containerfile can't be read (not a project directory)", () => {
+    const checks = buildBaseImageDriftCheck("/nonexistent", () => {
+      throw new Error("ENOENT: no such file or directory");
+    });
+    expect(checks).toEqual([]);
+  });
+
+  it("passes with no detail when the pinned hash matches the CLI's embedded base content", async () => {
+    const hash = computeBaseTag(BASE_CONTAINERFILE).slice(GHCR_BASE_PREFIX.length);
+    const checks = buildBaseImageDriftCheck("/proj", () => `FROM ${GHCR_BASE_PREFIX}${hash}\n`);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]?.name).toBe(BASE_IMAGE_DRIFT_CHECK_NAME);
+    expect(await checks[0]?.test()).toEqual({ ok: true });
+  });
+
+  it("fails with a fix naming update-base + rebuild when the pinned hash is stale", async () => {
+    const staleHash = "aaaaaaaaaaaa";
+    const checks = buildBaseImageDriftCheck(
+      "/proj",
+      () => `FROM ${GHCR_BASE_PREFIX}${staleHash}\n`,
+    );
+    expect(checks).toHaveLength(1);
+    const outcome = await checks[0]?.test();
+    expect(outcome).toMatchObject({ ok: false });
+    if (typeof outcome === "boolean" || outcome === undefined) throw new Error("unreachable");
+    expect(outcome.detail).toContain(staleHash);
+    expect(outcome.fix).toContain("openlock update-base --project /proj");
+    expect(outcome.fix).toContain("--rebuild");
+  });
+
+  it("passes with an explicit detail (not silently absent) when the FROM line is a custom base", async () => {
+    const checks = buildBaseImageDriftCheck("/proj", () => "FROM ubuntu:24.04\n");
+    expect(checks).toHaveLength(1);
+    const outcome = await checks[0]?.test();
+    expect(outcome).toMatchObject({ ok: true });
+    if (typeof outcome === "boolean" || outcome === undefined) throw new Error("unreachable");
+    expect(outcome.detail).toMatch(/custom base image/);
+  });
+
+  it("passes with an explicit detail (not silently absent) when no active FROM line is found", async () => {
+    const checks = buildBaseImageDriftCheck("/proj", () => "# FROM ubuntu\nRUN echo hi\n");
+    expect(checks).toHaveLength(1);
+    const outcome = await checks[0]?.test();
+    expect(outcome).toMatchObject({ ok: true });
+    if (typeof outcome === "boolean" || outcome === undefined) throw new Error("unreachable");
+    expect(outcome.detail).toMatch(/no active FROM|skipping/);
+  });
+});
+
+describe("runDoctorChecks base image drift wiring", () => {
+  let tmp = "";
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "openlock-doctor-basedrift-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it(
+    "is absent when projectDir has no .openlock/Containerfile",
+    async () => {
+      const results = await runDoctorChecks("podman", undefined, tmp);
+      expect(results.some((r) => r.name === BASE_IMAGE_DRIFT_CHECK_NAME)).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "fails when the project's pinned base hash is stale, naming the projectDir in the fix",
+    async () => {
+      const openlockDir = join(tmp, ".openlock");
+      mkdirSync(openlockDir, { recursive: true });
+      writeFileSync(join(openlockDir, "Containerfile"), `FROM ${GHCR_BASE_PREFIX}aaaaaaaaaaaa\n`);
+      const results = await runDoctorChecks("podman", undefined, tmp);
+      const r = results.find((x) => x.name === BASE_IMAGE_DRIFT_CHECK_NAME);
+      expect(r).toBeDefined();
+      expect(r?.ok).toBe(false);
+      expect(r?.fix).toContain(`openlock update-base --project ${tmp}`);
+    },
+    TIMEOUT_MS,
+  );
 });
 
 describe("buildRuntimeChecks", () => {

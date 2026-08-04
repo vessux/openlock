@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
-import type { DoctorResult } from "../doctor";
+import { BASE_IMAGE_DRIFT_CHECK_NAME, type DoctorResult } from "../doctor";
 import type { Runtime } from "../runtime";
 import { SANDBOX_UID } from "./seed-containerfile";
 import { rangeCoversUid } from "./subuid";
@@ -138,6 +138,19 @@ export async function preflight(opts: PreflightOpts): Promise<PreflightResult> {
   if (reach && !reach.ok) {
     console.warn(
       `openlock: ${reach.detail ?? "sandbox may not be able to reach the gateway"}${reach.fix ? ` — ${reach.fix}` : ""}`,
+    );
+  }
+  // openlock-x83q: a stale pinned base-image hash (containers/base.Containerfile
+  // changed since this project's .openlock/Containerfile was generated/last
+  // updated) is real, actionable information the user should see at the moment
+  // they're about to create/reattach a sandbox — but it must never BLOCK: the
+  // stale tag still resolves and builds cleanly, and the user may have
+  // deliberately pinned an old base. So it's surfaced here exactly like the
+  // gateway-reachability probe above, never gated on by checkDoctor.
+  const baseDrift = results.find((r) => r.name === BASE_IMAGE_DRIFT_CHECK_NAME);
+  if (baseDrift && !baseDrift.ok) {
+    console.warn(
+      `openlock: ${baseDrift.detail ?? "this project's pinned base image is stale"}${baseDrift.fix ? ` — fix: ${baseDrift.fix}` : ""}`,
     );
   }
   return (

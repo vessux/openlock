@@ -37,6 +37,56 @@ export function isOpenlockBaseRef(ref: string): boolean {
   return ref.startsWith(GHCR_BASE_PREFIX);
 }
 
+export type BaseImageDriftStatus =
+  | { kind: "match" }
+  | { kind: "drift"; pinnedHash: string; expectedHash: string }
+  | { kind: "custom" }
+  | { kind: "unparseable" };
+
+/**
+ * Compare a project's `.openlock/Containerfile` pinned base-image hash
+ * against the hash the CLI's currently embedded base-image content would
+ * produce (openlock-x83q). `computeBaseTag` is content-addressed, but
+ * `renderSeedContainerfile`/`seedContainerfile` bake the resulting tag in as
+ * a LITERAL `FROM ghcr.io/vessux/openlock-base:<hash>` line at `openlock
+ * init` time — a project's Containerfile never re-derives it, so a base
+ * image change (e.g. PR #133's nftables fix) leaves every pre-existing
+ * project silently pinned to the stale, still-resolvable old tag. Pure
+ * string comparison — no registry or podman call — so it's cheap enough for
+ * both `openlock doctor` and the `openlock sandbox` preflight hot path.
+ *
+ * `currentBaseContent` is passed in rather than imported here to avoid the
+ * circular import `image-build.ts` already routes around (see the module
+ * comment above) — callers pass `BASE_CONTAINERFILE` from `./image-build`.
+ *
+ * `"custom"`: the active FROM line isn't an openlock-base reference at all —
+ * the documented "comment out FROM+ARGs, uncomment the inline reference
+ * block" customization path from `seedContainerfile`. That's a deliberate,
+ * legitimate divergence, not drift; reporting it as drift would be a false
+ * positive.
+ *
+ * `"unparseable"`: no active FROM line could be found at all (e.g.
+ * hand-edited into something `parseFromImage` doesn't recognize). Treated as
+ * "can't compare" just like `"custom"` — never a false positive — but kept
+ * as its own variant so callers can tell the two apart if they ever need to.
+ */
+export function detectBaseImageDrift(
+  containerfileContent: string,
+  currentBaseContent: string,
+): BaseImageDriftStatus {
+  let fromRef: string;
+  try {
+    fromRef = parseFromImage(containerfileContent);
+  } catch {
+    return { kind: "unparseable" };
+  }
+  if (!isOpenlockBaseRef(fromRef)) return { kind: "custom" };
+  const pinnedHash = fromRef.slice(GHCR_BASE_PREFIX.length);
+  const expectedHash = computeBaseTag(currentBaseContent).slice(GHCR_BASE_PREFIX.length);
+  if (pinnedHash === expectedHash) return { kind: "match" };
+  return { kind: "drift", pinnedHash, expectedHash };
+}
+
 export interface EnsureBaseDeps {
   imageExists: (runtime: Runtime, tag: string) => Promise<boolean>;
   tryPull: (runtime: Runtime, tag: string) => Promise<boolean>;

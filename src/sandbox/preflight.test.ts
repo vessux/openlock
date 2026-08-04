@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import os from "node:os";
 import { type PreflightDeps, preflight } from "./preflight";
 
@@ -255,5 +255,49 @@ describe("preflight", () => {
     });
     const result = await preflight({ tty: false, deps });
     expect(result.ok).toBe(true);
+  });
+
+  // openlock-x83q: a stale base-image pin is deliberately never blocking —
+  // the old tag still resolves and builds cleanly, and the user may have
+  // pinned an old base on purpose. It must surface as a warning rather than
+  // vanish, since that's exactly the silent-failure shape this project keeps
+  // getting burned by.
+  it("warns but does not block sandbox create when the base image pin is stale", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const deps = makeDeps({
+        runDoctorChecks: async () => [
+          { name: "git", ok: true },
+          { name: "podman", ok: true },
+          { name: "podman machine (running)", ok: true },
+          { name: "credentials (openlock login)", ok: true },
+          {
+            name: "base image pin",
+            ok: false,
+            detail: "pinned to aaaaaaaaaaaa, current is bbbbbbbbbbbb",
+            fix: "openlock update-base --project /proj, then rebuild with --rebuild",
+          },
+        ],
+      });
+      const result = await preflight({ tty: true, deps });
+      expect(result.ok).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = warn.mock.calls[0]?.[0];
+      expect(message).toContain("pinned to aaaaaaaaaaaa");
+      expect(message).toContain("openlock update-base --project /proj");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not warn when the base image pin check is absent (not a project directory)", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await preflight({ tty: true, deps: makeDeps() });
+      expect(result.ok).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

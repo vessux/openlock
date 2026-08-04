@@ -581,9 +581,9 @@ async function ensureHostRuntimeReady(): Promise<void> {
   }
 }
 
-function realPreflightDeps(runtime: Runtime): PreflightDeps {
+function realPreflightDeps(runtime: Runtime, projectDir: string): PreflightDeps {
   return {
-    runDoctorChecks: () => runDoctorChecks(runtime),
+    runDoctorChecks: () => runDoctorChecks(runtime, undefined, projectDir),
     hasCredentials: hasAnyProvider,
     isMac: process.platform === "darwin",
     runtime,
@@ -1057,7 +1057,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const projectPath = resolve(opts.path);
   const tty = Boolean(process.stdin.isTTY);
   const runtime = await resolveRuntime();
-  exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps(runtime) }));
+  exitOnPreflightFailure(await preflight({ tty, deps: realPreflightDeps(runtime, projectPath) }));
   const repoResult = await ensureRepoIsGit(projectPath);
   announceRepoAction(repoResult.action, projectPath);
   let resolved: ResolvedRepo;

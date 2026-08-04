@@ -6,8 +6,10 @@ import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
 import { forkDir } from "./paths";
 import { type BinaryProbes, RUNTIMES, type Runtime, resolveRuntimeNonInteractive } from "./runtime";
+import { detectBaseImageDrift } from "./sandbox/ensure-base";
 import { GATEWAY_PORT, gatewayStatus } from "./sandbox/ensure-gateway";
 import { isDevMode } from "./sandbox/fork-binaries";
+import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 import { SANDBOX_UID } from "./sandbox/seed-containerfile";
 import { rangeCoversUid } from "./sandbox/subuid";
 import { hasAnyProvider } from "./tokens";
@@ -558,6 +560,88 @@ export function buildCmakeCheck(dev: boolean, hasCmake: boolean): Check[] {
   ];
 }
 
+export const BASE_IMAGE_DRIFT_CHECK_NAME = "base image pin";
+
+/** Names the exact remedy (openlock-x83q): update the pinned FROM, then get
+ * the actual image rebuilt. `openlock update-base` only rewrites the
+ * Containerfile text; it does not itself build anything — the next `openlock
+ * sandbox` picks up the changed text via the existing cold-inputs drift
+ * check (src/sandbox/drift.ts) and either prompts (tty) or warns-stale
+ * (non-interactive) unless `--rebuild` is passed explicitly. */
+function updateBaseRemedy(projectDir: string): string {
+  return (
+    `openlock update-base --project ${projectDir}, then rebuild the sandbox image ` +
+    "(openlock sandbox --rebuild, or accept the reattach prompt on the next openlock sandbox)"
+  );
+}
+
+/**
+ * Reads a project's `.openlock/Containerfile` and compares its pinned base
+ * image hash against the CLI's currently embedded base image content
+ * (openlock-x83q — see `detectBaseImageDrift`'s own doc comment for why this
+ * exists). Included only when the file exists: a directory that isn't an
+ * openlock project has nothing to compare, so the check is silently absent
+ * there rather than a spurious failure, matching `buildCmakeCheck`'s /
+ * `buildSubuidCheck`'s applicability-gating convention. Pure local file read
+ * + string compare — no registry or podman call — cheap enough to also run
+ * on every `openlock sandbox` preflight (see preflight.ts), not just
+ * standalone `openlock doctor`.
+ *
+ * `"custom"` and `"unparseable"` both render as an explicit ok:true detail
+ * line rather than being silently omitted — the project deliberately avoids
+ * a bare "check absent" here (that would look identical to "nothing to
+ * check" for a non-project directory) so a hand-edited Containerfile's
+ * divergence is visible as a deliberate, understood state rather than an
+ * accidental gap in coverage.
+ */
+export function buildBaseImageDriftCheck(
+  projectDir: string,
+  readContainerfile: (path: string) => string = (p) => readFileSync(p, "utf-8"),
+): Check[] {
+  const cfPath = join(projectDir, ".openlock", "Containerfile");
+  let content: string;
+  try {
+    content = readContainerfile(cfPath);
+  } catch {
+    return [];
+  }
+  return [
+    {
+      name: BASE_IMAGE_DRIFT_CHECK_NAME,
+      test: async (): Promise<CheckOutcome> => {
+        const status = detectBaseImageDrift(content, BASE_CONTAINERFILE);
+        if (status.kind === "match") return { ok: true };
+        if (status.kind === "custom") {
+          return {
+            ok: true,
+            detail:
+              ".openlock/Containerfile's FROM line does not reference " +
+              "ghcr.io/vessux/openlock-base — custom base image in use, drift check not applicable",
+          };
+        }
+        if (status.kind === "unparseable") {
+          return {
+            ok: true,
+            detail:
+              "could not find an active FROM line in .openlock/Containerfile — skipping " +
+              "base-image drift check",
+          };
+        }
+        return {
+          ok: false,
+          detail:
+            `.openlock/Containerfile is pinned to base image ${status.pinnedHash}, but this ` +
+            `openlock build now pins ${status.expectedHash} (containers/base.Containerfile ` +
+            "changed since this project was created/updated — e.g. security fixes). Old base " +
+            "tags are never deleted, so the stale pin keeps resolving and building cleanly; " +
+            "this project will NOT get the fix until it's updated.",
+          fix: updateBaseRemedy(projectDir),
+        };
+      },
+    },
+  ];
+}
+
 // A malformed config.yaml is reported separately by the "global config" check
 // below; don't let it crash doctor here too — just fall back to the
 // suggest-only default (matches network_auto_reload's documented default).
@@ -572,6 +656,7 @@ function readNetworkAutoReload(): boolean {
 export async function runDoctorChecks(
   runtime?: Runtime | null,
   readSubuid: () => string = defaultReadSubuid,
+  projectDir: string = process.cwd(),
 ): Promise<DoctorResult[]> {
   // No explicit runtime (standalone `openlock doctor`, report) → probe both and
   // report every installed runtime. An explicit runtime (e.g. session preflight,
@@ -623,12 +708,16 @@ export async function runDoctorChecks(
     GATEWAY_PORT,
     readNetworkAutoReload(),
   );
+  // Absent (not an error) when projectDir isn't an openlock project at all —
+  // see buildBaseImageDriftCheck's doc comment.
+  const baseImageDriftChecks = buildBaseImageDriftCheck(projectDir);
 
   const checks: Check[] = [
     { name: "git", test: async () => commandExists("git"), fix: installHint("git") },
     ...runtimeChecks,
     ...subuidChecks,
     ...reachabilityChecks,
+    ...baseImageDriftChecks,
     ...(dev
       ? [
           {
