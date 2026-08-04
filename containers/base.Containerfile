@@ -10,8 +10,36 @@ ARG SANDBOX_GID=60000
 ARG NODE_VERSION=22.12.0
 ARG UV_VERSION=0.5.11
 
+# nftables: required by the openshell-sandbox supervisor's per-sandbox netns
+# fence (openshell-fork crates/openshell-supervisor-process/src/netns/mod.rs:
+# find_nft() / install_bypass_rules()) to install the OUTPUT-chain
+# ACCEPT/REJECT ruleset for the workload's network namespace. Without it
+# (openlock-jsfo) the supervisor logs "nft not found; bypass detection rules
+# will not be installed" and degrades to routing-only isolation: no open
+# egress path, but a raw bypass attempt hangs to a TCP-level timeout instead
+# of an immediate ECONNREFUSED. Empirically reproduced 2026-08-04 on
+# Mac/podman: from inside the fenced workload netns (not the container's
+# outer netns — `podman exec` lands in the latter), a literal-IP connect
+# bypassing DNS and any proxy env hung past 8s on both :443 and a random
+# high port, where the fix should produce an immediate reject.
+#
+# This ONLY restores fast-fail. It does NOT restore bypass *detection* (the
+# dmesg-tailing monitor in bypass_monitor/mod.rs) — that path is separately
+# broken by kernel.dmesg_restrict=1 + rootless podman's nested user
+# namespace, which EPERMs the kernel-log read regardless of whether nftables
+# is installed (confirmed empirically same day: `dmesg --follow --notime`
+# fails "Operation not permitted" even as root with CAP_SYSLOG, while the
+# monitor's own `dmesg --version` availability gate passes — see
+# openlock-pc5e). Do not describe this change as restoring bypass
+# observability.
+#
+# No iptables/iptables-legacy: that fallback only backs
+# install_sidecar_bypass_rules() for the Kubernetes sidecar topology
+# (openshell-fork crates/openshell-sandbox/src/main.rs), a deployment mode
+# openlock's podman/docker driver never uses. Adding it here for "upstream
+# parity" would be dead weight with nothing that exercises it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git openssh-client iproute2 python3 xz-utils \
+    ca-certificates curl git openssh-client iproute2 nftables python3 xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 RUN ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/') \
