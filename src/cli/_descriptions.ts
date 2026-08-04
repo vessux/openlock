@@ -24,6 +24,15 @@ export const COMMAND_DESCRIPTIONS = {
   gateway: "Manage the gateway",
   doctor: "Check system health and prerequisites",
   "update-images": "Rebuild sandbox container images",
+  // openlock-tuxj: these three were real, dispatched commands (see the
+  // switch in cli.ts) that never got an entry here or in COMMAND_FLAGS, so
+  // completions/--help/description lists silently omitted them. Wording
+  // below is verbatim from the USAGE block in cli.ts, except prune-images
+  // drops the "(use --legacy for pre-M5)" parenthetical to match every
+  // other entry in this map being flag-agnostic.
+  "update-base": "Rewrite .openlock/Containerfile FROM to current base hash",
+  "update-harness": "Resolve harness dist-tags + rewrite pinned npm install versions",
+  "prune-images": "Remove stale openlock images",
   complete: "Print shell completion script",
   refs: "Inspect and promote sandbox commits to real branches",
   report: "Collect diagnostic bundle for bug reports",
