@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Runtime } from "../runtime";
 import {
+  BASE_CONTAINERFILE,
   buildImageBuildArgv,
   buildImageExistsArgv,
   computeImageTag,
@@ -92,6 +93,24 @@ describe("buildImageBuildArgv", () => {
       "--no-cache",
       "/ctx",
     ]);
+  });
+});
+
+describe("BASE_CONTAINERFILE", () => {
+  // openlock-jsfo: the base image never installed nftables, so the
+  // supervisor's per-sandbox netns fence silently degraded to routing-only
+  // isolation (fast-fail lost, bypass detection dead). This is an offline,
+  // package-list-only regression guard — it does not prove the resulting
+  // image actually works (that's the live `which nft` assertion in
+  // tests/integration/slim-images.test.ts) nor that bypass detection is
+  // restored (it isn't — see openlock-pc5e, a separate rootless-podman
+  // dmesg_restrict problem `nftables` cannot fix).
+  it("installs nftables in the apt package list", () => {
+    const installLine = BASE_CONTAINERFILE.split("\n").find((l) =>
+      l.trim().startsWith("ca-certificates"),
+    );
+    expect(installLine).toBeDefined();
+    expect(installLine?.split(/\s+/)).toContain("nftables");
   });
 });
 
