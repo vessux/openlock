@@ -26,19 +26,35 @@
 // test sharing the module. There is no seam to reach for here on purpose;
 // the next author threads the port explicitly through their own test
 // helper instead of inheriting an ambient default.
-import { describe, expect, it } from "bun:test";
+//
+// openlock-x8m8 added `resolveGatewayPort`/`OPENLOCK_STATE_DIR` — a
+// LEGITIMATE call-time seam (env read fresh on every call, never a global a
+// test mutates and forgets to reset), tested directly below as pure
+// functions. It does NOT relax the constraint above: `OPENLOCK_STATE_DIR`
+// lets a test point a REAL `startGateway`/`gatewayStatus()` call at a
+// scratch directory (save/restore the env var around one test, exactly like
+// the `process.env.HOME` pattern already used in session-ops.test.ts), but
+// nothing here spins up the actual gateway BINARY — that remains out of
+// scope per point 3 above.
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaultStateDir } from "../paths";
 import {
   classifyProcNetTcpBind,
   classifyReadinessOutcome,
   findGatewayDriverMismatch,
+  findGatewayPortRecordMismatch,
   formatForeignGatewayAdoptionError,
   formatGatewayDriverMismatchError,
+  GATEWAY_PORT,
+  gatewayStatus,
   getListeningPids,
+  readGatewayPortRecord,
   readGatewayRssKb,
   renderGatewayConfigToml,
+  resolveGatewayPort,
   rotateLogIfLarge,
   spawnDaemonToLog,
   warnIfGatewayLoopbackOnly,
@@ -530,5 +546,118 @@ describe("formatForeignGatewayAdoptionError (openlock-k5j2)", () => {
   it("makes clear this is a gateway the invocation does not own", () => {
     const msg = formatForeignGatewayAdoptionError(18081, "pid 100 exited");
     expect(msg.toLowerCase()).toContain("does not own");
+  });
+});
+
+describe("resolveGatewayPort (openlock-x8m8)", () => {
+  it("returns GATEWAY_PORT (18081) for the default state dir, byte-identical to pre-x8m8 behavior", () => {
+    expect(resolveGatewayPort(defaultStateDir())).toBe(GATEWAY_PORT);
+  });
+
+  it("returns GATEWAY_PORT for the default state dir even with a non-canonical (trailing-slash) spelling", () => {
+    expect(resolveGatewayPort(`${defaultStateDir()}/`)).toBe(GATEWAY_PORT);
+  });
+
+  it("returns a DIFFERENT, derived port for a relocated state dir", () => {
+    const port = resolveGatewayPort("/tmp/some-other-openlock-state");
+    expect(port).not.toBe(GATEWAY_PORT);
+  });
+
+  it("stays within the documented private band (18082-18999), clear of both platforms' ephemeral ranges", () => {
+    const dirs = [
+      "/tmp/openlock-a",
+      "/tmp/openlock-b",
+      "/home/ci/project-1/.state",
+      "/home/ci/project-2/.state",
+      "/var/folders/x/y/z/openlock-state",
+    ];
+    for (const dir of dirs) {
+      const port = resolveGatewayPort(dir);
+      expect(port).toBeGreaterThanOrEqual(18082);
+      expect(port).toBeLessThanOrEqual(18999);
+    }
+  });
+
+  it("is deterministic: same path in, same port out", () => {
+    const a = resolveGatewayPort("/tmp/openlock-state-x");
+    const b = resolveGatewayPort("/tmp/openlock-state-x");
+    expect(a).toBe(b);
+  });
+
+  it("different relocated paths can (and do, for these examples) derive different ports", () => {
+    const a = resolveGatewayPort("/tmp/openlock-state-x");
+    const b = resolveGatewayPort("/tmp/openlock-state-y");
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("readGatewayPortRecord / findGatewayPortRecordMismatch (openlock-x8m8)", () => {
+  let dir = "";
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "openlock-port-record-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("readGatewayPortRecord returns undefined when the file doesn't exist", () => {
+    expect(readGatewayPortRecord(dir)).toBeUndefined();
+  });
+
+  it("readGatewayPortRecord reads back a written value", () => {
+    writeFileSync(join(dir, "gateway.port"), "18123\n");
+    expect(readGatewayPortRecord(dir)).toBe(18123);
+  });
+
+  it("readGatewayPortRecord returns undefined for unparseable content, never throws", () => {
+    writeFileSync(join(dir, "gateway.port"), "not-a-number");
+    expect(readGatewayPortRecord(dir)).toBeUndefined();
+  });
+
+  it("findGatewayPortRecordMismatch: no report when there's no record yet (never a false positive)", () => {
+    expect(findGatewayPortRecordMismatch(undefined, 18081)).toBeNull();
+  });
+
+  it("findGatewayPortRecordMismatch: no report when the record matches the derived value", () => {
+    expect(findGatewayPortRecordMismatch(18081, 18081)).toBeNull();
+  });
+
+  it("findGatewayPortRecordMismatch: returns the stale recorded port when it disagrees with derived", () => {
+    expect(findGatewayPortRecordMismatch(18500, 18081)).toBe(18500);
+  });
+});
+
+describe("gatewayStatus port field (openlock-x8m8)", () => {
+  // Exercises the real gatewayStatus() against a SCRATCH state dir via
+  // OPENLOCK_STATE_DIR, save/restored around each test — never the real
+  // state dir, never the real gateway (see this file's header comment).
+  const oldOverride = process.env.OPENLOCK_STATE_DIR;
+  let dir = "";
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "openlock-gateway-status-"));
+    process.env.OPENLOCK_STATE_DIR = dir;
+  });
+
+  afterEach(() => {
+    if (oldOverride === undefined) delete process.env.OPENLOCK_STATE_DIR;
+    else process.env.OPENLOCK_STATE_DIR = oldOverride;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reports a derived (non-18081) port for a relocated, empty scratch state dir", () => {
+    const status = gatewayStatus();
+    expect(status.running).toBe(false);
+    expect(status.port).toBe(resolveGatewayPort(dir));
+    expect(status.port).not.toBe(GATEWAY_PORT);
+  });
+
+  it("port is present even when a pid file exists but the pid is dead (not running)", () => {
+    writeFileSync(join(dir, "gateway.pid"), "999999999");
+    const status = gatewayStatus();
+    expect(status.running).toBe(false);
+    expect(status.port).toBe(resolveGatewayPort(dir));
   });
 });

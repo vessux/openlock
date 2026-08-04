@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSession, type SessionMeta, saveSession } from "./session-store";
+import { defaultStateDir } from "../paths";
+import { loadSession, type SessionMeta, saveSession, sessionsDir } from "./session-store";
 
 const testDir = join(import.meta.dir, "../../.test-sessions");
 
@@ -318,5 +319,29 @@ describe("session-store attachedCredentialBundles field (openlock-04t)", () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe("sessionsDir (openlock-x8m8)", () => {
+  // Before x8m8, sessionsDir() independently recomputed
+  // `join(HOME, ".local", "state", "openlock", "sessions")` inline — an
+  // OPENLOCK_STATE_DIR override would have worked for the gateway and
+  // silently done nothing for session storage. This proves it now routes
+  // through the same resolver as everything else.
+  const oldOverride = process.env.OPENLOCK_STATE_DIR;
+
+  afterEach(() => {
+    if (oldOverride === undefined) delete process.env.OPENLOCK_STATE_DIR;
+    else process.env.OPENLOCK_STATE_DIR = oldOverride;
+  });
+
+  it("is the default state dir's 'sessions' subdirectory with no override", () => {
+    delete process.env.OPENLOCK_STATE_DIR;
+    expect(sessionsDir()).toBe(join(defaultStateDir(), "sessions"));
+  });
+
+  it("honors OPENLOCK_STATE_DIR", () => {
+    process.env.OPENLOCK_STATE_DIR = "/custom/state/dir";
+    expect(sessionsDir()).toBe(join("/custom/state/dir", "sessions"));
   });
 });

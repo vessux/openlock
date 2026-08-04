@@ -144,6 +144,53 @@ describe("report()", () => {
   });
 });
 
+describe("report() honors OPENLOCK_STATE_DIR when opts.stateDir is omitted (openlock-x8m8)", () => {
+  // Before x8m8, report()'s `opts.stateDir ?? join(HOME, ...)` independently
+  // recomputed the state dir inline — an env override would have worked on
+  // ensure-gateway.ts and silently done nothing here. This exercises the
+  // real no-argument default path (never passing `stateDir` in opts) to
+  // prove it now routes through the same `resolveStateDir` resolver.
+  const oldOverride = process.env.OPENLOCK_STATE_DIR;
+  let envStateDir = "";
+  let envOutDir = "";
+  let envExtractDir = "";
+
+  beforeEach(() => {
+    envStateDir = mkdtempSync(join(tmpdir(), "openlock-report-envstate-"));
+    envOutDir = mkdtempSync(join(tmpdir(), "openlock-report-envout-"));
+    envExtractDir = mkdtempSync(join(tmpdir(), "openlock-report-envextract-"));
+    process.env.OPENLOCK_STATE_DIR = envStateDir;
+
+    const sessionDir = join(envStateDir, "sessions", "envsession");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, "meta.json"),
+      JSON.stringify({ id: "envsession", name: "from-env-override" }),
+    );
+  });
+
+  afterEach(() => {
+    if (oldOverride === undefined) delete process.env.OPENLOCK_STATE_DIR;
+    else process.env.OPENLOCK_STATE_DIR = oldOverride;
+    rmSync(envStateDir, { recursive: true, force: true });
+    rmSync(envOutDir, { recursive: true, force: true });
+    rmSync(envExtractDir, { recursive: true, force: true });
+  });
+
+  it("collects sessions from OPENLOCK_STATE_DIR, not the HOME-relative default", async () => {
+    const { path: tarballPath } = await report({ outDir: envOutDir });
+    const extract = Bun.spawn(["tar", "-xzf", tarballPath, "-C", envExtractDir]);
+    expect(await extract.exited).toBe(0);
+
+    const baseName = tarballPath
+      .substring(tarballPath.lastIndexOf("/") + 1)
+      .replace(/\.tar\.gz$/, "");
+    const summary = JSON.parse(readFileSync(join(envExtractDir, baseName, "summary.json"), "utf8"));
+    expect(summary.sessions).toHaveLength(1);
+    expect(summary.sessions[0].id).toBe("envsession");
+  });
+});
+
 describe("declaredBundleSecrets", () => {
   let dir: string;
   let cwd: string;

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveStateDir } from "../paths";
 import type { Harness } from "./harness";
 
 export interface SessionMeta {
@@ -56,8 +56,7 @@ function migrateMeta(raw: LegacyMeta): SessionMeta {
 }
 
 export function sessionsDir(): string {
-  const home = process.env.HOME || homedir();
-  return join(home, ".local", "state", "openlock", "sessions");
+  return join(resolveStateDir(), "sessions");
 }
 
 export function sessionDirById(baseDir: string, id: string): string {

@@ -7,18 +7,21 @@ import {
   BASE_IMAGE_DRIFT_CHECK_NAME,
   buildBaseImageDriftCheck,
   buildCmakeCheck,
+  buildGatewayPortRecordCheck,
   buildGatewayReachabilityCheck,
   buildReachabilityProbeArgv,
   buildRuntimeChecks,
   buildSubuidCheck,
   classifyReachabilityProbeExit,
   evaluateGatewayReachability,
+  GATEWAY_PORT_RECORD_CHECK_NAME,
   installHint,
   renderDoctorResults,
   runDoctorChecks,
 } from "./doctor";
 import { globalConfigPath } from "./global-config/paths";
 import { computeBaseTag, GHCR_BASE_PREFIX } from "./sandbox/ensure-base";
+import { resolveGatewayPort } from "./sandbox/ensure-gateway";
 import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 
 // Each check spawns real subprocesses (which/podman/curl). On a cold CI
@@ -294,6 +297,62 @@ describe("runDoctorChecks base image drift wiring", () => {
       expect(r).toBeDefined();
       expect(r?.ok).toBe(false);
       expect(r?.fix).toContain(`openlock update-base --project ${tmp}`);
+    },
+    TIMEOUT_MS,
+  );
+});
+
+describe("runDoctorChecks gateway port record wiring (openlock-x8m8)", () => {
+  // OPENLOCK_STATE_DIR points every call at a SCRATCH dir for the duration
+  // of each test, save/restored — never the real state dir, never a real
+  // gateway process (see feedback_no_optional_live_state_deps.md). "running"
+  // is faked by writing this TEST PROCESS's own pid to gateway.pid — a real,
+  // genuinely-alive pid, just not an actual gateway.
+  const oldOverride = process.env.OPENLOCK_STATE_DIR;
+  let dir = "";
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "openlock-doctor-gwport-"));
+    process.env.OPENLOCK_STATE_DIR = dir;
+  });
+
+  afterEach(() => {
+    if (oldOverride === undefined) delete process.env.OPENLOCK_STATE_DIR;
+    else process.env.OPENLOCK_STATE_DIR = oldOverride;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it(
+    "is absent when no gateway is running (no pid file at all)",
+    async () => {
+      const results = await runDoctorChecks("podman");
+      expect(results.some((r) => r.name === GATEWAY_PORT_RECORD_CHECK_NAME)).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "is absent when the persisted record matches what this (relocated) state dir currently derives",
+    async () => {
+      writeFileSync(join(dir, "gateway.pid"), String(process.pid));
+      writeFileSync(join(dir, "gateway.port"), String(resolveGatewayPort(dir)));
+      const results = await runDoctorChecks("podman");
+      expect(results.some((r) => r.name === GATEWAY_PORT_RECORD_CHECK_NAME)).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "fails, naming the stale record, when the persisted record disagrees with the derived port",
+    async () => {
+      writeFileSync(join(dir, "gateway.pid"), String(process.pid));
+      writeFileSync(join(dir, "gateway.port"), "18500");
+      const results = await runDoctorChecks("podman");
+      const r = results.find((x) => x.name === GATEWAY_PORT_RECORD_CHECK_NAME);
+      expect(r).toBeDefined();
+      expect(r?.ok).toBe(false);
+      expect(r?.detail).toContain("18500");
+      expect(r?.detail).toContain(String(resolveGatewayPort(dir)));
     },
     TIMEOUT_MS,
   );
@@ -699,6 +758,36 @@ describe("buildGatewayReachabilityCheck (GH #75 / bd openlock-7er piece 1)", () 
     const checks = buildGatewayReachabilityCheck(true, true, 18081, true, spyProbe);
     await checks[0]?.test();
     expect(seen).toEqual([18081, true]);
+  });
+});
+
+describe("buildGatewayPortRecordCheck (openlock-x8m8)", () => {
+  it("is absent when the gateway is not running (nothing live to be wrong about)", () => {
+    const checks = buildGatewayPortRecordCheck(false, "/proj", 18081, () => 19999);
+    expect(checks).toEqual([]);
+  });
+
+  it("is absent when there's no persisted record yet", () => {
+    const checks = buildGatewayPortRecordCheck(true, "/proj", 18081, () => undefined);
+    expect(checks).toEqual([]);
+  });
+
+  it("is absent when the record matches the derived port", () => {
+    const checks = buildGatewayPortRecordCheck(true, "/proj", 18081, () => 18081);
+    expect(checks).toEqual([]);
+  });
+
+  it("fails naming both the stale recorded port and the currently-derived one when they disagree", async () => {
+    const checks = buildGatewayPortRecordCheck(true, "/proj", 18081, () => 18500);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]?.name).toBe(GATEWAY_PORT_RECORD_CHECK_NAME);
+    const outcome = await checks[0]?.test();
+    expect(outcome).toMatchObject({ ok: false });
+    if (typeof outcome === "boolean" || outcome === undefined) throw new Error("unreachable");
+    expect(outcome.detail).toContain("18500");
+    expect(outcome.detail).toContain("18081");
+    expect(outcome.fix).toContain("openlock gateway stop");
+    expect(outcome.fix).toContain("openlock gateway start");
   });
 });
 

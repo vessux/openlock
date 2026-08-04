@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
@@ -7,6 +7,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { loadDeclaredCredentialsMerged } from "../config-core";
 import { runDoctorChecks } from "../doctor";
 import { globalConfigPath } from "../global-config/paths";
+import { resolveStateDir } from "../paths";
 import { OPENSHELL_FORK_TAG } from "../sandbox/fork-binaries";
 import { readCredentials } from "../tokens";
 import { printCmdHelp } from "./_help";
@@ -68,8 +69,7 @@ export interface ReportOptions {
 export async function report(
   opts: ReportOptions = {},
 ): Promise<{ path: string; doctorFailures: number }> {
-  const stateDir =
-    opts.stateDir ?? join(process.env.HOME || homedir(), ".local", "state", "openlock");
+  const stateDir = resolveStateDir(opts.stateDir);
   const outDir = resolve(opts.outDir ?? process.cwd());
 
   const now = new Date();

@@ -4,7 +4,7 @@ import { classificationFlag, gatewayJsonForTest, renderGatewayHeaderForTest } fr
 
 describe("renderGatewayHeader", () => {
   it("renders stopped gateway with consistent column positions", () => {
-    const out = renderGatewayHeaderForTest({ running: false, pid: null });
+    const out = renderGatewayHeaderForTest({ running: false, pid: null, port: 18081 });
     expect(out).toContain("GATEWAY        STATE    PID    RSS       UPTIME    DRIVER");
     expect(out).toContain("stopped");
     // DRIVER column starts at the same offset in header and data row
@@ -18,6 +18,7 @@ describe("renderGatewayHeader", () => {
       pid: 12345,
       rssKb: 42_000,
       uptimeMs: 8_040_000,
+      port: 18081,
     });
     expect(out).toContain("running");
     expect(out).toContain("12345");
@@ -26,7 +27,7 @@ describe("renderGatewayHeader", () => {
   });
 
   it("uses '-' placeholders when running but rss/uptime missing", () => {
-    const out = renderGatewayHeaderForTest({ running: true, pid: 999 });
+    const out = renderGatewayHeaderForTest({ running: true, pid: 999, port: 18081 });
     expect(out).toContain("999");
     expect(out).toContain(" -");
   });
@@ -35,18 +36,23 @@ describe("renderGatewayHeader", () => {
   // half the reason a podman/docker gateway mismatch went unnoticed.
   describe("DRIVER column (openlock-ox1)", () => {
     it("shows the recorded driver on a running gateway", () => {
-      const out = renderGatewayHeaderForTest({ running: true, pid: 1, driver: "docker" });
+      const out = renderGatewayHeaderForTest({
+        running: true,
+        pid: 1,
+        driver: "docker",
+        port: 18081,
+      });
       expect(out).toContain("docker");
     });
 
     it("shows '-' when running but the driver wasn't recorded (legacy gateway)", () => {
-      const out = renderGatewayHeaderForTest({ running: true, pid: 1 });
+      const out = renderGatewayHeaderForTest({ running: true, pid: 1, port: 18081 });
       const dataLine = out.split("\n")[1]!;
       expect(dataLine.trim().endsWith("-")).toBe(true);
     });
 
     it("shows '-' when the gateway is stopped", () => {
-      const out = renderGatewayHeaderForTest({ running: false, pid: null });
+      const out = renderGatewayHeaderForTest({ running: false, pid: null, port: 18081 });
       const dataLine = out.split("\n")[1]!;
       expect(dataLine.trim().endsWith("-")).toBe(true);
     });
@@ -55,7 +61,7 @@ describe("renderGatewayHeader", () => {
 
 describe("gatewayJson", () => {
   it("collapses undefined to null in JSON shape", () => {
-    const j = gatewayJsonForTest({ running: true, pid: 7 });
+    const j = gatewayJsonForTest({ running: true, pid: 7, port: 18081 });
     expect(j).toEqual({
       name: "podman-dev",
       state: "running",
@@ -67,7 +73,7 @@ describe("gatewayJson", () => {
   });
 
   it("emits stopped state with all-null fields when not running", () => {
-    const j = gatewayJsonForTest({ running: false, pid: null });
+    const j = gatewayJsonForTest({ running: false, pid: null, port: 18081 });
     expect(j).toEqual({
       name: "podman-dev",
       state: "stopped",
@@ -79,7 +85,7 @@ describe("gatewayJson", () => {
   });
 
   it("surfaces the recorded driver (openlock-ox1)", () => {
-    const j = gatewayJsonForTest({ running: true, pid: 7, driver: "docker" });
+    const j = gatewayJsonForTest({ running: true, pid: 7, driver: "docker", port: 18081 });
     expect(j.driver).toBe("docker");
   });
 });

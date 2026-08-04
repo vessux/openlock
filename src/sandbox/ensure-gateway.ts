@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -10,36 +11,62 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
+import { defaultStateDir, resolveStateDir } from "../paths";
 import { parseRuntime, type Runtime, resolveRuntime } from "../runtime";
 import { ensureSupervisorImage } from "./build-supervisor-image";
 import { getGatewayBinary } from "./fork-binaries";
 import { pidAlive } from "./proc";
 
-const STATE_DIR = join(process.env.HOME || homedir(), ".local", "state", "openlock");
-const PID_FILE = join(STATE_DIR, "gateway.pid");
+function pidFile(stateDir: string): string {
+  return join(stateDir, "gateway.pid");
+}
 // Driver the RUNNING gateway was started with (openlock-ox1). Written
-// alongside PID_FILE at every gateway start; absent means either the
+// alongside the pid file at every gateway start; absent means either the
 // gateway isn't running or (if it IS running) it was started by a version
 // of openlock that predates this file — either way, "unknown", never a
-// mismatch. Deliberately a separate file rather than folding into PID_FILE
-// (a bare integer read/relied on in several places) to keep this additive
-// and not touch that format.
-const DRIVER_FILE = join(STATE_DIR, "gateway.driver");
-const LOG_FILE = join(STATE_DIR, "gateway.log");
+// mismatch. Deliberately a separate file rather than folding into the pid
+// file (a bare integer read/relied on in several places) to keep this
+// additive and not touch that format.
+function driverFile(stateDir: string): string {
+  return join(stateDir, "gateway.driver");
+}
+function logFile(stateDir: string): string {
+  return join(stateDir, "gateway.log");
+}
 // gateway.log is appended to forever across gateway restarts (openlock-lai:
 // observed at 100MB, unrotated). Rotate at (re)start time — the only moment
 // openlock touches the file — keeping exactly one backup generation.
 const GATEWAY_LOG_MAX_BYTES = 10 * 1024 * 1024;
-const CONFIG_FILE = join(STATE_DIR, "gateway-config.toml");
+function configFile(stateDir: string): string {
+  return join(stateDir, "gateway-config.toml");
+}
 // Sandbox-JWT signing material. Since upstream #1404 the sandbox supervisor
 // requires a gateway-minted JWT to fetch its policy — without one it exits
 // during provisioning. The gateway mints per-sandbox tokens only when this
 // bundle is present, so we generate it once and point the gateway at it.
-const PKI_DIR = join(STATE_DIR, "pki");
-const JWT_SIGNING_KEY = join(PKI_DIR, "jwt", "signing.pem");
-const JWT_PUBLIC_KEY = join(PKI_DIR, "jwt", "public.pem");
-const JWT_KID = join(PKI_DIR, "jwt", "kid");
+function pkiDir(stateDir: string): string {
+  return join(stateDir, "pki");
+}
+function jwtSigningKey(stateDir: string): string {
+  return join(pkiDir(stateDir), "jwt", "signing.pem");
+}
+function jwtPublicKey(stateDir: string): string {
+  return join(pkiDir(stateDir), "jwt", "public.pem");
+}
+function jwtKid(stateDir: string): string {
+  return join(pkiDir(stateDir), "jwt", "kid");
+}
+/** Persisted CACHE of the port a gateway started from `stateDir` last bound
+ * to (openlock-x8m8) — written alongside the pid/driver files purely for
+ * observability (`cat .../gateway.port`, and `openlock doctor`'s mismatch
+ * check below). NEVER the authority: `resolveGatewayPort`, recomputed fresh
+ * from the CURRENT state dir, is what every operational decision uses. See
+ * `findGatewayPortRecordMismatch`. */
+function portFile(stateDir: string): string {
+  return join(stateDir, "gateway.port");
+}
+
 export const GATEWAY_PORT = 18081;
 // Historical name from the podman-only era; now drives podman OR docker per
 // `--drivers` resolution. Kept stable so existing on-disk state under
@@ -48,21 +75,99 @@ export const GATEWAY_NAME = "podman-dev";
 
 const DEFAULT_SANDBOX_IMAGE = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
 
-function readPid(): number | null {
-  if (!existsSync(PID_FILE)) return null;
-  const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+// Private port band for a RELOCATED state dir (openlock-x8m8): 18082-18999,
+// ~900 slots, adjacent to the historical fixed GATEWAY_PORT. Deliberately
+// clear of both platforms' ephemeral port ranges (Linux 32768-60999, macOS
+// 49152-65535) — binding inside either would make the gateway intermittently
+// collide with transient outbound sockets.
+const DERIVED_PORT_BAND_START = 18082;
+const DERIVED_PORT_BAND_SIZE = 918; // 18082..18999 inclusive
+
+/**
+ * The gateway port for a given (already-resolved) state dir (openlock-x8m8:
+ * isolating `$HOME`/`OPENLOCK_STATE_DIR` per project/CI run is pointless if
+ * every isolated instance still fights over the one fixed port).
+ *
+ * - The DEFAULT state dir ALWAYS maps to `GATEWAY_PORT` (18081), byte-for-
+ *   byte identical to pre-x8m8 behavior. Hashing the default dir would move
+ *   every existing user's gateway port: it would orphan their already-
+ *   running gateway (openlock-k5j2's foreign-gateway refusal would then fire
+ *   against their OWN gateway), stale
+ *   `~/.config/openshell/gateways/podman-dev/metadata.json`'s
+ *   `gateway_endpoint` (see registerGatewayMetadata), and make
+ *   `openlock doctor` / the install docs report the wrong port.
+ * - A RELOCATED state dir (`OPENLOCK_STATE_DIR` pointed elsewhere) gets a
+ *   port deterministically derived from the canonicalized dir path — same
+ *   path in, same port out, across runs and machines, with no scan-and-
+ *   persist coordination needed.
+ *
+ * Collisions within the derived band (two different relocated state dirs
+ * hashing to the same port) are possible and already LOUD: openlock-k5j2
+ * (PR #134) refuses to adopt a foreign gateway found answering the port
+ * instead of the child this invocation just spawned. This function
+ * deliberately builds no second collision-avoidance mechanism on top of
+ * that existing refusal.
+ */
+export function resolveGatewayPort(stateDir: string): number {
+  const resolved = resolvePath(stateDir);
+  if (resolved === resolvePath(defaultStateDir())) return GATEWAY_PORT;
+  const hash = createHash("sha256").update(resolved).digest();
+  return DERIVED_PORT_BAND_START + (hash.readUInt32BE(0) % DERIVED_PORT_BAND_SIZE);
+}
+
+/** Reads the persisted port record (see `portFile`) for `stateDir`, or
+ * `undefined` when absent/unparseable — no gateway has ever started from
+ * this state dir, or it's a pre-x8m8 one that never wrote the file. Never
+ * throws. */
+export function readGatewayPortRecord(stateDir: string): number | undefined {
+  try {
+    const raw = readFileSync(portFile(stateDir), "utf-8").trim();
+    const n = parseInt(raw, 10);
+    return Number.isNaN(n) ? undefined : n;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a persisted port record disagrees with what `stateDir` currently
+ * derives (openlock-x8m8). Returns the stale recorded port (for the
+ * message), or `null` when there's nothing to report — including when
+ * `recorded` is `undefined` (no record yet, never a false positive). Mirrors
+ * `findGatewayDriverMismatch`'s exact shape.
+ *
+ * The record is a CACHE for observability, never the authority — `derived`
+ * always wins for any operational decision (what port to start on, what
+ * port to probe). A disagreement means the state dir's resolved path
+ * changed identity (moved, or `OPENLOCK_STATE_DIR` repointed) AFTER the
+ * currently-recorded gateway was started; it's surfaced as a doctor warning
+ * rather than acted on automatically.
+ */
+export function findGatewayPortRecordMismatch(
+  recorded: number | undefined,
+  derived: number,
+): number | null {
+  if (recorded === undefined) return null;
+  return recorded !== derived ? recorded : null;
+}
+
+function readPid(stateDir: string): number | null {
+  const path = pidFile(stateDir);
+  if (!existsSync(path)) return null;
+  const pid = parseInt(readFileSync(path, "utf-8").trim(), 10);
   return Number.isNaN(pid) ? null : pid;
 }
 
 /** Driver recorded for the currently-running gateway (openlock-ox1), or
  * `undefined` when the file is absent/unparseable — treated as "unknown",
- * never coerced to a guess. See DRIVER_FILE's own comment for why absence
+ * never coerced to a guess. See `driverFile`'s own comment for why absence
  * is expected and safe (legacy gateway, or simply not running). */
-function readRunningDriver(): Runtime | undefined {
-  if (!existsSync(DRIVER_FILE)) return undefined;
+function readRunningDriver(stateDir: string): Runtime | undefined {
+  const path = driverFile(stateDir);
+  if (!existsSync(path)) return undefined;
   let raw: string;
   try {
-    raw = readFileSync(DRIVER_FILE, "utf-8").trim();
+    raw = readFileSync(path, "utf-8").trim();
   } catch {
     return undefined;
   }
@@ -79,6 +184,11 @@ export interface GatewayStatus {
    * started before driver-recording existed — both are "can't tell", never
    * a false mismatch signal. See findGatewayDriverMismatch. */
   driver?: Runtime;
+  /** The gateway port for the CURRENTLY RESOLVED state dir (openlock-x8m8).
+   * Always present (computed fresh via `resolveGatewayPort` regardless of
+   * `running`) — 18081 for the default state dir, a derived value for a
+   * relocated one (`OPENLOCK_STATE_DIR`). */
+  port: number;
 }
 
 export function readGatewayRssKb(pid: number): number | null {
@@ -111,22 +221,24 @@ export function readGatewayRssKb(pid: number): number | null {
 // half, since that requires gatewayStatus() itself to probe the socket
 // (today it never touches GATEWAY_PORT at all).
 export function gatewayStatus(): GatewayStatus {
-  const pid = readPid();
-  if (pid === null) return { running: false, pid: null };
+  const stateDir = resolveStateDir();
+  const port = resolveGatewayPort(stateDir);
+  const pid = readPid(stateDir);
+  if (pid === null) return { running: false, pid: null, port };
   if (!pidAlive(pid)) {
-    unlinkSync(PID_FILE);
-    return { running: false, pid: null };
+    unlinkSync(pidFile(stateDir));
+    return { running: false, pid: null, port };
   }
   const rssKb = readGatewayRssKb(pid) ?? undefined;
   let uptimeMs: number | undefined;
   try {
-    const stat = statSync(PID_FILE);
+    const stat = statSync(pidFile(stateDir));
     uptimeMs = Date.now() - stat.mtimeMs;
   } catch {
     uptimeMs = undefined;
   }
-  const driver = readRunningDriver();
-  return { running: true, pid, rssKb, uptimeMs, driver };
+  const driver = readRunningDriver(stateDir);
+  return { running: true, pid, rssKb, uptimeMs, driver, port };
 }
 
 /**
@@ -179,7 +291,7 @@ function realLsofListenProbe(port: number): number[] | null {
     .filter((n) => !Number.isNaN(n));
 }
 
-function registerGatewayMetadata(): void {
+function registerGatewayMetadata(port: number): void {
   const configHome = process.env.XDG_CONFIG_HOME ?? join(process.env.HOME || homedir(), ".config");
   const gatewayDir = join(configHome, "openshell", "gateways", GATEWAY_NAME);
   mkdirSync(gatewayDir, { recursive: true });
@@ -188,9 +300,9 @@ function registerGatewayMetadata(): void {
     join(gatewayDir, "metadata.json"),
     JSON.stringify({
       name: GATEWAY_NAME,
-      gateway_endpoint: `http://127.0.0.1:${GATEWAY_PORT}`,
+      gateway_endpoint: `http://127.0.0.1:${port}`,
       is_remote: false,
-      gateway_port: GATEWAY_PORT,
+      gateway_port: port,
       auth_mode: "plaintext",
     }),
   );
@@ -266,23 +378,30 @@ export function renderGatewayConfigToml(
   return lines.join("\n");
 }
 
-function writeGatewayConfigFile(opts: {
-  runtime: Runtime;
-  supervisorImage: string;
-  podmanSocket?: string;
-  gatewayJwt?: { signingKeyPath: string; publicKeyPath: string; kidPath: string };
-}): void {
-  writeFileSync(CONFIG_FILE, renderGatewayConfigToml(opts.runtime, opts));
+function writeGatewayConfigFile(
+  path: string,
+  opts: {
+    runtime: Runtime;
+    supervisorImage: string;
+    podmanSocket?: string;
+    gatewayJwt?: { signingKeyPath: string; publicKeyPath: string; kidPath: string };
+  },
+): void {
+  writeFileSync(path, renderGatewayConfigToml(opts.runtime, opts));
 }
 
 // Generate the sandbox-JWT signing bundle if absent. Idempotent: the gateway's
 // `generate-certs` skips when the files already exist. Also emits an (unused)
 // TLS bundle alongside the JWT material, which is harmless under --disable-tls.
-async function ensureSandboxJwtMaterial(gatewayBin: string): Promise<void> {
-  if (existsSync(JWT_SIGNING_KEY) && existsSync(JWT_PUBLIC_KEY) && existsSync(JWT_KID)) {
+async function ensureSandboxJwtMaterial(gatewayBin: string, stateDir: string): Promise<void> {
+  if (
+    existsSync(jwtSigningKey(stateDir)) &&
+    existsSync(jwtPublicKey(stateDir)) &&
+    existsSync(jwtKid(stateDir))
+  ) {
     return;
   }
-  const proc = Bun.spawn([gatewayBin, "generate-certs", "--output-dir", PKI_DIR], {
+  const proc = Bun.spawn([gatewayBin, "generate-certs", "--output-dir", pkiDir(stateDir)], {
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -429,7 +548,7 @@ export function formatGatewayDriverMismatchError(
  *
  * Deliberately a DIFFERENT message from formatGatewayDriverMismatchError:
  * that one means "MY OWN previously-recorded gateway (this state dir's own
- * PID_FILE/DRIVER_FILE) has a different driver than now requested," and
+ * pid/driver files) has a different driver than now requested," and
  * its remedy (`openlock gateway stop`) is correct there, because this
  * state dir genuinely owns that gateway. Here, this invocation never owned
  * anything on the port at all — telling the user to stop "their" gateway
@@ -530,16 +649,18 @@ function refuseForeignGatewayAdoption(
   gwPid: number,
   port: number,
   listeningPids: number[] | null,
+  stateDir: string,
 ): never {
-  if (existsSync(PID_FILE)) unlinkSync(PID_FILE);
-  if (existsSync(DRIVER_FILE)) unlinkSync(DRIVER_FILE);
+  if (existsSync(pidFile(stateDir))) unlinkSync(pidFile(stateDir));
+  if (existsSync(driverFile(stateDir))) unlinkSync(driverFile(stateDir));
+  if (existsSync(portFile(stateDir))) unlinkSync(portFile(stateDir));
   const detail =
     outcome === "foreign-dead-child"
       ? `pid ${gwPid} exited (commonly "address already in use")`
       : `pid ${gwPid} is alive but the port's listener is pid(s) ` +
         `${listeningPids?.join(", ") || "(none)"}`;
   console.error(formatForeignGatewayAdoptionError(port, detail));
-  if (outcome === "foreign-dead-child") console.error(`Check log: ${LOG_FILE}`);
+  if (outcome === "foreign-dead-child") console.error(`Check log: ${logFile(stateDir)}`);
   process.exit(1);
 }
 
@@ -547,11 +668,17 @@ function refuseForeignGatewayAdoption(
 // see the file-level comment at the top of ensure-gateway.test.ts for the
 // constraint a future live-gateway test must follow instead (thread the
 // port as a required parameter of its own; never default to GATEWAY_PORT).
+// The state dir IS resolved at call time now (openlock-x8m8, via
+// `resolveStateDir()`), which is the ALLOWED seam: a test harness can set
+// `OPENLOCK_STATE_DIR` before spawning a child process. What stays forbidden
+// is a module-global mutable setter that this production code would read.
 export async function startGateway(): Promise<void> {
+  const stateDir = resolveStateDir();
+  const port = resolveGatewayPort(stateDir);
   const runtime = await resolveRuntime();
   const { running, pid, driver } = gatewayStatus();
   if (running) {
-    if (pid !== null) warnIfRecordedGatewayPidMismatch(pid, GATEWAY_PORT);
+    if (pid !== null) warnIfRecordedGatewayPidMismatch(pid, port);
 
     const mismatchedDriver = findGatewayDriverMismatch(runtime, driver);
     if (mismatchedDriver !== null) {
@@ -562,37 +689,36 @@ export async function startGateway(): Promise<void> {
     return;
   }
 
-  mkdirSync(STATE_DIR, { recursive: true });
+  mkdirSync(stateDir, { recursive: true });
 
   const [supervisorImage, gatewayBin] = await Promise.all([
     ensureSupervisorImage(),
     getGatewayBinary(),
   ]);
-  registerGatewayMetadata();
+  registerGatewayMetadata(port);
 
-  await ensureSandboxJwtMaterial(gatewayBin);
+  await ensureSandboxJwtMaterial(gatewayBin, stateDir);
 
   let podmanSocket: string | undefined;
   if (runtime === "podman") {
     podmanSocket = await resolvePodmanSocket();
   }
-  writeGatewayConfigFile({
+  writeGatewayConfigFile(configFile(stateDir), {
     runtime,
     supervisorImage,
     podmanSocket,
     gatewayJwt: {
-      signingKeyPath: JWT_SIGNING_KEY,
-      publicKeyPath: JWT_PUBLIC_KEY,
-      kidPath: JWT_KID,
+      signingKeyPath: jwtSigningKey(stateDir),
+      publicKeyPath: jwtPublicKey(stateDir),
+      kidPath: jwtKid(stateDir),
     },
   });
 
-  const dbPath = join(STATE_DIR, "gateway.db");
-  const port = GATEWAY_PORT;
+  const dbPath = join(stateDir, "gateway.db");
   const args = [
     gatewayBin,
     "--config",
-    CONFIG_FILE,
+    configFile(stateDir),
     "--drivers",
     runtime,
     "--disable-tls",
@@ -608,14 +734,19 @@ export async function startGateway(): Promise<void> {
     ...(process.platform === "linux" ? ["--bind-address", "0.0.0.0"] : []),
   ];
 
-  rotateLogIfLarge(LOG_FILE, GATEWAY_LOG_MAX_BYTES);
-  const { pid: gwPid } = spawnDaemonToLog(args, STATE_DIR, LOG_FILE);
+  rotateLogIfLarge(logFile(stateDir), GATEWAY_LOG_MAX_BYTES);
+  const { pid: gwPid } = spawnDaemonToLog(args, stateDir, logFile(stateDir));
 
-  writeFileSync(PID_FILE, String(gwPid));
-  writeFileSync(DRIVER_FILE, runtime);
-  console.log(`Gateway starting (pid ${gwPid}), log: ${LOG_FILE}`);
+  writeFileSync(pidFile(stateDir), String(gwPid));
+  writeFileSync(driverFile(stateDir), runtime);
+  // Cache only — see portFile's/findGatewayPortRecordMismatch's doc.
+  // `resolveGatewayPort(stateDir)` remains the authority on every path that
+  // re-derives it; this is purely so the value is inspectable and so
+  // `openlock doctor` can flag a state dir relocated after this write.
+  writeFileSync(portFile(stateDir), String(port));
+  console.log(`Gateway starting (pid ${gwPid}), log: ${logFile(stateDir)}`);
 
-  await waitForGatewayReady(gwPid, port);
+  await waitForGatewayReady(gwPid, port, stateDir);
 }
 
 /**
@@ -624,13 +755,14 @@ export async function startGateway(): Promise<void> {
  * except on success. Extracted out of `startGateway` to keep its cognitive
  * complexity in bounds.
  */
-async function waitForGatewayReady(gwPid: number, port: number): Promise<void> {
+async function waitForGatewayReady(gwPid: number, port: number, stateDir: string): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     await Bun.sleep(1000);
     if (!pidAlive(gwPid)) {
-      const tail = existsSync(LOG_FILE)
-        ? readFileSync(LOG_FILE, "utf-8").split("\n").slice(-20).join("\n")
+      const log = logFile(stateDir);
+      const tail = existsSync(log)
+        ? readFileSync(log, "utf-8").split("\n").slice(-20).join("\n")
         : "(no log)";
       console.error(`Gateway exited unexpectedly. Last 20 lines:\n${tail}`);
       process.exit(1);
@@ -654,7 +786,7 @@ async function waitForGatewayReady(gwPid: number, port: number): Promise<void> {
 
     const outcome = classifyPostFetchOutcome(gwPid, port);
     if (outcome.outcome === "foreign-dead-child" || outcome.outcome === "foreign-lsof-mismatch") {
-      refuseForeignGatewayAdoption(outcome.outcome, gwPid, port, outcome.listeningPids);
+      refuseForeignGatewayAdoption(outcome.outcome, gwPid, port, outcome.listeningPids, stateDir);
     }
 
     console.log("Gateway ready.");
@@ -662,7 +794,7 @@ async function waitForGatewayReady(gwPid: number, port: number): Promise<void> {
     return;
   }
   console.error("Gateway did not become ready within 30s.");
-  console.error(`Check log: ${LOG_FILE}`);
+  console.error(`Check log: ${logFile(stateDir)}`);
   process.exit(1);
 }
 
@@ -797,7 +929,9 @@ export function stopGateway(): void {
     return;
   }
   process.kill(pid, "SIGTERM");
-  if (existsSync(PID_FILE)) unlinkSync(PID_FILE);
-  if (existsSync(DRIVER_FILE)) unlinkSync(DRIVER_FILE);
+  const stateDir = resolveStateDir();
+  if (existsSync(pidFile(stateDir))) unlinkSync(pidFile(stateDir));
+  if (existsSync(driverFile(stateDir))) unlinkSync(driverFile(stateDir));
+  if (existsSync(portFile(stateDir))) unlinkSync(portFile(stateDir));
   console.log(`Gateway stopped (pid ${pid}).`);
 }
