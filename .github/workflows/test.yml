@@ -30,7 +30,7 @@ jobs:
         run: bun run typecheck
 
       - name: Tests
-        run: bun test
+        run: bun run test
 
       - name: Dead code (knip)
         run: bun run knip
@@ -58,6 +58,45 @@ jobs:
           bun-version: latest
 
       - run: bun install --frozen-lockfile
+
+      - name: Preflight — fork release assets published? (bd openlock-lpc)
+        # OPENSHELL_FORK_TAG pins a fork *tag*; the fork's own release
+        # workflow builds cross-platform binaries asynchronously and can
+        # take hours after the tag push (see CLAUDE.md's release-line
+        # model). If this job runs before assets land, ensureFromRelease's
+        # `curl -f` 404s (exit 22) deep inside gateway startup, ~10+ minutes
+        # into a 20-minute job, after podman/subuid setup has already run.
+        # Check the same URLs the real download uses (asked of
+        # fork-binaries.ts, not re-derived here) and fail fast and
+        # unambiguously instead.
+        #
+        # Deliberately NOT in the `test` job above: `live-integration` is not
+        # a required check under the branch ruleset, so a release-ordering
+        # false red here doesn't block merge; a false red in `test` would.
+        # Moving this there would promote a non-blocking hazard into a
+        # merge-blocking one, and would put a network dependency back into
+        # the one job whose value is being hermetic (bd openlock-lpc part 1).
+        #
+        # Release assets are public — ensureFromRelease sends no auth, so
+        # neither does this check. If vessux/OpenShell ever goes private,
+        # every URL here 404s and this becomes a permanent false red; a
+        # future reader hitting that should look here first, not assume the
+        # release is stuck.
+        run: |
+          set -uo pipefail
+          tag="$(bun -e 'import { OPENSHELL_FORK_TAG } from "./src/sandbox/fork-binaries"; console.log(OPENSHELL_FORK_TAG)')"
+          missing=0
+          while IFS= read -r url; do
+            [ -z "$url" ] && continue
+            if ! curl -fsSIL -o /dev/null "$url"; then
+              echo "::error::Fork release ${tag} asset not found: $url"
+              missing=1
+            fi
+          done < <(bun run scripts/print-fork-asset-urls.ts)
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Fork release ${tag} is missing one or more assets this job needs. This is expected in the window right after a fork tag push — the release workflow builds binaries asynchronously and can take hours. Wait for https://github.com/vessux/OpenShell/releases/tag/${tag} to show all platform archives attached, then re-run this job."
+            exit 1
+          fi
 
       - name: Install podman (5.x+, heredoc-aware)
         if: matrix.runtime == 'podman'

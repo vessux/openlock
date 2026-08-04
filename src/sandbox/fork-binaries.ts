@@ -45,6 +45,23 @@ function downloadUrl(name: ForkBinary): string {
   return `https://github.com/${OPENSHELL_FORK_REPO}/releases/download/${OPENSHELL_FORK_TAG}/${name}-${triple}.tar.gz`;
 }
 
+// Every asset ensureFromRelease() would fetch for *this* host/arch — i.e.
+// exactly what a real download here needs, not every triple the fork
+// release happens to publish. Exported for CI's live-integration preflight
+// (bd openlock-lpc part 2): the workflow calls this instead of hand-rolling
+// the tag/triple/URL logic in YAML, which would drift out of sync with this
+// module exactly the way a hand-copied fixture drifts from its source (see
+// feedback_fixtures_must_match_product_output.md).
+const FORK_BINARIES: readonly ForkBinary[] = [
+  "openshell-gateway",
+  "openshell-sandbox",
+  "openshell",
+];
+
+export function expectedForkAssetUrls(): string[] {
+  return FORK_BINARIES.map((name) => downloadUrl(name));
+}
+
 async function ensureFromRelease(name: ForkBinary): Promise<string> {
   const triple = rustTriple(name);
   const cached = join(CACHE_DIR, `${name}-${triple}`);
