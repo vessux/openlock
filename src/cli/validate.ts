@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import type { ConfigFile, Issue, Severity } from "../config-core";
-import { gitignoreCoversLocalConfig, lintFolder } from "../config-core";
+import { gitignoreCoversLocalConfig, lintFolder, renderIssue } from "../config-core";
 import { printCmdHelp } from "./_help";
 
 export const flagSchema = {
@@ -13,20 +13,6 @@ export const flagSchema = {
 
 const BASE_FILE_ORDER: ConfigFile[] = ["config.yaml", "policy.yaml"];
 const SEVERITY_ORDER: Severity[] = ["error", "filesystem", "warning"];
-// Non-"error" severities get a bracketed tag prefix; "error" (the common
-// case) stays untagged to match the pre-existing output shape.
-const SEVERITY_TAGS: Partial<Record<Severity, string>> = {
-  filesystem: "[fs] ",
-  warning: "[warn] ",
-};
-
-function renderIssue(issue: Issue): string[] {
-  const loc = issue.path ? `${issue.path}: ` : "";
-  const tag = SEVERITY_TAGS[issue.severity] ?? "";
-  const lines = [`    ${tag}${loc}${issue.message}`];
-  if (issue.fix) lines.push(`      fix: ${issue.fix}`);
-  return lines;
-}
 
 function renderFile(file: ConfigFile, issues: Issue[]): string[] {
   if (issues.length === 0) return [`  ${file}: ok`];

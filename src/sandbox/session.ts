@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import type { CredentialBundle } from "../config-core";
+import type { CredentialBundle, Issue } from "../config-core";
 import {
   dockerDaemonReachable,
   podmanMachineRunning,
@@ -54,6 +54,7 @@ import {
 } from "./mounts";
 import { gateOpencodeOpenRouterModel } from "./opencode-openrouter-model-gate";
 import { resolveOpenlockFolder } from "./openlock-folder";
+import { collectSandboxPolicyIssues, enforcePolicyPreflight } from "./policy-preflight";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
 import { heartbeatIntervalMs, reapIdleMs } from "./reap";
@@ -838,10 +839,15 @@ async function resolveOrCreateSession(
   debugEgress: boolean,
   rebuild: boolean,
   interactive: boolean,
+  policyIssues: readonly Issue[],
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
+    // Fresh create: the on-disk policy/config is about to be baked into a
+    // brand-new container (openlock-j9t7 / D3) — block on any error-severity
+    // issue before spending time on the actual build.
+    enforcePolicyPreflight(policyIssues, { policyWillBeApplied: true });
     const created = await createSession(
       projectPath,
       resolved,
@@ -883,7 +889,14 @@ async function resolveOrCreateSession(
     );
   }
 
-  const attachStale = () => reattachSession(m, resolved.mounts, providerId, resolved.credentials);
+  // Plain reattach (whichever branch below reaches it): the already-running
+  // container keeps its already-baked policy regardless of what's wrong
+  // on-disk right now (openlock-j9t7 / D3) — warn only, and the warning text
+  // must say this affects the NEXT rebuild, not the live sandbox.
+  const attachStale = () => {
+    enforcePolicyPreflight(policyIssues, { policyWillBeApplied: false });
+    return reattachSession(m, resolved.mounts, providerId, resolved.credentials);
+  };
 
   if (action === "proceed" || action === "warn-stale") return attachStale();
 
@@ -894,7 +907,9 @@ async function resolveOrCreateSession(
     return attachStale();
   }
 
-  // action === "rebuild", or the prompt was answered yes.
+  // action === "rebuild", or the prompt was answered yes: the on-disk
+  // policy/config IS about to be baked into a recreated container — block.
+  enforcePolicyPreflight(policyIssues, { policyWillBeApplied: true });
   console.log(`Rebuilding sandbox "${m.name}" to apply config/policy changes...`);
   return recreateSession(
     m,
@@ -988,6 +1003,14 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     process.exit(2);
   }
 
+  // Collected once, cheaply, right after resolveRepoPolicy succeeds — same
+  // point covers create, reattach, AND drift-triggered recreate, since this
+  // runs before resolveOrCreateSession branches into any of them
+  // (openlock-j9t7). Severity routing (block vs warn) happens per-branch
+  // inside resolveOrCreateSession, since only it knows whether the on-disk
+  // policy is actually about to be applied this run.
+  const policyIssues = collectSandboxPolicyIssues(join(projectPath, ".openlock"), resolved.policy);
+
   const branchErr = validateBranchFlagAgainstWorkdir(opts.branch, workdirMount(resolved.mounts));
   if (branchErr !== null) {
     console.error(branchErr);
@@ -1037,6 +1060,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     opts.debugEgress === true,
     opts.rebuild === true,
     tty,
+    policyIssues,
   );
 
   // Convergence point for create / reattach / drift-triggered recreate: all
