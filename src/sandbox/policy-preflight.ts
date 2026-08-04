@@ -115,14 +115,36 @@ export function formatPolicyPreflightLines(
  * `exitOnPreflightFailure`/`enforceTlsTerminationHealthy` shape in
  * session.ts (console + process.exit, not unit-tested directly; the pure
  * decision/formatting it wraps is what's tested).
+ *
+ * Returns the lines it printed (`[]` if there was nothing to say, or if the
+ * call blocked) so a non-blocking caller can re-emit the SAME lines later —
+ * openlock-j9t7: every non-blocking call site in session.ts's
+ * `resolveOrCreateSession` (fresh create, plain reattach, accepted/forced
+ * `--rebuild` recreate — not just reattach) captures this return value into
+ * `ResolvedSession.policyWarningLines`, and `runSandbox` re-prints it after
+ * the harness exits, because on an interactive attach the harness's
+ * full-screen TUI destroys the pre-attach copy within a fraction of a
+ * second. The rule is about output survival, not which lifecycle branch ran
+ * — a create with warning-only issues gets painted over exactly like a
+ * reattach's warning does. A blocking call returns `[]` explicitly (even
+ * though `process.exit(1)` really terminates the process first in
+ * production, so this is unreachable there) — the contract is that a
+ * blocked call never hands back lines for anything to re-emit.
  */
-export function enforcePolicyPreflight(issues: readonly Issue[], opts: PolicyPreflightOpts): void {
+export function enforcePolicyPreflight(
+  issues: readonly Issue[],
+  opts: PolicyPreflightOpts,
+): string[] {
   const lines = formatPolicyPreflightLines(issues, opts);
-  if (lines.length === 0) return;
+  if (lines.length === 0) return [];
   const { block } = decidePolicyPreflightAction(issues, opts);
   for (const line of lines) {
     if (block) console.error(line);
     else console.warn(line);
   }
-  if (block) process.exit(1);
+  if (block) {
+    process.exit(1);
+    return [];
+  }
+  return lines;
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { collectConfigPolicyIssues } from "../config-core";
 import {
   collectSandboxPolicyIssues,
   decidePolicyPreflightAction,
+  enforcePolicyPreflight,
   formatPolicyPreflightLines,
 } from "./policy-preflight";
 
@@ -85,6 +86,103 @@ describe("formatPolicyPreflightLines", () => {
     const lines = formatPolicyPreflightLines([warningIssue], { policyWillBeApplied: true });
     expect(lines[0]).toMatch(/non-blocking issue/);
     expect(lines[0]).not.toContain("this sandbox would ship with them");
+  });
+});
+
+// openlock-j9t7: enforcePolicyPreflight's RETURN VALUE is what
+// session.ts's resolveOrCreateSession threads out as
+// ResolvedSession.policyWarningLines and runSandbox re-prints once the
+// harness exits — resolveOrCreateSession itself has no direct unit test
+// (heavy gateway/podman I/O, matching the existing untested-wiring
+// precedent around enforceTlsTerminationHealthy), so this is where the
+// "every non-blocking call yields its lines; the blocking call yields none"
+// contract is actually verified. The rule is about whether a call is
+// blocking, NOT about which lifecycle branch (create/reattach/recreate)
+// made it — a prior version of this fix wrongly assumed only reattach
+// needed its lines re-emitted; a fresh create with warning-only issues hits
+// the identical "TUI destroys the pre-attach copy" failure, so that case is
+// pinned explicitly below.
+describe("enforcePolicyPreflight (threading contract for ResolvedSession.policyWarningLines)", () => {
+  // Assertions below use deltas/tails against each spy's call list rather
+  // than "not called at all": this file runs inside the shared `bun test`
+  // process alongside ~1200 other tests, some of which log asynchronously,
+  // so an absolute-zero assertion on a global like console.warn/error can
+  // pick up unrelated activity that happens to land in the same tick. Deltas
+  // and tail-matches are immune to that and still prove the real point. Do
+  // NOT "tighten" these back into toHaveBeenCalledTimes(0)-style absolute
+  // assertions — that's what caused the flake this comment is warning about.
+  it("warn-only reattach (policyWillBeApplied:false) returns the formatted lines, prints them via console.warn, never exits", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const exitSpy = spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    try {
+      const exitCallsBefore = exitSpy.mock.calls.length;
+      const expected = formatPolicyPreflightLines([errorIssue], { policyWillBeApplied: false });
+      const lines = enforcePolicyPreflight([errorIssue], { policyWillBeApplied: false });
+      expect(lines).toEqual(expected);
+      expect(lines.length).toBeGreaterThan(0);
+      const printed = warnSpy.mock.calls.slice(-lines.length).map((c) => c[0]);
+      expect(printed).toEqual(lines);
+      expect(exitSpy.mock.calls.slice(exitCallsBefore)).not.toContainEqual([1]);
+    } finally {
+      warnSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  // The case the earlier spec got wrong: a fresh create is also
+  // policyWillBeApplied:true, and warning-only issues there are just as
+  // real as on reattach — this must yield non-empty lines for
+  // reprintPolicyWarningsAfterAttach to re-emit, not [].
+  it("a fresh create with warning-only issues (policyWillBeApplied:true, no errors) ALSO returns non-empty lines to re-emit", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const exitSpy = spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    try {
+      const exitCallsBefore = exitSpy.mock.calls.length;
+      const expected = formatPolicyPreflightLines([warningIssue], { policyWillBeApplied: true });
+      const lines = enforcePolicyPreflight([warningIssue], { policyWillBeApplied: true });
+      expect(lines).toEqual(expected);
+      expect(lines.length).toBeGreaterThan(0);
+      const printed = warnSpy.mock.calls.slice(-lines.length).map((c) => c[0]);
+      expect(printed).toEqual(lines);
+      expect(exitSpy.mock.calls.slice(exitCallsBefore)).not.toContainEqual([1]);
+    } finally {
+      warnSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+  });
+
+  it("a fresh create with no issues at all (issues:[]) returns [] — nothing to re-emit, nothing printed", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const before = warnSpy.mock.calls.length;
+      expect(enforcePolicyPreflight([], { policyWillBeApplied: true })).toEqual([]);
+      expect(warnSpy.mock.calls.length).toBe(before);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("the blocking case (policyWillBeApplied:true, an error issue) returns [], exits(1), and prints via console.error, not warn", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    try {
+      const warnBefore = warnSpy.mock.calls.length;
+      const expected = formatPolicyPreflightLines([errorIssue], { policyWillBeApplied: true });
+      const lines = enforcePolicyPreflight([errorIssue], { policyWillBeApplied: true });
+      // Nothing for a (real-world unreachable, since process.exit(1) halts
+      // first) caller to re-emit — the blocking contract is []; see
+      // enforcePolicyPreflight's doc comment.
+      expect(lines).toEqual([]);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(warnSpy.mock.calls.length).toBe(warnBefore);
+      const printed = errorSpy.mock.calls.slice(-expected.length).map((c) => c[0]);
+      expect(printed).toEqual(expected);
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 });
 
