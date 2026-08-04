@@ -58,7 +58,13 @@ import { collectSandboxPolicyIssues, enforcePolicyPreflight } from "./policy-pre
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
 import { heartbeatIntervalMs, reapIdleMs } from "./reap";
-import { buildIdleNudge, classifyAll, cleanSession, reapIdleStaleSessions } from "./session-ops";
+import {
+  buildIdleNudge,
+  classifyAll,
+  cleanSession,
+  REAL_CLEAN_DEPS,
+  reapIdleStaleSessions,
+} from "./session-ops";
 import {
   findSessionsByPath,
   listAllSessions,
@@ -839,7 +845,7 @@ async function recreateSession(
   rebuild: boolean,
 ): Promise<SessionHandle> {
   await startGateway(); // cleanSession → deleteSandbox routes through the gateway
-  await cleanSession(m.name);
+  await cleanSession(m.name, {}, REAL_CLEAN_DEPS);
   const created = await createSession(
     projectPath,
     resolved,

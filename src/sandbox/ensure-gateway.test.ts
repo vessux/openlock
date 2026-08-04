@@ -1,11 +1,42 @@
+// openlock-k5j2: this file intentionally has NO helper for spinning up a
+// real gateway process, and no port-override seam. If a future test needs
+// to exercise a live (throwaway) gateway — e.g. to reproduce the actual
+// bind-conflict race behind classifyReadinessOutcome end-to-end — it MUST:
+//
+//   1. Take the port as a REQUIRED parameter to whatever helper it adds,
+//      the same way ensure-provider.test.ts's `Shell` is threaded in
+//      explicitly rather than defaulted — never fall back to the exported
+//      `GATEWAY_PORT` constant.
+//   2. Run against a scratch `$HOME`/state dir AND a scratch port. Never
+//      18081, under any circumstance.
+//   3. Never call the real `startGateway`/`stopGateway` against the
+//      default port. That port is the developer's live gateway: an
+//      optional test dependency once silently defaulted to the real thing
+//      and deleted this project's real gateway providers, costing an
+//      unrecoverable anthropic credential (see
+//      feedback_no_optional_live_state_deps.md). A test that spins up a
+//      real gateway process without threading its own scratch port is the
+//      same shape of mistake with a different victim.
+//
+// A port-override seam (a module-global `_setGatewayPortForTests` setter)
+// was added and then deliberately removed for this same reason: production
+// code reading "whatever was last set" via a global is ITSELF the
+// optional-with-a-real-default shape that rule forbids — a test that sets
+// the override and forgets to reset it would silently redirect every OTHER
+// test sharing the module. There is no seam to reach for here on purpose;
+// the next author threads the port explicitly through their own test
+// helper instead of inheriting an ambient default.
 import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   classifyProcNetTcpBind,
+  classifyReadinessOutcome,
   findGatewayDriverMismatch,
+  formatForeignGatewayAdoptionError,
   formatGatewayDriverMismatchError,
+  getListeningPids,
   readGatewayRssKb,
   renderGatewayConfigToml,
   rotateLogIfLarge,
@@ -370,5 +401,134 @@ describe("formatGatewayDriverMismatchError (openlock-ox1)", () => {
   it("points at `openlock gateway stop` as the remedy", () => {
     const msg = formatGatewayDriverMismatchError("docker", "podman");
     expect(msg).toContain("openlock gateway stop");
+  });
+});
+
+describe("getListeningPids (openlock-k5j2)", () => {
+  it("returns the probe's result unchanged when it finds a single listener", () => {
+    expect(getListeningPids(18081, () => [56694])).toEqual([56694]);
+  });
+
+  // Ground truth from a real running gateway (2026-08-04): `lsof -ti :18081`
+  // (WITHOUT -sTCP:LISTEN) returned three pids — 48431, 56694, 61433 — where
+  // only 56694 was the actual gateway; the other two were connected clients.
+  // The corrected invocation (`-sTCP:LISTEN`) is what the probe itself must
+  // use to avoid ever returning that 3-pid shape in the first place, but
+  // callers must ALSO tolerate a probe legitimately reporting more than one
+  // pid (a forking/threaded server can hold multiple listening fds), so
+  // membership — not array equality or index-0 — is the only safe check.
+  it("can legitimately report multiple listening pids; the real listener must be a member, not necessarily first", () => {
+    const pids = getListeningPids(18081, () => [61433, 56694]);
+    expect(pids).toContain(56694);
+  });
+
+  it('returns [] (not null) when the probe ran but found no listener — a real "nothing listening"', () => {
+    expect(getListeningPids(18081, () => [])).toEqual([]);
+  });
+
+  it("returns null when the probe itself couldn't run (e.g. lsof missing) — inconclusive, not a real result", () => {
+    expect(getListeningPids(18081, () => null)).toBeNull();
+  });
+});
+
+describe("classifyReadinessOutcome (openlock-k5j2)", () => {
+  it('classifies as "not-ready" when the HTTP probe itself did not succeed yet', () => {
+    expect(
+      classifyReadinessOutcome({
+        fetchOk: false,
+        childAlive: true,
+        gwPid: 100,
+        listeningPids: [100],
+      }),
+    ).toBe("not-ready");
+  });
+
+  // THE bug: the readiness fetch succeeded (something answered), but our own
+  // spawned child is no longer alive at that instant — the responder can
+  // only be a foreign, pre-existing gateway. This is the exact race
+  // exhibited in openlock-k5j2 (a bind failure on an already-occupied port
+  // let the pre-existing gateway answer while our own child silently died).
+  it('classifies as "foreign-dead-child" on fetchOk=true with a dead child — the exhibited bug', () => {
+    expect(
+      classifyReadinessOutcome({
+        fetchOk: true,
+        childAlive: false,
+        gwPid: 100,
+        listeningPids: null,
+      }),
+    ).toBe("foreign-dead-child");
+  });
+
+  it('classifies as "foreign-dead-child" regardless of what listeningPids says (child-death is dispositive on its own)', () => {
+    expect(
+      classifyReadinessOutcome({
+        fetchOk: true,
+        childAlive: false,
+        gwPid: 100,
+        listeningPids: [100], // even if lsof still sees it as (momentarily) listed
+      }),
+    ).toBe("foreign-dead-child");
+  });
+
+  it('classifies as "foreign-lsof-mismatch" when the child is alive but not among the port\'s listeners', () => {
+    expect(
+      classifyReadinessOutcome({
+        fetchOk: true,
+        childAlive: true,
+        gwPid: 100,
+        listeningPids: [999],
+      }),
+    ).toBe("foreign-lsof-mismatch");
+  });
+
+  it('classifies as "ready" when the child is alive and IS among the listeners', () => {
+    expect(
+      classifyReadinessOutcome({
+        fetchOk: true,
+        childAlive: true,
+        gwPid: 100,
+        listeningPids: [100],
+      }),
+    ).toBe("ready");
+  });
+
+  it('classifies as "ready" when listeningPids is null (lsof unavailable) — inconclusive must never fail a healthy start', () => {
+    expect(
+      classifyReadinessOutcome({
+        fetchOk: true,
+        childAlive: true,
+        gwPid: 100,
+        listeningPids: null,
+      }),
+    ).toBe("ready");
+  });
+
+  it('classifies as "ready" when multiple pids are listening and gwPid is among them (set membership, not equality)', () => {
+    expect(
+      classifyReadinessOutcome({
+        fetchOk: true,
+        childAlive: true,
+        gwPid: 56694,
+        listeningPids: [56694, 61433],
+      }),
+    ).toBe("ready");
+  });
+});
+
+describe("formatForeignGatewayAdoptionError (openlock-k5j2)", () => {
+  it("names the port and includes the caller-supplied detail", () => {
+    const msg = formatForeignGatewayAdoptionError(18081, "pid 100 exited");
+    expect(msg).toContain("18081");
+    expect(msg).toContain("pid 100 exited");
+  });
+
+  it("does NOT tell the user to run `openlock gateway stop` (this invocation never owned the gateway, unlike formatGatewayDriverMismatchError's case)", () => {
+    const msg = formatForeignGatewayAdoptionError(18081, "pid 100 exited");
+    expect(msg).not.toContain("openlock gateway stop");
+  });
+
+  it("makes clear this is a gateway the invocation does not own", () => {
+    const msg = formatForeignGatewayAdoptionError(18081, "pid 100 exited");
+    expect(msg.toLowerCase()).toContain("does not own");
   });
 });

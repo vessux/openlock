@@ -5,6 +5,8 @@ import {
   type CleanOpts,
   classifyAll,
   cleanSession,
+  REAL_CLEAN_DEPS,
+  REAL_GATEWAY_SELF_HEAL_DEPS,
   selfHealGatewayIfRuntimeConfigured,
 } from "../sandbox/session-ops";
 import { printCmdHelp } from "./_help";
@@ -18,13 +20,24 @@ export const flagSchema = {
 } as const satisfies ParseArgsOptionsConfig;
 
 export interface BulkCleanDeps {
-  /** Defaults to selfHealGatewayIfRuntimeConfigured. */
-  selfHealGateway?: () => Promise<unknown>;
-  /** Defaults to classifyAll. */
-  classifyAll?: () => Promise<ClassifiedSession[]>;
-  /** Defaults to cleanSession. */
-  cleanSession?: (name: string, opts: CleanOpts) => Promise<void>;
+  /** Real: selfHealGatewayIfRuntimeConfigured. REQUIRED — no
+   * optional-with-a-real-default (openlock-k5j2 /
+   * feedback_no_optional_live_state_deps); see REAL_BULK_CLEAN_DEPS below
+   * for the production wiring. */
+  selfHealGateway: () => Promise<unknown>;
+  /** Real: classifyAll. REQUIRED, same reasoning. */
+  classifyAll: () => Promise<ClassifiedSession[]>;
+  /** Real: cleanSession. REQUIRED, same reasoning. */
+  cleanSession: (name: string, opts: CleanOpts) => Promise<void>;
 }
+
+/** Production wiring for BulkCleanDeps (openlock-k5j2) — single source of
+ * truth for the real dependencies, so cleanCmd doesn't repeat the wiring. */
+export const REAL_BULK_CLEAN_DEPS: BulkCleanDeps = {
+  selfHealGateway: () => selfHealGatewayIfRuntimeConfigured(REAL_GATEWAY_SELF_HEAL_DEPS),
+  classifyAll,
+  cleanSession: (name, opts) => cleanSession(name, opts, REAL_CLEAN_DEPS),
+};
 
 /**
  * `--all`/`--stale` bulk clean. Self-heals the gateway ONCE, BEFORE
@@ -60,11 +73,11 @@ export interface BulkCleanDeps {
 export async function runBulkClean(
   stale: boolean,
   copyDir: string | undefined,
-  deps: BulkCleanDeps = {},
+  deps: BulkCleanDeps,
 ): Promise<number> {
-  const selfHeal = deps.selfHealGateway ?? selfHealGatewayIfRuntimeConfigured;
-  const classify = deps.classifyAll ?? classifyAll;
-  const clean = deps.cleanSession ?? cleanSession;
+  const selfHeal = deps.selfHealGateway;
+  const classify = deps.classifyAll;
+  const clean = deps.cleanSession;
 
   try {
     await selfHeal();
@@ -116,12 +129,12 @@ export async function cleanCmd(args: string[]): Promise<number> {
   }
   const copyDir = values.copy;
   if (values.all === true || values.stale === true) {
-    return runBulkClean(values.stale === true, copyDir);
+    return runBulkClean(values.stale === true, copyDir, REAL_BULK_CLEAN_DEPS);
   }
   const name = await resolveSessionName(positionals[0], "clean");
   if (!name) return 1;
   try {
-    await cleanSession(name, { copyDir });
+    await cleanSession(name, { copyDir }, REAL_CLEAN_DEPS);
     return 0;
   } catch (e) {
     console.error((e as Error).message);
