@@ -1,0 +1,93 @@
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { validateCmd } from "./validate";
+
+// openlock-j9t7: `validateCmd`'s printed output must stay byte-identical
+// across the collectPolicyCrossCheckIssues/collectNameCollisionIssues →
+// collectConfigPolicyIssues refactor (config-core/index.ts) and the
+// renderIssue/SEVERITY_TAGS move into config-core/format.ts. This fixture
+// deliberately hits all three rendered severities (error, filesystem,
+// warning) across both files so a formatting regression in either moved
+// piece would show up here, not just in the Issue[]-shape assertions in
+// config-core/index.test.ts.
+describe("validateCmd output (byte-identical guard, openlock-j9t7)", () => {
+  let root: string;
+  let logs: string[];
+  let exitCode: number | undefined;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "openlock-validate-output-"));
+    logs = [];
+    spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    spyOn(process, "exit").mockImplementation(((code?: number) => {
+      exitCode = code;
+      return undefined as never;
+    }) as never);
+
+    const folder = join(root, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(
+      join(folder, "config.yaml"),
+      [
+        "credentials:",
+        "  - name: anthropic", // collides with a built-in provider id → error
+        "    values:",
+        "      X: { from_env: X }",
+        "mounts:",
+        "  - source: nope", // does not exist on disk → filesystem
+        "    target: /sandbox/.openlock/x",
+        "    type: copy-once",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(folder, "policy.yaml"),
+      [
+        "version: 1",
+        "network_policies:",
+        "  gh:",
+        "    endpoints:",
+        "      - host: api.github.com",
+        "        port: 443",
+        "        protocol: rest",
+        "        rules: [{ allow: { method: GET, path: /** } }]",
+        "        cred_inject:",
+        "          inject:",
+        "            - header: Authorization",
+        "              from_credential: GITHUB_TOKEN", // nothing supplies it → error
+        "  claude:",
+        "    endpoints:",
+        "      - host: platform.claude.com", // known credential host, no cred_inject → warning
+        "        port: 443",
+        "        protocol: rest",
+        "        rules: [{ allow: { method: GET, path: /** } }]",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("prints the exact expected lines and exits 1", () => {
+    validateCmd([root]);
+    expect(logs).toEqual([
+      "  config.yaml:",
+      '    credentials[0].name: credential bundle name "anthropic" collides with a built-in provider — choose a different name',
+      "      fix: rename this credentials[] entry to something other than: anthropic, openrouter",
+      `    [fs] mounts[0].source: source ${join(root, "nope")} does not exist`,
+      "  policy.yaml:",
+      '    network_policies.gh.endpoints[0].cred_inject: credential "GITHUB_TOKEN" is injected by policy but no provider supplies it — declare it under credentials: in config.yaml (or attach the provider)',
+      "      fix: add a credentials: entry whose values include GITHUB_TOKEN",
+      '    [warn] network_policies.claude.endpoints[0].cred_inject: endpoint for host "platform.claude.com" in network_policies.claude allows traffic but declares no cred_inject, even though it is a known credential-bearing provider endpoint. Without cred_inject, the sandbox\'s PLACEHOLDER credential is forwarded verbatim; the real service typically answers 401/403, which agent harnesses treat as fatal — strictly worse than denying the connection.',
+      "      fix: add a cred_inject block to this endpoint (mirror the other endpoint for platform.claude.com, or the provider's policyEndpoints), or remove/scope down the host if it is genuinely meant to stay unauthenticated",
+      "config.yaml: 2 issues · policy.yaml: 2 issues",
+    ]);
+    expect(exitCode).toBe(1);
+  });
+});

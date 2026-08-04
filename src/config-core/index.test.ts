@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { collectSandboxPolicyIssues } from "../sandbox/policy-preflight";
 import {
   gitignoreCoversLocalConfig,
   knownConfigTokens,
@@ -189,6 +190,80 @@ describe("lintFolder", () => {
           i.file === "policy.yaml" && i.severity === "error" && i.message.includes("GITHUB_TOKEN"),
       ),
     ).toBe(true);
+  });
+
+  // openlock-j9t7: pins that checkCredentialNameCollisions runs UNCONDITIONALLY
+  // on hasConfigErr, independent of whether policy.yaml exists at all —
+  // unlike collectPolicyCrossCheckIssues, which early-returns when policy.yaml
+  // is absent. A refactor that folds all cross-checks behind one
+  // "policyContent present" gate would silently stop reporting a name
+  // collision for a project with only a config.yaml — and no other test here
+  // would catch that, since every other collision fixture also writes a
+  // policy.yaml. This is the control-flow property the shared
+  // collectConfigPolicyIssues (openlock-j9t7) must preserve.
+  it("still reports a config.yaml name collision when policy.yaml does not exist at all", () => {
+    mkdirSync(join(root, ".openlock"), { recursive: true });
+    writeFileSync(
+      join(root, ".openlock/config.yaml"),
+      ["credentials:", "  - name: anthropic", "    values:", "      X: { from_env: X }", ""].join(
+        "\n",
+      ),
+    );
+    const issues = lintFolder(root, { offline: false });
+    expect(
+      issues.some(
+        (i) =>
+          i.file === "config.yaml" &&
+          i.severity === "error" &&
+          i.path === "credentials[0].name" &&
+          i.message.includes("anthropic"),
+      ),
+    ).toBe(true);
+  });
+
+  // openlock-j9t7 drift guard: `openlock validate` (lintFolder) and the
+  // sandbox create-time preflight (collectSandboxPolicyIssues) must report
+  // the SAME issue set for the same on-disk fixture, since both now delegate
+  // to the one shared collectConfigPolicyIssues. Anchored on the actual
+  // openlock-64dl shape (PR #130): a committed policy.yaml whose
+  // api.anthropic.com cred_inject omits `value_prefix: 'Bearer '` — the field
+  // report that reached a colleague's terminal specifically because this
+  // check was invisible outside `openlock validate`. If a future check is
+  // added to collectConfigPolicyIssues but only one of these two call sites
+  // is updated to pass it the right inputs, this test is what would catch
+  // the surfaces silently diverging again.
+  it("lintFolder and collectSandboxPolicyIssues report the same issues for the openlock-64dl value_prefix fixture", () => {
+    writeFolder(
+      "args: []\n",
+      [
+        "version: 1",
+        "network_policies:",
+        "  claude_code:",
+        "    endpoints:",
+        "      - host: api.anthropic.com",
+        "        port: 443",
+        "        protocol: rest",
+        "        rules: [{ allow: { method: GET, path: /** } }]",
+        "        cred_inject:",
+        "          inject:",
+        "            - header: Authorization",
+        "              from_credential: ANTHROPIC_BEARER_TOKEN",
+        "",
+      ].join("\n"),
+    );
+    const viaValidate = lintFolder(root, { offline: true });
+    const viaSandboxCreate = collectSandboxPolicyIssues(
+      join(root, ".openlock"),
+      join(root, ".openlock", "policy.yaml"),
+    );
+    expect(viaSandboxCreate.length).toBeGreaterThan(0);
+    expect(
+      viaSandboxCreate.some((i) => i.severity === "error" && i.message.includes("Bearer ")),
+    ).toBe(true);
+    // config.yaml here is clean (no manifest-schema issues, no credentials:
+    // bundle), so validate's full result is exactly the policy-side issue
+    // set the create path also produces — no filtering needed to compare.
+    expect(viaValidate).toEqual(viaSandboxCreate);
   });
 
   it("offline:true suppresses a missing-source filesystem issue", () => {

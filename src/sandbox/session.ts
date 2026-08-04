@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import type { CredentialBundle } from "../config-core";
+import type { CredentialBundle, Issue } from "../config-core";
 import {
   dockerDaemonReachable,
   podmanMachineRunning,
@@ -54,6 +54,7 @@ import {
 } from "./mounts";
 import { gateOpencodeOpenRouterModel } from "./opencode-openrouter-model-gate";
 import { resolveOpenlockFolder } from "./openlock-folder";
+import { collectSandboxPolicyIssues, enforcePolicyPreflight } from "./policy-preflight";
 import { type PreflightDeps, preflight } from "./preflight";
 import { pidAlive } from "./proc";
 import { heartbeatIntervalMs, reapIdleMs } from "./reap";
@@ -623,9 +624,35 @@ function announceRepoAction(
     console.log(`Landed empty initial commit in ${projectPath}`);
 }
 
-interface ResolvedSession {
+/** What `createSession`/`reattachSession`/`recreateSession` themselves know
+ * how to produce — just which container/session resulted. The
+ * policy-preflight warning lines (below) are a `resolveOrCreateSession`-level
+ * concern layered on top, not something any of those three know about. */
+interface SessionHandle {
   containerName: string;
   sessionName: string;
+}
+
+interface ResolvedSession extends SessionHandle {
+  /** Warn-only policy/config preflight lines already printed once inside
+   * `resolveOrCreateSession` (openlock-j9t7 / D3) — captured from
+   * `enforcePolicyPreflight`'s return value at every non-blocking call site
+   * (fresh create, plain reattach, accepted/forced `--rebuild` recreate), so
+   * it's `[]` exactly when there was nothing to say, never because of which
+   * branch ran. The blocking case needs no entry here: it `process.exit(1)`s
+   * and never reaches a `return`.
+   *
+   * `runSandbox` re-prints these lines after the harness exits. The rule is
+   * about OUTPUT SURVIVAL, not lifecycle: the pre-attach print is the only
+   * copy a scripted/`--no-attach`/non-TTY caller ever sees (their output is
+   * captured, not overwritten), but on an interactive attach the harness's
+   * full-screen TUI destroys that pre-attach copy within a fraction of a
+   * second — regardless of whether the lines came from a create or a
+   * reattach. A prior version of this fix wrongly hardcoded `[]` for create/
+   * recreate on the theory that only reattach needed re-emitting; a create
+   * with warning-only issues (e.g. an uninjected known-credential host) hits
+   * the identical failure, so that was a bug in the fix, not a simplification. */
+  policyWarningLines: string[];
 }
 
 function exitOnAmbiguousSessions(projectPath: string, matches: SessionMeta[]): void {
@@ -652,7 +679,7 @@ async function reattachSession(
   mounts: readonly Mount[],
   providerId: ProviderId,
   credentials: readonly CredentialBundle[],
-): Promise<ResolvedSession> {
+): Promise<SessionHandle> {
   const containerName = m.name;
   // Self-heal (openlock-ab6): getSandboxState queries the gateway
   // (`openshell sandbox get`), so a dead/never-started gateway makes a
@@ -810,7 +837,7 @@ async function recreateSession(
   branch: string | undefined,
   debugEgress: boolean,
   rebuild: boolean,
-): Promise<ResolvedSession> {
+): Promise<SessionHandle> {
   await startGateway(); // cleanSession → deleteSandbox routes through the gateway
   await cleanSession(m.name);
   const created = await createSession(
@@ -838,10 +865,18 @@ async function resolveOrCreateSession(
   debugEgress: boolean,
   rebuild: boolean,
   interactive: boolean,
+  policyIssues: readonly Issue[],
 ): Promise<ResolvedSession> {
   const matches = findSessionsByPath(sessionsDir(), projectPath);
   exitOnAmbiguousSessions(projectPath, matches);
   if (matches.length === 0) {
+    // Fresh create: the on-disk policy/config is about to be baked into a
+    // brand-new container (openlock-j9t7 / D3) — block on any error-severity
+    // issue before spending time on the actual build. A non-blocking result
+    // (warnings only) is captured into policyWarningLines like every other
+    // non-blocking call site below — see ResolvedSession's doc comment for
+    // why it gets re-emitted later.
+    const policyWarningLines = enforcePolicyPreflight(policyIssues, { policyWillBeApplied: true });
     const created = await createSession(
       projectPath,
       resolved,
@@ -855,7 +890,7 @@ async function resolveOrCreateSession(
       attachedPid: process.pid,
       lastAttachedAt: new Date().toISOString(),
     });
-    return { containerName: created.containerName, sessionName: created.name };
+    return { containerName: created.containerName, sessionName: created.name, policyWarningLines };
   }
 
   // Reattach path. Detect drift of the container's cold build inputs
@@ -883,7 +918,17 @@ async function resolveOrCreateSession(
     );
   }
 
-  const attachStale = () => reattachSession(m, resolved.mounts, providerId, resolved.credentials);
+  // Plain reattach (whichever branch below reaches it): the already-running
+  // container keeps its already-baked policy regardless of what's wrong
+  // on-disk right now (openlock-j9t7 / D3) — warn only, and the warning text
+  // must say this affects the NEXT rebuild, not the live sandbox. Captured
+  // into policyWarningLines like every other non-blocking call site — see
+  // ResolvedSession's doc comment for why it gets re-emitted later.
+  const attachStale = async () => {
+    const policyWarningLines = enforcePolicyPreflight(policyIssues, { policyWillBeApplied: false });
+    const handle = await reattachSession(m, resolved.mounts, providerId, resolved.credentials);
+    return { ...handle, policyWarningLines };
+  };
 
   if (action === "proceed" || action === "warn-stale") return attachStale();
 
@@ -894,9 +939,13 @@ async function resolveOrCreateSession(
     return attachStale();
   }
 
-  // action === "rebuild", or the prompt was answered yes.
+  // action === "rebuild", or the prompt was answered yes: the on-disk
+  // policy/config IS about to be baked into a recreated container — block.
+  // Captured into policyWarningLines like every other non-blocking call site
+  // — see ResolvedSession's doc comment for why it gets re-emitted later.
+  const policyWarningLines = enforcePolicyPreflight(policyIssues, { policyWillBeApplied: true });
   console.log(`Rebuilding sandbox "${m.name}" to apply config/policy changes...`);
-  return recreateSession(
+  const recreated = await recreateSession(
     m,
     projectPath,
     resolved,
@@ -906,6 +955,7 @@ async function resolveOrCreateSession(
     debugEgress,
     rebuild,
   );
+  return { ...recreated, policyWarningLines };
 }
 
 /**
@@ -973,6 +1023,30 @@ function handleGatewayShutdown(remainingSessions: number): void {
   console.log(`Gateway kept running (${remainingSessions} session(s) remain).`);
 }
 
+/**
+ * Re-print any non-blocking policy/config preflight warning AFTER the
+ * harness has exited (openlock-j9t7). `lines` was already printed once
+ * inside `resolveOrCreateSession` (create, reattach, or recreate — see
+ * `ResolvedSession.policyWarningLines`), before attach.
+ *
+ * Why print it again: the pre-attach copy is the ONLY copy a scripted/
+ * `--no-attach`/non-TTY caller ever sees, because their output is captured
+ * rather than overwritten. But on an interactive attach, the harness's
+ * full-screen TUI destroys that pre-attach copy within a fraction of a
+ * second — the exact "warning nobody can read" failure shape this project
+ * shipped a fix FOR. This is about whether the output SURVIVES, not about
+ * which lifecycle branch produced it: a fresh create with warning-only
+ * issues is painted over exactly as a reattach's warning is, so both must be
+ * re-emitted here. This is a deliberate double-print, not a leftover
+ * duplicate — do not remove either copy, and do not narrow this to "only
+ * reattach needs it" again (that was tried and was a bug, not a
+ * simplification). `lines` is `[]` whenever there was nothing non-blocking
+ * to say, so there's nothing to double-print outside a real warning.
+ */
+function reprintPolicyWarningsAfterAttach(lines: readonly string[]): void {
+  for (const line of lines) console.warn(line);
+}
+
 export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const projectPath = resolve(opts.path);
   const tty = Boolean(process.stdin.isTTY);
@@ -987,6 +1061,14 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(2);
   }
+
+  // Collected once, cheaply, right after resolveRepoPolicy succeeds — same
+  // point covers create, reattach, AND drift-triggered recreate, since this
+  // runs before resolveOrCreateSession branches into any of them
+  // (openlock-j9t7). Severity routing (block vs warn) happens per-branch
+  // inside resolveOrCreateSession, since only it knows whether the on-disk
+  // policy is actually about to be applied this run.
+  const policyIssues = collectSandboxPolicyIssues(join(projectPath, ".openlock"), resolved.policy);
 
   const branchErr = validateBranchFlagAgainstWorkdir(opts.branch, workdirMount(resolved.mounts));
   if (branchErr !== null) {
@@ -1028,7 +1110,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     readGlobalConfig,
   });
 
-  const { containerName, sessionName } = await resolveOrCreateSession(
+  const { containerName, sessionName, policyWarningLines } = await resolveOrCreateSession(
     projectPath,
     resolved,
     harness,
@@ -1037,6 +1119,7 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
     opts.debugEgress === true,
     opts.rebuild === true,
     tty,
+    policyIssues,
   );
 
   // Convergence point for create / reattach / drift-triggered recreate: all
@@ -1090,6 +1173,9 @@ export async function runSandbox(opts: SandboxOpts): Promise<void> {
   const exitCode = await attachHarnessAndSync(containerName, sessionName, launch, resolved.mounts);
   handleGatewayShutdown(listAllSessions(sessionsDir()).length);
   await autoReapOrNudge(sessionName);
+  // Placed next to the idle-session nudge above (same end-of-session-
+  // advisory precedent: autoReapOrNudge) so both land together.
+  reprintPolicyWarningsAfterAttach(policyWarningLines);
   // Exit explicitly with the harness's code. The persistent-container tether
   // (openshellSandboxCreateAsync's `openshell sandbox create … sleep infinity`
   // child) and the gateway client are intentionally left running, so the
