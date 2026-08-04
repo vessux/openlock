@@ -86,6 +86,22 @@
 //     asserts the derived port is never 18081 as a belt-and-suspenders
 //     check. Never call `startGateway()`/the CLI's `gateway start` without
 //     an explicit `OPENLOCK_STATE_DIR` override in scope.
+//   - `OPENLOCK_STATE_DIR` ALONE IS NOT SUFFICIENT ISOLATION. This bit a
+//     real run: `registerGatewayMetadata` (ensure-gateway.ts) writes the
+//     SHARED openshell gateway registry at
+//     `<XDG_CONFIG_HOME>/openshell/gateways/<GATEWAY_NAME>/metadata.json` —
+//     a path keyed by `XDG_CONFIG_HOME` (defaulting to `~/.config`, NOT
+//     under the openlock state dir at all) and by the FIXED constant
+//     `GATEWAY_NAME` ("podman-dev"). Relocating only `OPENLOCK_STATE_DIR`
+//     leaves BOTH throwaway gateways below writing that one real, shared
+//     file — the second one to start wins, repointing the developer's
+//     (or CI's) real gateway registry at a scratch port that dies with the
+//     test, breaking every later command until someone notices and runs
+//     `gateway stop && gateway start` to repair it. `XDG_CONFIG_HOME` MUST
+//     be overridden to a scratch directory everywhere `OPENLOCK_STATE_DIR`
+//     is, for BOTH gateways. The `realGatewayRegistryUnchanged` guard below
+//     converts "we hope this is isolated" into a hard, loud failure the
+//     moment that stops being true again.
 //   - The FIRST gateway (expected to succeed) is started IN-PROCESS via the
 //     exported `startGateway()`, matching every other test in this
 //     directory — its success path never calls `process.exit()`.
@@ -101,14 +117,38 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveGatewayPort, startGateway } from "../../src/sandbox/ensure-gateway";
+import { GATEWAY_NAME, resolveGatewayPort, startGateway } from "../../src/sandbox/ensure-gateway";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const CLI_PATH = join(import.meta.dir, "..", "..", "src", "cli.ts");
 const DEFAULT_GATEWAY_PORT = 18081;
 const COLLISION_SEARCH_CAP = 200_000;
+
+/**
+ * The REAL, shared openshell gateway registry file's path — mirrors
+ * `registerGatewayMetadata`'s (unexported) `configHome` resolution in
+ * ensure-gateway.ts EXACTLY (`XDG_CONFIG_HOME` ?? `$HOME/.config`), read
+ * with `GATEWAY_NAME` imported rather than re-literaled so this can't drift
+ * on a rename. Duplicated rather than imported because that resolution
+ * isn't exported, and this function is called at test start — BEFORE this
+ * test overrides `XDG_CONFIG_HOME` — specifically so it resolves the one
+ * true shared path, not a scratch one. Keep this in sync if that resolution
+ * in ensure-gateway.ts ever changes.
+ */
+function realGatewayRegistryMetadataPath(): string {
+  const configHome = process.env.XDG_CONFIG_HOME ?? join(process.env.HOME || homedir(), ".config");
+  return join(configHome, "openshell", "gateways", GATEWAY_NAME, "metadata.json");
+}
+
+function readFileOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf-8");
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Finds a state-dir path (a plain string — not yet created on disk) whose
@@ -186,85 +226,116 @@ describe("k5j2 foreign-gateway refusal, live (openlock-tv6u)", () => {
   });
 
   it.skipIf(!LIVE)(
-    "a second gateway colliding on the derived port never adopts the first (exit != 0, no 'Gateway ready', gateway A unaffected); when k5j2's specific attribution branch fires, it also cleans up its own pid/driver/port files",
+    "a second gateway colliding on the derived port never adopts the first (exit != 0, no 'Gateway ready', gateway A unaffected, real gateway registry untouched); when k5j2's specific attribution branch fires, it also cleans up its own pid/driver/port files",
     async () => {
-      scratchRoot = mkdtempSync(join(tmpdir(), "openlock-tv6u-"));
-      const stateDirA = join(scratchRoot, "state-a");
+      // Captured BEFORE any override below — the real, shared registry this
+      // test must never touch. See the SAFETY section on why
+      // OPENLOCK_STATE_DIR alone doesn't protect it.
+      const realRegistryPath = realGatewayRegistryMetadataPath();
+      const realRegistryBefore = readFileOrNull(realRegistryPath);
 
-      const port = resolveGatewayPort(stateDirA);
-      // Belt-and-suspenders on top of stateDirA being a freshly minted
-      // tmpdir path, which can never canonicalize to the real default state
-      // dir: this test must NEVER exercise the developer's real gateway.
-      expect(port).not.toBe(DEFAULT_GATEWAY_PORT);
-
-      // Gateway A: IN-PROCESS, expected to SUCCEED (startGateway()'s success
-      // path never calls process.exit()). `podman`, matching the "real"
-      // instance in k5j2's own reproduction. startGateway() creates
-      // stateDirA itself.
-      const savedStateDir = process.env.OPENLOCK_STATE_DIR;
-      const savedRuntime = process.env.OPENLOCK_RUNTIME;
-      process.env.OPENLOCK_STATE_DIR = stateDirA;
-      process.env.OPENLOCK_RUNTIME = "podman";
       try {
-        await startGateway();
+        scratchRoot = mkdtempSync(join(tmpdir(), "openlock-tv6u-"));
+        const stateDirA = join(scratchRoot, "state-a");
+        const xdgConfigHomeA = join(scratchRoot, "xdg-a");
+        const xdgConfigHomeB = join(scratchRoot, "xdg-b");
+
+        const port = resolveGatewayPort(stateDirA);
+        // Belt-and-suspenders on top of stateDirA being a freshly minted
+        // tmpdir path, which can never canonicalize to the real default
+        // state dir: this test must NEVER exercise the developer's real
+        // gateway.
+        expect(port).not.toBe(DEFAULT_GATEWAY_PORT);
+
+        // Gateway A: IN-PROCESS, expected to SUCCEED (startGateway()'s
+        // success path never calls process.exit()). `podman`, matching the
+        // "real" instance in k5j2's own reproduction. startGateway()
+        // creates stateDirA (and, via registerGatewayMetadata, the scratch
+        // XDG_CONFIG_HOME's registry dir) itself.
+        const savedStateDir = process.env.OPENLOCK_STATE_DIR;
+        const savedRuntime = process.env.OPENLOCK_RUNTIME;
+        const savedXdgConfigHome = process.env.XDG_CONFIG_HOME;
+        process.env.OPENLOCK_STATE_DIR = stateDirA;
+        process.env.OPENLOCK_RUNTIME = "podman";
+        process.env.XDG_CONFIG_HOME = xdgConfigHomeA;
+        try {
+          await startGateway();
+        } finally {
+          if (savedStateDir === undefined) delete process.env.OPENLOCK_STATE_DIR;
+          else process.env.OPENLOCK_STATE_DIR = savedStateDir;
+          if (savedRuntime === undefined) delete process.env.OPENLOCK_RUNTIME;
+          else process.env.OPENLOCK_RUNTIME = savedRuntime;
+          if (savedXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+          else process.env.XDG_CONFIG_HOME = savedXdgConfigHome;
+        }
+        const gatewayAPid = readPidFile(stateDirA);
+        expect(gatewayAPid).not.toBeNull();
+
+        const stateDirB = findCollidingStateDir(scratchRoot, port, stateDirA);
+        expect(resolveGatewayPort(stateDirB)).toBe(port);
+
+        // Gateway B: a SEPARATE CHILD PROCESS — see the file header on why
+        // this can never be an in-process `startGateway()` call. Deliberately
+        // `docker` (differs from A's `podman`): whichever branch below
+        // catches the collision, it is never via driver comparison — this
+        // state dir has no prior recorded driver of its own to compare
+        // against. Its own scratch XDG_CONFIG_HOME (separate from A's) keeps
+        // its own registerGatewayMetadata write off the real, shared file
+        // too.
+        const result = await spawnAndCapture(["bun", "run", CLI_PATH, "gateway", "start"], {
+          OPENLOCK_STATE_DIR: stateDirB,
+          OPENLOCK_RUNTIME: "docker",
+          XDG_CONFIG_HOME: xdgConfigHomeB,
+        });
+        const combined = `${result.stdout}\n${result.stderr}`;
+
+        // The durable, branch-independent invariant (see file header): a
+        // colliding gateway must NEVER silently succeed, on either branch.
+        expect(result.code).not.toBe(0);
+        expect(combined).not.toContain("Gateway ready");
+
+        // Observability only — NEVER a pass/fail condition. See the file
+        // header for why which branch fires depends on this machine's
+        // bind-failure speed, not on anything openlock or this test
+        // controls.
+        const specificBranch = combined.includes("Refusing to adopt it");
+        console.log(
+          specificBranch
+            ? "openlock-tv6u: observed k5j2's specific foreign-adoption branch (refuseForeignGatewayAdoption)"
+            : "openlock-tv6u: observed the generic pre-k5j2 'gateway exited unexpectedly' branch — " +
+                "still a correct refusal, just not k5j2's attribution path (see file header)",
+        );
+
+        if (specificBranch) {
+          // formatForeignGatewayAdoptionError's exact wording (ensure-gateway.ts).
+          expect(combined).toContain(`127.0.0.1:${port}`);
+          expect(combined).toContain("DIFFERENT gateway");
+          // refuseForeignGatewayAdoption's cleanup: the pid/driver/port files
+          // startGateway() wrote for its own doomed child must not describe a
+          // gateway that never actually started. NOT asserted on the generic
+          // branch — that branch is known (pre-existing, unrelated to k5j2)
+          // to leave these files behind; see the file header.
+          expect(existsSync(join(stateDirB, "gateway.pid"))).toBe(false);
+          expect(existsSync(join(stateDirB, "gateway.driver"))).toBe(false);
+          expect(existsSync(join(stateDirB, "gateway.port"))).toBe(false);
+        }
+
+        // Gateway A must be completely unaffected by B's attempt: same pid,
+        // still actually the one answering on the port.
+        expect(readPidFile(stateDirA)).toBe(gatewayAPid);
+        const probe = await fetch(`http://localhost:${port}/`).catch(() => null);
+        expect(probe).not.toBeNull();
       } finally {
-        if (savedStateDir === undefined) delete process.env.OPENLOCK_STATE_DIR;
-        else process.env.OPENLOCK_STATE_DIR = savedStateDir;
-        if (savedRuntime === undefined) delete process.env.OPENLOCK_RUNTIME;
-        else process.env.OPENLOCK_RUNTIME = savedRuntime;
+        // Regression guard for the exact failure this test once caused on a
+        // real machine (see the SAFETY section): the real, shared gateway
+        // registry must be byte-identical to what it was before this test
+        // ran — unchanged if it existed, still absent if it didn't. Placed
+        // in `finally` so it runs even when an assertion above already
+        // failed, per the same "always verify" discipline as the
+        // `afterEach` cleanup.
+        const realRegistryAfter = readFileOrNull(realRegistryPath);
+        expect(realRegistryAfter).toBe(realRegistryBefore);
       }
-      const gatewayAPid = readPidFile(stateDirA);
-      expect(gatewayAPid).not.toBeNull();
-
-      const stateDirB = findCollidingStateDir(scratchRoot, port, stateDirA);
-      expect(resolveGatewayPort(stateDirB)).toBe(port);
-
-      // Gateway B: a SEPARATE CHILD PROCESS — see the file header on why
-      // this can never be an in-process `startGateway()` call. Deliberately
-      // `docker` (differs from A's `podman`): whichever branch below catches
-      // the collision, it is never via driver comparison — this state dir
-      // has no prior recorded driver of its own to compare against.
-      const result = await spawnAndCapture(["bun", "run", CLI_PATH, "gateway", "start"], {
-        OPENLOCK_STATE_DIR: stateDirB,
-        OPENLOCK_RUNTIME: "docker",
-      });
-      const combined = `${result.stdout}\n${result.stderr}`;
-
-      // The durable, branch-independent invariant (see file header): a
-      // colliding gateway must NEVER silently succeed, on either branch.
-      expect(result.code).not.toBe(0);
-      expect(combined).not.toContain("Gateway ready");
-
-      // Observability only — NEVER a pass/fail condition. See the file
-      // header for why which branch fires depends on this machine's
-      // bind-failure speed, not on anything openlock or this test controls.
-      const specificBranch = combined.includes("Refusing to adopt it");
-      console.log(
-        specificBranch
-          ? "openlock-tv6u: observed k5j2's specific foreign-adoption branch (refuseForeignGatewayAdoption)"
-          : "openlock-tv6u: observed the generic pre-k5j2 'gateway exited unexpectedly' branch — " +
-              "still a correct refusal, just not k5j2's attribution path (see file header)",
-      );
-
-      if (specificBranch) {
-        // formatForeignGatewayAdoptionError's exact wording (ensure-gateway.ts).
-        expect(combined).toContain(`127.0.0.1:${port}`);
-        expect(combined).toContain("DIFFERENT gateway");
-        // refuseForeignGatewayAdoption's cleanup: the pid/driver/port files
-        // startGateway() wrote for its own doomed child must not describe a
-        // gateway that never actually started. NOT asserted on the generic
-        // branch — that branch is known (pre-existing, unrelated to k5j2)
-        // to leave these files behind; see the file header.
-        expect(existsSync(join(stateDirB, "gateway.pid"))).toBe(false);
-        expect(existsSync(join(stateDirB, "gateway.driver"))).toBe(false);
-        expect(existsSync(join(stateDirB, "gateway.port"))).toBe(false);
-      }
-
-      // Gateway A must be completely unaffected by B's attempt: same pid,
-      // still actually the one answering on the port.
-      expect(readPidFile(stateDirA)).toBe(gatewayAPid);
-      const probe = await fetch(`http://localhost:${port}/`).catch(() => null);
-      expect(probe).not.toBeNull();
     },
     300_000,
   );
