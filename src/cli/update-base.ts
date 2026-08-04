@@ -1,22 +1,26 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import { computeBaseTag, GHCR_BASE_PREFIX } from "../sandbox/ensure-base";
 import { BASE_CONTAINERFILE } from "../sandbox/image-build";
 import { updateContainerfile } from "../sandbox/update-containerfile";
+import { printCmdHelp } from "./_help";
+
+export const flagSchema = {
+  project: { type: "string", default: process.cwd() },
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
 
 export async function updateBaseCmd(argv: string[]): Promise<number> {
   const { values } = parseArgs({
     args: argv,
-    options: {
-      project: { type: "string", default: process.cwd() },
-      help: { type: "boolean", short: "h" },
-    },
+    options: flagSchema,
     allowPositionals: false,
   });
 
   if (values.help) {
-    console.log("Usage: openlock update-base [--project DIR]");
+    printCmdHelp("update-base", flagSchema, "[--project DIR]");
     return 0;
   }
 

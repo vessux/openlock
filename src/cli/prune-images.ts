@@ -1,8 +1,16 @@
+import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import { type Runtime, resolveRuntime } from "../runtime";
 import { computeBaseTag } from "../sandbox/ensure-base";
 import { BASE_CONTAINERFILE } from "../sandbox/image-build";
 import { defaultListTags, defaultRemove, pruneImages } from "../sandbox/prune-images";
+import { printCmdHelp } from "./_help";
+
+export const flagSchema = {
+  legacy: { type: "boolean", default: false },
+  "dry-run": { type: "boolean", default: false },
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
 
 async function listInUseImages(runtime: Runtime): Promise<Set<string>> {
   const proc = Bun.spawn([runtime, "ps", "-a", "--format", "{{.Image}}"], {
@@ -22,20 +30,12 @@ async function listInUseImages(runtime: Runtime): Promise<Set<string>> {
 export async function pruneImagesCmd(argv: string[]): Promise<number> {
   const { values } = parseArgs({
     args: argv,
-    options: {
-      legacy: { type: "boolean", default: false },
-      "dry-run": { type: "boolean", default: false },
-      help: { type: "boolean", short: "h" },
-    },
+    options: flagSchema,
     allowPositionals: false,
   });
 
   if (values.help) {
-    console.log(
-      "Usage: openlock prune-images [--legacy] [--dry-run]\n" +
-        "  --legacy    remove pre-M5 images (openlock-core* prefix)\n" +
-        "  --dry-run   print what would be removed, don't remove\n",
-    );
+    printCmdHelp("prune-images", flagSchema, "[--legacy] [--dry-run]");
     return 0;
   }
 

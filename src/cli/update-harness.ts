@@ -1,11 +1,18 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ParseArgsOptionsConfig } from "node:util";
 import { parseArgs } from "node:util";
 import type { Harness } from "../sandbox/harness";
 import type { FetchDistTags } from "../sandbox/resolve-harness-version";
 import { resolveHarnessVersion } from "../sandbox/resolve-harness-version";
 import { HARNESS_SENTINEL } from "../sandbox/update-containerfile";
 import { harnessesPresentIn, updateHarnessVersions } from "../sandbox/update-harness-versions";
+import { printCmdHelp } from "./_help";
+
+export const flagSchema = {
+  project: { type: "string", default: process.cwd() },
+  help: { type: "boolean", short: "h" },
+} as const satisfies ParseArgsOptionsConfig;
 
 export interface UpdateHarnessCmdDeps {
   fetchDistTags?: FetchDistTags;
@@ -53,15 +60,12 @@ export async function updateHarnessCmd(
 ): Promise<number> {
   const { values } = parseArgs({
     args: argv,
-    options: {
-      project: { type: "string", default: process.cwd() },
-      help: { type: "boolean", short: "h" },
-    },
+    options: flagSchema,
     allowPositionals: false,
   });
 
   if (values.help) {
-    console.log("Usage: openlock update-harness [--project DIR]");
+    printCmdHelp("update-harness", flagSchema, "[--project DIR]");
     return 0;
   }
 
