@@ -136,13 +136,30 @@ export async function stopSession(name: string): Promise<void> {
 }
 
 export interface GatewaySelfHealDeps {
-  /** Defaults to resolveRuntimeNonInteractive. Overridable for testing the
-   * no-configured-runtime local-only path without touching real binaries. */
-  resolveRuntime?: () => Promise<Runtime | null>;
-  /** Defaults to startGateway. Overridable for testing the self-heal branch
-   * without spawning a real gateway process. */
-  startGateway?: () => Promise<void>;
+  /** Real: resolveRuntimeNonInteractive. Fake in tests for the
+   * no-configured-runtime local-only path without touching real binaries.
+   * REQUIRED — no optional-with-a-real-default here (openlock-k5j2 /
+   * feedback_no_optional_live_state_deps): an optional default previously
+   * let a forgotten test override reach real state undetected and cost this
+   * project an unrecoverable credential. Making it required means the type
+   * checker catches the omission instead of a test silently touching the
+   * real gateway/providers. Production call sites use
+   * REAL_GATEWAY_SELF_HEAL_DEPS below rather than repeating the wiring. */
+  resolveRuntime: () => Promise<Runtime | null>;
+  /** Real: startGateway. Fake in tests for the self-heal branch without
+   * spawning a real gateway process. REQUIRED, same reasoning as
+   * resolveRuntime above. */
+  startGateway: () => Promise<void>;
 }
+
+/** Production wiring for GatewaySelfHealDeps (openlock-k5j2). Single source
+ * of truth for "what the real dependencies are," so call sites needing the
+ * real behavior reference this constant rather than each re-listing the
+ * same two functions (and risking drift between them). */
+export const REAL_GATEWAY_SELF_HEAL_DEPS: GatewaySelfHealDeps = {
+  resolveRuntime: resolveRuntimeNonInteractive,
+  startGateway,
+};
 
 /**
  * Self-heal the gateway (openlock-kx8, ab6 follow-up): several ops
@@ -169,13 +186,11 @@ export interface GatewaySelfHealDeps {
  * same risk profile, one implementation so the two can't drift apart.
  */
 export async function selfHealGatewayIfRuntimeConfigured(
-  deps: GatewaySelfHealDeps = {},
+  deps: GatewaySelfHealDeps,
 ): Promise<Runtime | null> {
-  const resolveRuntime = deps.resolveRuntime ?? resolveRuntimeNonInteractive;
-  const bringUpGateway = deps.startGateway ?? startGateway;
-  const runtime = await resolveRuntime();
+  const runtime = await deps.resolveRuntime();
   if (runtime !== null) {
-    await bringUpGateway();
+    await deps.startGateway();
   }
   return runtime;
 }
@@ -186,21 +201,30 @@ export interface CleanOpts {
 }
 
 export interface CleanDeps extends GatewaySelfHealDeps {
-  /** Defaults to deleteSandbox (container.ts). Overridable so tests can
-   * assert the local-only/self-heal branching without a real openshell/
-   * gateway round trip. */
-  deleteSandbox?: (name: string) => Promise<void>;
+  /** Real: deleteSandbox (container.ts). Fake in tests so they can assert
+   * the local-only/self-heal branching without a real openshell/gateway
+   * round trip. REQUIRED, same reasoning as GatewaySelfHealDeps' fields
+   * (openlock-k5j2 / feedback_no_optional_live_state_deps). */
+  deleteSandbox: (name: string) => Promise<void>;
 }
+
+/** Production wiring for CleanDeps (openlock-k5j2) — see
+ * REAL_GATEWAY_SELF_HEAL_DEPS above for why this exists as a named
+ * constant rather than each call site re-listing the same three functions. */
+export const REAL_CLEAN_DEPS: CleanDeps = {
+  ...REAL_GATEWAY_SELF_HEAL_DEPS,
+  deleteSandbox,
+};
 
 export async function cleanSession(
   name: string,
   opts: CleanOpts = {},
-  deps: CleanDeps = {},
+  deps: CleanDeps,
 ): Promise<void> {
   const m = await loadSessionByName(name);
   if (!m) throw new Error(`no such session: ${name}`);
   const containerName = m.name;
-  const tearDown = deps.deleteSandbox ?? deleteSandbox;
+  const tearDown = deps.deleteSandbox;
 
   const runtime = await selfHealGatewayIfRuntimeConfigured(deps);
   if (runtime === null) {

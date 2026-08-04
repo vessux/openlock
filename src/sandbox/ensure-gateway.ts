@@ -99,6 +99,17 @@ export function readGatewayRssKb(pid: number): number | null {
   return Number.isNaN(kb) ? null : kb;
 }
 
+// KNOWN GAP, noted not fixed here (openlock-k5j2 spike, to be filed
+// separately): the ONLY liveness signal below is `pidAlive(pid)` — a
+// gateway process that is alive but has somehow lost its listening socket
+// (crashed accept loop, killed and replaced by an unrelated process that
+// reused the pid, etc.) still reports `running: true` here, and every
+// downstream sandbox operation then fails against a gateway this function
+// swears is healthy. `startGateway`'s new post-spawn checks (below) close
+// the "silently adopted a FOREIGN gateway" half of this defect family;
+// they do not close this "silently trusts a dead-but-pid-alive gateway"
+// half, since that requires gatewayStatus() itself to probe the socket
+// (today it never touches GATEWAY_PORT at all).
 export function gatewayStatus(): GatewayStatus {
   const pid = readPid();
   if (pid === null) return { running: false, pid: null };
@@ -116,6 +127,56 @@ export function gatewayStatus(): GatewayStatus {
   }
   const driver = readRunningDriver();
   return { running: true, pid, rssKb, uptimeMs, driver };
+}
+
+/**
+ * Pids holding the LISTEN socket on `port` (openlock-k5j2). Deliberately
+ * NOT `lsof -ti :<port>` — that flag combination returns the listener AND
+ * every connected CLIENT of that port. Verified against a real running
+ * gateway: `lsof -ti :18081` returned three pids, of which only one was
+ * actually the gateway (the other two were connected clients) — comparing
+ * against just the first line of that output would false-positive a
+ * mismatch against a perfectly healthy gateway. `-sTCP:LISTEN` restricts
+ * the match to the actual listening socket; `-nP` skips DNS/service-name
+ * lookups (irrelevant here, but avoids surprising hangs on a broken
+ * resolver). Callers MUST compare by set membership, never index-0
+ * equality.
+ *
+ * Returns `null` when the probe itself couldn't run (e.g. `lsof` missing —
+ * this is the COMMON case on the project's own ubuntu-24.04 CI runner,
+ * not confirmed present there) — that means "inconclusive," never "nothing
+ * is listening." An empty (non-null) array is a real, meaningful "nothing
+ * is listening on this port right now," distinct from "couldn't tell."
+ * Every caller must treat `null` as "skip this check," not as evidence of
+ * either a match or a mismatch — same discipline as `readRunningDriver`.
+ */
+export function getListeningPids(
+  port: number,
+  probe: (port: number) => number[] | null = realLsofListenProbe,
+): number[] | null {
+  return probe(port);
+}
+
+function realLsofListenProbe(port: number): number[] | null {
+  let proc: ReturnType<typeof Bun.spawnSync>;
+  try {
+    proc = Bun.spawnSync(["lsof", "-t", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch {
+    return null; // lsof not on PATH (or failed to spawn at all)
+  }
+  // lsof exits 1 when nothing matches the filter — that IS a real "no
+  // listener" result, not a probe failure, so it must not fold into null
+  // alongside genuine spawn/exec failures (any other non-zero exit).
+  if (proc.exitCode !== 0 && proc.exitCode !== 1) return null;
+  const out = new TextDecoder().decode(proc.stdout).trim();
+  if (out.length === 0) return [];
+  return out
+    .split("\n")
+    .map((line) => parseInt(line.trim(), 10))
+    .filter((n) => !Number.isNaN(n));
 }
 
 function registerGatewayMetadata(): void {
@@ -360,10 +421,138 @@ export function formatGatewayDriverMismatchError(
   );
 }
 
+/**
+ * Message for openlock-k5j2's actual exhibited bug: a gateway answered THIS
+ * invocation's readiness probe, but concrete evidence (our own spawned
+ * child no longer alive, or the port's real LISTEN-socket owner excluding
+ * our child's pid) shows it isn't the process we just started.
+ *
+ * Deliberately a DIFFERENT message from formatGatewayDriverMismatchError:
+ * that one means "MY OWN previously-recorded gateway (this state dir's own
+ * PID_FILE/DRIVER_FILE) has a different driver than now requested," and
+ * its remedy (`openlock gateway stop`) is correct there, because this
+ * state dir genuinely owns that gateway. Here, this invocation never owned
+ * anything on the port at all — telling the user to stop "their" gateway
+ * would point at state they may not even be able to reach (e.g. a
+ * different $HOME's gateway holding the port).
+ */
+export function formatForeignGatewayAdoptionError(port: number, detail: string): string {
+  return (
+    `Gateway did not start: ${detail}, but 127.0.0.1:${port} is answering anyway — that is a ` +
+    `DIFFERENT gateway this invocation does not own (a different $HOME, or another instance ` +
+    `already holding the port). Refusing to adopt it.`
+  );
+}
+
+export type ReadinessOutcome =
+  | "not-ready"
+  | "ready"
+  | "foreign-dead-child"
+  | "foreign-lsof-mismatch";
+
+/**
+ * Pure decision for one readiness-loop iteration (openlock-k5j2). Extracted
+ * so the exact race this bug hinges on — `fetchOk: true, childAlive:
+ * false` — is exhaustively unit tested without spawning a real gateway
+ * process. Mirrors this file's `classifyProcNetTcpBind`: a pure classifier
+ * fed by real-but-injected probe results, called from the actual I/O loop
+ * in `startGateway`.
+ *
+ * - "not-ready": the HTTP probe itself didn't succeed this iteration — keep
+ *   looping, no identity question arises yet.
+ * - "foreign-dead-child": the probe succeeded, but our own spawned child
+ *   (`gwPid`) is no longer alive. A responding probe therefore did NOT come
+ *   from our child — some OTHER process already held the port. This is the
+ *   exhibited bug: a bind failure on an already-occupied port lets a
+ *   pre-existing, foreign gateway answer the readiness fetch while our own
+ *   child silently died in the interval between this iteration's earlier
+ *   liveness check and the fetch resolving.
+ * - "foreign-lsof-mismatch": the child IS alive, but `listeningPids` (when
+ *   available) doesn't include it — the child is running yet not bound to
+ *   the port, so something else is answering instead. `listeningPids:
+ *   null` (lsof unavailable — the common case on the project's own CI
+ *   runner) can never produce this outcome; an inconclusive probe must not
+ *   be able to fail a healthy start.
+ * - "ready": the child is alive, and either lsof confirms it owns the
+ *   listening socket or the probe was inconclusive.
+ */
+export function classifyReadinessOutcome(input: {
+  fetchOk: boolean;
+  childAlive: boolean;
+  gwPid: number;
+  listeningPids: number[] | null;
+}): ReadinessOutcome {
+  if (!input.fetchOk) return "not-ready";
+  if (!input.childAlive) return "foreign-dead-child";
+  if (input.listeningPids !== null && !input.listeningPids.includes(input.gwPid)) {
+    return "foreign-lsof-mismatch";
+  }
+  return "ready";
+}
+
+/**
+ * openlock-k5j2: warn-only strengthening signal for `startGateway`'s
+ * already-running branch. This branch is what every real user hits on
+ * every `gateway start`/`sandbox create` once a gateway is already up, so
+ * an inconclusive OR even a genuinely stale probe must never brick a
+ * working gateway. Contrast with `refuseForeignGatewayAdoption` below: that
+ * one fires post-spawn, where THIS SAME invocation just watched its own
+ * child die (or fail to own the socket) with its own eyes — an unambiguous
+ * signal. Here we're only cross-checking a locally-recorded pid number
+ * against a point-in-time lsof snapshot — real but weaker evidence, and
+ * `lsof` is not confirmed present on the project's own ubuntu-24.04 CI
+ * runner, so `null` is the COMMON case there, not the exception. Extracted
+ * out of `startGateway` to keep its cognitive complexity in bounds.
+ */
+function warnIfRecordedGatewayPidMismatch(pid: number, port: number): void {
+  const listeningPids = getListeningPids(port);
+  if (listeningPids === null || listeningPids.includes(pid)) return;
+  console.warn(
+    `Warning: pid ${pid} is recorded as the gateway, but 127.0.0.1:${port}'s actual listener is ` +
+      `pid(s) ${listeningPids.join(", ") || "(none)"} — the recorded pid may be stale (pid reuse) ` +
+      `or a different gateway holds the port now. Proceeding, since the recorded gateway otherwise ` +
+      `looks alive; run \`openlock gateway stop\` then \`openlock gateway start\` if sandbox ` +
+      `operations start failing.`,
+  );
+}
+
+/**
+ * Cleans up the PID/DRIVER files this invocation just wrote (they describe
+ * a dead/foreign gateway now, not a usable one) and exits with a message
+ * distinguishing the two foreign-adoption outcomes (openlock-k5j2). Never
+ * returns. Extracted out of `startGateway` to keep its cognitive complexity
+ * in bounds — see `classifyReadinessOutcome`'s docs for why each outcome is
+ * unambiguous evidence, unlike the warn-only already-running-branch check
+ * above.
+ */
+function refuseForeignGatewayAdoption(
+  outcome: "foreign-dead-child" | "foreign-lsof-mismatch",
+  gwPid: number,
+  port: number,
+  listeningPids: number[] | null,
+): never {
+  if (existsSync(PID_FILE)) unlinkSync(PID_FILE);
+  if (existsSync(DRIVER_FILE)) unlinkSync(DRIVER_FILE);
+  const detail =
+    outcome === "foreign-dead-child"
+      ? `pid ${gwPid} exited (commonly "address already in use")`
+      : `pid ${gwPid} is alive but the port's listener is pid(s) ` +
+        `${listeningPids?.join(", ") || "(none)"}`;
+  console.error(formatForeignGatewayAdoptionError(port, detail));
+  if (outcome === "foreign-dead-child") console.error(`Check log: ${LOG_FILE}`);
+  process.exit(1);
+}
+
+// No test-only port-override seam exists for this function on purpose —
+// see the file-level comment at the top of ensure-gateway.test.ts for the
+// constraint a future live-gateway test must follow instead (thread the
+// port as a required parameter of its own; never default to GATEWAY_PORT).
 export async function startGateway(): Promise<void> {
   const runtime = await resolveRuntime();
   const { running, pid, driver } = gatewayStatus();
   if (running) {
+    if (pid !== null) warnIfRecordedGatewayPidMismatch(pid, GATEWAY_PORT);
+
     const mismatchedDriver = findGatewayDriverMismatch(runtime, driver);
     if (mismatchedDriver !== null) {
       console.error(formatGatewayDriverMismatchError(runtime, mismatchedDriver));
@@ -399,6 +588,7 @@ export async function startGateway(): Promise<void> {
   });
 
   const dbPath = join(STATE_DIR, "gateway.db");
+  const port = GATEWAY_PORT;
   const args = [
     gatewayBin,
     "--config",
@@ -407,7 +597,7 @@ export async function startGateway(): Promise<void> {
     runtime,
     "--disable-tls",
     "--port",
-    String(GATEWAY_PORT),
+    String(port),
     "--db-url",
     `sqlite:${dbPath}?mode=rwc`,
     // On Linux, rootless podman containers see `host.containers.internal` as
@@ -425,6 +615,16 @@ export async function startGateway(): Promise<void> {
   writeFileSync(DRIVER_FILE, runtime);
   console.log(`Gateway starting (pid ${gwPid}), log: ${LOG_FILE}`);
 
+  await waitForGatewayReady(gwPid, port);
+}
+
+/**
+ * Polls until the just-spawned `gwPid` is confirmed ready, or exits the
+ * process on any failure/timeout/foreign-adoption outcome. Never returns
+ * except on success. Extracted out of `startGateway` to keep its cognitive
+ * complexity in bounds.
+ */
+async function waitForGatewayReady(gwPid: number, port: number): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     await Bun.sleep(1000);
@@ -436,15 +636,57 @@ export async function startGateway(): Promise<void> {
       process.exit(1);
     }
     try {
-      await fetch(`http://localhost:${GATEWAY_PORT}/`, { signal: AbortSignal.timeout(1000) });
-      console.log("Gateway ready.");
-      warnIfGatewayLoopbackOnly(GATEWAY_PORT, process.platform);
-      return;
-    } catch {}
+      // NOTE (openlock-k5j2): probing `/` — as opposed to a real health
+      // endpoint — is INTENTIONAL and must stay exactly as-is. Verified
+      // empirically against the actual running gateway binary this project
+      // ships (pinned fork release, `openshell-gateway`): `/`, `/health`,
+      // `/healthz`, `/readyz`, `/livez`, and `/v1/health` ALL return 404
+      // with an empty body. This port speaks gRPC, not a health-checkable
+      // HTTP API, on the binary openlock actually runs. This fetch only
+      // needs to prove SOMETHING is bound and answering HTTP at all — a
+      // 404 is success. DO NOT "fix" this into a `/health`/`/readyz` check
+      // — that would make every `gateway start` time out after 30s on
+      // every machine, every time.
+      await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(1000) });
+    } catch {
+      continue;
+    }
+
+    const outcome = classifyPostFetchOutcome(gwPid, port);
+    if (outcome.outcome === "foreign-dead-child" || outcome.outcome === "foreign-lsof-mismatch") {
+      refuseForeignGatewayAdoption(outcome.outcome, gwPid, port, outcome.listeningPids);
+    }
+
+    console.log("Gateway ready.");
+    warnIfGatewayLoopbackOnly(port, process.platform);
+    return;
   }
   console.error("Gateway did not become ready within 30s.");
   console.error(`Check log: ${LOG_FILE}`);
   process.exit(1);
+}
+
+/**
+ * A responding `/` does NOT by itself prove gwPid served it — re-check
+ * gwPid's own liveness AFTER the fetch resolved, not the check from the top
+ * of the CALLER's SAME loop iteration: a bind-failure race can kill gwPid
+ * in the interval between that earlier check and the fetch settling. See
+ * `classifyReadinessOutcome`'s docs for the full reasoning; this re-check
+ * is the fix for openlock-k5j2's exhibited bug and needs no external tool,
+ * so it is guaranteed to run on every platform, including CI. Extracted out
+ * of `waitForGatewayReady` to keep its cognitive complexity in bounds.
+ */
+function classifyPostFetchOutcome(
+  gwPid: number,
+  port: number,
+): { outcome: ReadinessOutcome; listeningPids: number[] | null } {
+  const childAlive = pidAlive(gwPid);
+  // lsof strengthening check only when the child is alive — if it's already
+  // dead, "foreign-dead-child" fires regardless, so there's nothing to gain
+  // from spawning lsof first.
+  const listeningPids = childAlive ? getListeningPids(port) : null;
+  const outcome = classifyReadinessOutcome({ fetchOk: true, childAlive, gwPid, listeningPids });
+  return { outcome, listeningPids };
 }
 
 // ============================================================================
