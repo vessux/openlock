@@ -8,7 +8,7 @@
 // Gated behind OPENLOCK_LIVE_INTEGRATION=1 (same rationale as
 // harness-cred-inject.test.ts: needs podman + image build + gateway).
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,12 +60,50 @@ async function gitInit(dir: string): Promise<void> {
   if (commit.code !== 0) throw new Error(`git commit failed: ${commit.stderr}`);
 }
 
+/**
+ * True when `sandbox delete` failed only because the sandbox doesn't exist
+ * — a harmless "nothing to clean up" outcome (e.g. the test died before
+ * ever creating one), not a leak. Matches the literal stderr text from a
+ * verified live probe against the real gateway (2026-08-05): `openshell
+ * sandbox delete <nonexistent>` exits 1 with stderr `Error:   × code: 'Some
+ * requested entity was not found', message: "sandbox not found"`. A
+ * sandbox that still EXISTS and can't be removed (the real leak signature
+ * — e.g. "attached to sandbox(es)") does not match this and stays loud.
+ * (Contrast `provider delete` on a nonexistent name, which is already exit
+ * 0 — no matcher needed there.)
+ */
+function isSandboxNotFoundError(stderr: string): boolean {
+  return stderr.includes("sandbox not found");
+}
+
 describe("npm scoped packages via default-js policy", () => {
+  // openlock-18c: see harness-binary-cred-inject.test.ts for the full
+  // mechanism writeup (bun test timeout runs afterEach/afterAll but not an
+  // in-body try/finally). Also fixes the same second bug as its siblings:
+  // `removeContainer` did a raw `podman rm -f`, never `sandbox delete`,
+  // leaving the gateway's own sandbox record behind even on a clean run.
+  // No provider is created in this test, so only the sandbox is registered.
+  // NOT a prefix sweep — only the exact name this run registers is ever
+  // deleted; this suite runs against the real dev gateway.
+  let registeredSandbox: string | null = null;
+
+  afterAll(async () => {
+    if (registeredSandbox === null) return;
+    const cli = await getCliInvocation();
+    const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", registeredSandbox], cli.cwd);
+    if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
+      throw new Error(
+        `openlock-18c: gateway teardown left leaked state behind: sandbox delete ` +
+          `${registeredSandbox} failed (exit ${r.code}): ${r.stderr}`,
+      );
+    }
+  });
+
   it.skipIf(!LIVE)(
     "fetch of @scope%2Fname is allowed (allow_encoded_slash: true on npm endpoint)",
     async () => {
       const sessionName = `ol-npm-${Date.now().toString(36)}`;
-      const containerName = `openshell-sandbox-${sessionName}`;
+      registeredSandbox = sessionName;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-isb-"));
       const repoDir = join(tmp, "repo");
       mkdirSync(repoDir);
@@ -80,14 +118,6 @@ describe("npm scoped packages via default-js policy", () => {
 
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
-      const removeContainer = async (): Promise<void> => {
-        await spawnAndCapture([
-          process.env.OPENLOCK_RUNTIME ?? "podman",
-          "rm",
-          "-f",
-          containerName,
-        ]);
-      };
 
       try {
         await startGateway();
@@ -129,7 +159,9 @@ describe("npm scoped packages via default-js policy", () => {
         // npm view prints just the version string on stdout.
         expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);
       } finally {
-        await removeContainer();
+        // Gateway-side sandbox cleanup lives in the describe's `afterAll`
+        // above, which survives a timeout this `finally` would not — see
+        // openlock-18c comment there.
         rmSync(tmp, { recursive: true, force: true });
       }
     },

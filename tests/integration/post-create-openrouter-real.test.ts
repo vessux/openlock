@@ -12,7 +12,7 @@
 //
 // CI never runs this — no real key in CI secrets. Local-only.
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -103,12 +103,96 @@ async function waitForSandboxReady(
   throw new Error(`sandbox ${sessionName} did not reach Ready state within ${timeoutMs}ms`);
 }
 
+/** Best-effort reap of the detached `sandbox create` child (openlock-18c) —
+ * split out of `afterAll` purely to keep that hook's cognitive complexity
+ * under biome's limit. Tolerates the process already being dead. */
+async function reapLiveProc(proc: ReturnType<typeof Bun.spawn> | null): Promise<void> {
+  if (proc === null) return;
+  try {
+    proc.kill();
+    await proc.exited;
+  } catch {
+    // Already dead — fine.
+  }
+}
+
+/**
+ * True when `sandbox delete` failed only because the sandbox doesn't exist
+ * — a harmless "nothing to clean up" outcome (e.g. the test died before
+ * ever creating one), not a leak. Matches the literal stderr text from a
+ * verified live probe against the real gateway (2026-08-05): `openshell
+ * sandbox delete <nonexistent>` exits 1 with stderr `Error:   × code: 'Some
+ * requested entity was not found', message: "sandbox not found"`. A
+ * sandbox that still EXISTS and can't be removed (the real leak signature
+ * — e.g. "attached to sandbox(es)") does not match this and stays loud.
+ * (Contrast `provider delete` on a nonexistent name, which is already exit
+ * 0 — no matcher needed there.)
+ */
+function isSandboxNotFoundError(stderr: string): boolean {
+  return stderr.includes("sandbox not found");
+}
+
+/**
+ * Strict, loud gateway-side teardown (openlock-18c): deletes only the exact
+ * sandbox/provider names THIS run registered — never a prefix sweep, since
+ * this suite runs against the real dev gateway — sandbox-before-provider
+ * (a provider still "attached to sandbox(es)" refuses deletion), and throws
+ * on any failure instead of discarding it. Split out of `afterAll` purely to
+ * keep that hook's cognitive complexity under biome's limit.
+ */
+async function teardownGatewayState(
+  cli: { argv: string[]; cwd: string | undefined },
+  sandboxName: string | null,
+  providerName: string | null,
+): Promise<void> {
+  const errors: string[] = [];
+  if (sandboxName !== null) {
+    const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", sandboxName], cli.cwd);
+    if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
+      errors.push(`sandbox delete ${sandboxName} failed (exit ${r.code}): ${r.stderr}`);
+    }
+  }
+  if (providerName !== null) {
+    const r = await spawnAndCapture([...cli.argv, "provider", "delete", providerName], cli.cwd);
+    if (r.code !== 0) {
+      errors.push(`provider delete ${providerName} failed (exit ${r.code}): ${r.stderr}`);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(
+      `openlock-18c: gateway teardown left leaked state behind:\n${errors.join("\n")}`,
+    );
+  }
+}
+
 describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)", () => {
+  // openlock-18c: see harness-binary-cred-inject.test.ts for the full
+  // mechanism writeup (bun test timeout runs afterEach/afterAll but not an
+  // in-body try/finally). Also fixes the same second bug as its siblings:
+  // `removeContainer` did a raw `podman rm -f`, never `sandbox delete`,
+  // leaving the gateway's own sandbox record behind even on a clean run.
+  // Additionally tracks the detached `sandbox create` (foreground "sleep
+  // infinity") child process — see post-create-exec-proxy.test.ts for why.
+  // NOT a prefix sweep — only the exact name(s) this run registers are ever
+  // deleted; this suite runs against the real dev gateway.
+  let registeredSandbox: string | null = null;
+  let registeredProvider: string | null = null;
+  let liveCreateProc: ReturnType<typeof Bun.spawn> | null = null;
+
+  afterAll(async () => {
+    await reapLiveProc(liveCreateProc);
+    liveCreateProc = null;
+    if (registeredSandbox === null && registeredProvider === null) return;
+    const cli = await getCliInvocation();
+    await teardownGatewayState(cli, registeredSandbox, registeredProvider);
+  });
+
   it.skipIf(!LIVE || BEARER === null)(
     "openrouter.ai accepts the cred_inject-rewritten Bearer and responds at API level",
     async () => {
       const sessionName = `ol-orr-${Date.now().toString(36)}`;
-      const containerName = `openshell-sandbox-${sessionName}`;
+      registeredSandbox = sessionName;
+      registeredProvider = PROVIDER_NAME;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-or-real-"));
       const repoDir = join(tmp, "repo");
       mkdirSync(repoDir);
@@ -121,15 +205,9 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
       const removeProvider = async (): Promise<void> => {
+        // Best-effort, pre-create only (may not exist yet). The `afterAll`
+        // teardown above is the strict path.
         await spawnAndCapture([...argvHead, "provider", "delete", PROVIDER_NAME], cli.cwd);
-      };
-      const removeContainer = async (): Promise<void> => {
-        await spawnAndCapture([
-          process.env.OPENLOCK_RUNTIME ?? "podman",
-          "rm",
-          "-f",
-          containerName,
-        ]);
       };
 
       try {
@@ -188,6 +266,10 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
           stdout: "ignore",
           stderr: "ignore",
         });
+        // Registered for afterAll (openlock-18c) — see
+        // post-create-exec-proxy.test.ts for why a timeout must still be
+        // able to reap this.
+        liveCreateProc = createProc;
         await waitForSandboxReady(argvHead, cli.cwd, sessionName);
 
         // POST a tiny inference request to OpenRouter through the new exec
@@ -254,9 +336,11 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
         createProc.kill();
         // Reap to free supervisor + gateway slot for sibling tests.
         await createProc.exited;
+        liveCreateProc = null;
       } finally {
-        await removeContainer();
-        await removeProvider();
+        // Gateway-side cleanup (createProc, sandbox, provider) lives in the
+        // describe's `afterAll` above, which survives a timeout this
+        // `finally` would not — see openlock-18c comment there.
         rmSync(tmp, { recursive: true, force: true });
       }
     },

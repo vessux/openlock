@@ -27,7 +27,7 @@
 //     telemetry / update / model-list calls that get denied by the
 //     restrictive policy — denials are expected and ignored).
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -61,6 +61,63 @@ async function spawnAndCapture(
   return { code, stdout, stderr };
 }
 
+/**
+ * True when `sandbox delete` failed only because the sandbox doesn't exist
+ * — a harmless "nothing to clean up" outcome (e.g. the test died before
+ * ever creating one), not a leak. Matches the literal stderr text from a
+ * verified live probe against the real gateway (2026-08-05): `openshell
+ * sandbox delete <nonexistent>` exits 1 with stderr `Error:   × code: 'Some
+ * requested entity was not found', message: "sandbox not found"`. A
+ * sandbox that still EXISTS and can't be removed (the real leak signature
+ * — e.g. "attached to sandbox(es)") does not match this and stays loud.
+ * (Contrast `provider delete` on a nonexistent name, which is already exit
+ * 0 — no matcher needed there.)
+ */
+function isSandboxNotFoundError(stderr: string): boolean {
+  return stderr.includes("sandbox not found");
+}
+
+/**
+ * Strict, loud gateway-side teardown (openlock-18c): deletes only the exact
+ * sandbox/provider names THIS run registered — never a prefix sweep, since
+ * this suite runs against the real dev gateway — sandbox-before-provider (a
+ * provider still "attached to sandbox(es)" refuses deletion), and throws on
+ * any real failure instead of discarding it. A sandbox-delete that fails only
+ * because there was never one to delete (the test died before creating it)
+ * is NOT an error — see `isSandboxNotFoundError`. Split out of `afterAll`
+ * purely to keep that hook's cognitive complexity under biome's limit.
+ */
+async function teardownGatewayState(
+  cli: { argv: string[]; cwd: string | undefined },
+  sandboxName: string | null,
+  providerName: string | null,
+): Promise<void> {
+  const errors: string[] = [];
+  if (sandboxName !== null) {
+    // `sandbox delete` removes both the gateway-side record and the podman
+    // container; without it the provider stays "attached" and the next run
+    // hits AlreadyExists on create — so this must run BEFORE provider delete.
+    const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", sandboxName], cli.cwd);
+    if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
+      errors.push(`sandbox delete ${sandboxName} failed (exit ${r.code}): ${r.stderr}`);
+    }
+  }
+  if (providerName !== null) {
+    const r = await spawnAndCapture([...cli.argv, "provider", "delete", providerName], cli.cwd);
+    if (r.code !== 0) {
+      errors.push(`provider delete ${providerName} failed (exit ${r.code}): ${r.stderr}`);
+    }
+  }
+  // Loud on purpose (openlock-18c): a silently-discarded teardown failure is
+  // exactly what let leaked gateway state poison the next run. Throwing here
+  // fails the suite instead of hiding it.
+  if (errors.length > 0) {
+    throw new Error(
+      `openlock-18c: gateway teardown left leaked state behind:\n${errors.join("\n")}`,
+    );
+  }
+}
+
 async function gitInit(dir: string): Promise<void> {
   const init = await spawnAndCapture(["git", "init", "-q", "-b", "main"], dir);
   if (init.code !== 0) throw new Error(`git init failed: ${init.stderr}`);
@@ -83,11 +140,36 @@ async function gitInit(dir: string): Promise<void> {
 }
 
 describe("harness binary triggers cred_inject (live integration)", () => {
+  // openlock-18c: a bun test timeout runs afterEach/afterAll but NOT an
+  // in-body try/finally (verified empirically — see the bd issue), so the
+  // cleanup below used to live in a `finally` that a timed-out run (this
+  // test's network-dependent budget is 180s) silently skipped, leaking the
+  // sandbox and — since `openshell provider delete` refuses a provider still
+  // "attached to sandbox(es)" — the provider behind it too. Registered here
+  // (module-scoped, populated by the test body once the dynamic sandbox name
+  // is known) and torn down unconditionally in `afterAll`, sandbox-before-
+  // provider, with both results checked. NOT a prefix sweep: only the exact
+  // name(s) this run itself registers are ever deleted — this suite runs
+  // against the developer's real dev gateway.
+  let registeredSandbox: string | null = null;
+  let registeredProvider: string | null = null;
+
+  afterAll(async () => {
+    // Skip entirely (no getCliInvocation() call, which can hit the network
+    // in non-dev-mode) when the LIVE test never ran/never got far enough to
+    // register anything — the common case under plain `bun run test`.
+    if (registeredSandbox === null && registeredProvider === null) return;
+    const cli = await getCliInvocation();
+    await teardownGatewayState(cli, registeredSandbox, registeredProvider);
+  });
+
   it.skipIf(!LIVE)(
     `claude_code: /usr/local/bin/claude runs L7 echo via ${POLICY_NAME}`,
     async () => {
       const sessionName = `ol-hb-${Date.now().toString(36)}`;
       const providerName = "openlock-test-hb-claude";
+      registeredSandbox = sessionName;
+      registeredProvider = providerName;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-hb-"));
       const repoDir = join(tmp, "repo");
       mkdirSync(repoDir);
@@ -100,13 +182,9 @@ describe("harness binary triggers cred_inject (live integration)", () => {
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
       const removeProvider = async (): Promise<void> => {
+        // Best-effort, pre-create only: tolerate a non-zero exit (provider
+        // may not exist yet). The teardown path above is the strict one.
         await spawnAndCapture([...argvHead, "provider", "delete", providerName], cli.cwd);
-      };
-      const removeSandbox = async (): Promise<void> => {
-        // `sandbox delete` removes both the gateway-side record and
-        // the podman container; without it the provider stays
-        // "attached" and the next run hits AlreadyExists on create.
-        await spawnAndCapture([...argvHead, "sandbox", "delete", sessionName], cli.cwd);
       };
 
       try {
@@ -218,8 +296,10 @@ describe("harness binary triggers cred_inject (live integration)", () => {
         }
         expect(l7Hits.length).toBeGreaterThan(0);
       } finally {
-        await removeSandbox();
-        await removeProvider();
+        // Gateway-side cleanup (sandbox + provider) now lives in the
+        // describe's `afterAll` above, which survives a timeout that skips
+        // this `finally` — see openlock-18c comment there. The tmp dir is
+        // harmless either way (plain host-side scratch), so it stays here.
         rmSync(tmp, { recursive: true, force: true });
       }
     },
