@@ -4,10 +4,14 @@ import { join } from "node:path";
 import { commandExists } from "./command-exists";
 import { readGlobalConfig } from "./global-config";
 import { globalConfigPath } from "./global-config/paths";
-import { forkDir } from "./paths";
+import { forkDir, resolveStateDir } from "./paths";
 import { type BinaryProbes, RUNTIMES, type Runtime, resolveRuntimeNonInteractive } from "./runtime";
 import { detectBaseImageDrift } from "./sandbox/ensure-base";
-import { GATEWAY_PORT, gatewayStatus } from "./sandbox/ensure-gateway";
+import {
+  findGatewayPortRecordMismatch,
+  gatewayStatus,
+  readGatewayPortRecord,
+} from "./sandbox/ensure-gateway";
 import { isDevMode } from "./sandbox/fork-binaries";
 import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 import { SANDBOX_UID } from "./sandbox/seed-containerfile";
@@ -301,6 +305,41 @@ export function buildGatewayReachabilityCheck(
     {
       name: `sandbox → gateway reachability (${OPENSHELL_NETWORK_NAME} network)`,
       test: () => probe(gatewayPort, autoReloadEnabled),
+    },
+  ];
+}
+
+export const GATEWAY_PORT_RECORD_CHECK_NAME = "gateway port record";
+
+/**
+ * Surfaces a stale persisted port record (openlock-x8m8) — see
+ * `findGatewayPortRecordMismatch`'s doc for what this means and why the
+ * DERIVED value, not the record, is what's actually in effect. Gated on
+ * `gatewayRunning`: a stopped gateway leaves no live process for a
+ * mismatched record to be wrong ABOUT, so there's nothing actionable to
+ * report (and no risk of confusing a leftover file with a live one).
+ */
+export function buildGatewayPortRecordCheck(
+  gatewayRunning: boolean,
+  stateDir: string,
+  derivedPort: number,
+  readRecord: (stateDir: string) => number | undefined = readGatewayPortRecord,
+): Check[] {
+  if (!gatewayRunning) return [];
+  const recorded = readRecord(stateDir);
+  const mismatch = findGatewayPortRecordMismatch(recorded, derivedPort);
+  if (mismatch === null) return [];
+  return [
+    {
+      name: GATEWAY_PORT_RECORD_CHECK_NAME,
+      test: async () => ({
+        ok: false,
+        detail:
+          `the gateway's recorded port (${mismatch}) does not match ${derivedPort}, which this ` +
+          `state dir (${stateDir}) currently derives — it may have been relocated (or ` +
+          "OPENLOCK_STATE_DIR repointed) since the running gateway was last started.",
+        fix: "openlock gateway stop && openlock gateway start",
+      }),
     },
   ];
 }
@@ -699,14 +738,26 @@ export async function runDoctorChecks(
     readSubuid,
     process.getuid?.() === 0,
   );
+  // Called once and reused below: `.port` is the gateway port DERIVED for
+  // the currently-resolved state dir (18081 by default; a derived value for
+  // a relocated one — openlock-x8m8), which is what every check here must
+  // use instead of the historical GATEWAY_PORT constant directly.
+  const gwStatus = gatewayStatus();
   // Same principle: this probe spins up a real podman container to test
   // sandbox->gateway reachability on podman's network — meaningless (and
   // wasted work) unless podman is the runtime actually in play.
   const reachabilityChecks = buildGatewayReachabilityCheck(
     podmanIsResolved,
-    gatewayStatus().running,
-    GATEWAY_PORT,
+    gwStatus.running,
+    gwStatus.port,
     readNetworkAutoReload(),
+  );
+  // Cross-checks the persisted port record against the freshly-derived
+  // value above — see buildGatewayPortRecordCheck's doc.
+  const gatewayPortRecordChecks = buildGatewayPortRecordCheck(
+    gwStatus.running,
+    resolveStateDir(),
+    gwStatus.port,
   );
   // Absent (not an error) when projectDir isn't an openlock project at all —
   // see buildBaseImageDriftCheck's doc comment.
@@ -717,6 +768,7 @@ export async function runDoctorChecks(
     ...runtimeChecks,
     ...subuidChecks,
     ...reachabilityChecks,
+    ...gatewayPortRecordChecks,
     ...baseImageDriftChecks,
     ...(dev
       ? [

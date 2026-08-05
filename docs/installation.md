@@ -43,8 +43,9 @@ cp ~/.config/openlock/credentials.json ~/openlock-credentials.bak.json
 ```
 
 Then tear down in this order. The gateway is stopped **first and explicitly**,
-because it is a host process holding port 18081 that outlives the state
-directory it was started from:
+because it is a host process holding a port (18081 by default — see
+[State directory & gateway port](#state-directory--gateway-port) below) that
+outlives the state directory it was started from:
 
 ```bash
 openlock gateway stop
@@ -75,6 +76,31 @@ podman system df
 
 A full `podman machine rm` / `podman machine init` is only necessary when you
 suspect the VM itself, and it forces every base layer to download again.
+
+## State directory & gateway port
+
+openlock's durable state (gateway pid/log/config/database, the sandbox-JWT
+signing bundle, session metadata) lives at `~/.local/state/openlock` by
+default. Set `OPENLOCK_STATE_DIR` to relocate it — useful for running fully
+isolated openlock instances side by side (e.g. one per CI job, or a
+throwaway instance for testing) without them fighting over each other's
+state or gateway. This is a deliberately explicit, named override; openlock
+does **not** honor `XDG_STATE_HOME`, even though the default path looks
+XDG-shaped — doing so would silently relocate the state dir (and therefore
+the gateway port, see below) for anyone who already has `XDG_STATE_HOME` set
+for other tools.
+
+The gateway's port is derived from the state dir, not fixed:
+
+- The **default** state dir always uses port **18081** — this has not
+  changed and will not change for an existing install; only a *relocated*
+  state dir gets a different port.
+- A **relocated** state dir (`OPENLOCK_STATE_DIR` set) gets a port
+  deterministically derived from that path, in the 18082–18999 range. The
+  same path always derives the same port, on any machine, with no
+  coordination needed — but don't hardcode or assume a specific port for a
+  relocated state dir; check `openlock gateway status` (its `port` field) or
+  `openlock doctor` if you need to know it.
 
 ## Prerequisites
 
