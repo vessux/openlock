@@ -636,6 +636,30 @@ function warnIfRecordedGatewayPidMismatch(pid: number, port: number): void {
 }
 
 /**
+ * Removes the pid/driver/port triple this invocation wrote at the top of
+ * `startGateway` (openlock-u60k). All three describe a gateway this
+ * invocation believed it just started; once that belief is retracted —
+ * confirmed-dead child, confirmed-foreign port owner — the files are stale
+ * and must go with it, or a later `gatewayStatus()`/`openlock doctor` read
+ * describes a process that never successfully started. Shared by both
+ * `refuseForeignGatewayAdoption` and the "exited unexpectedly" branch below
+ * it in `waitForGatewayReady`: those were the two abort paths that had
+ * grown inconsistent about this cleanup (only the foreign-adoption one did
+ * it) — factored out so there's one place both draw from instead of two
+ * copies that can drift again. Deliberately NOT used by the 30s-timeout
+ * branch further down: that one can fire with the child still ALIVE, where
+ * the pid file is accurate and deleting it would orphan a live gateway. No
+ * behavioral bite today either way — every reader re-checks `pidAlive()`
+ * before trusting these files — this just keeps the two confirmed-dead
+ * paths honest with each other.
+ */
+export function clearGatewayStateFiles(stateDir: string): void {
+  if (existsSync(pidFile(stateDir))) unlinkSync(pidFile(stateDir));
+  if (existsSync(driverFile(stateDir))) unlinkSync(driverFile(stateDir));
+  if (existsSync(portFile(stateDir))) unlinkSync(portFile(stateDir));
+}
+
+/**
  * Cleans up the PID/DRIVER files this invocation just wrote (they describe
  * a dead/foreign gateway now, not a usable one) and exits with a message
  * distinguishing the two foreign-adoption outcomes (openlock-k5j2). Never
@@ -651,9 +675,7 @@ function refuseForeignGatewayAdoption(
   listeningPids: number[] | null,
   stateDir: string,
 ): never {
-  if (existsSync(pidFile(stateDir))) unlinkSync(pidFile(stateDir));
-  if (existsSync(driverFile(stateDir))) unlinkSync(driverFile(stateDir));
-  if (existsSync(portFile(stateDir))) unlinkSync(portFile(stateDir));
+  clearGatewayStateFiles(stateDir);
   const detail =
     outcome === "foreign-dead-child"
       ? `pid ${gwPid} exited (commonly "address already in use")`
@@ -765,6 +787,13 @@ async function waitForGatewayReady(gwPid: number, port: number, stateDir: string
         ? readFileSync(log, "utf-8").split("\n").slice(-20).join("\n")
         : "(no log)";
       console.error(`Gateway exited unexpectedly. Last 20 lines:\n${tail}`);
+      // openlock-u60k: was missing here — the confirmed-dead-child branch
+      // below (refuseForeignGatewayAdoption) already did this cleanup, this
+      // one didn't, so the two abort-after-spawn paths disagreed about
+      // whether a dead child leaves stale state files behind. See
+      // clearGatewayStateFiles's doc for why this branch qualifies (child
+      // confirmed dead, unlike the 30s-timeout branch further down).
+      clearGatewayStateFiles(stateDir);
       process.exit(1);
     }
     try {
@@ -930,8 +959,6 @@ export function stopGateway(): void {
   }
   process.kill(pid, "SIGTERM");
   const stateDir = resolveStateDir();
-  if (existsSync(pidFile(stateDir))) unlinkSync(pidFile(stateDir));
-  if (existsSync(driverFile(stateDir))) unlinkSync(driverFile(stateDir));
-  if (existsSync(portFile(stateDir))) unlinkSync(portFile(stateDir));
+  clearGatewayStateFiles(stateDir);
   console.log(`Gateway stopped (pid ${pid}).`);
 }
