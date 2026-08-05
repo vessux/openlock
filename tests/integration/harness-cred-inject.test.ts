@@ -20,6 +20,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { getSandboxState } from "../../src/sandbox/container";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
@@ -86,15 +87,57 @@ function isSandboxNotFoundError(stderr: string): boolean {
   return stderr.includes("sandbox not found");
 }
 
+// openlock-18c DISCOVERY: `sandbox delete` returns exit 0 when the gateway
+// ACCEPTS the delete, not when it COMPLETES — the provider stays "attached
+// to sandbox(es)" until the async teardown actually lands, so
+// sandbox-before-provider ordering alone is NOT sufficient. See
+// harness-binary-cred-inject.test.ts's `waitForSandboxGone` for the full
+// discovery writeup (CI evidence, why "unreachable" != "gone") — DO NOT
+// "simplify" this wait away.
+async function waitForSandboxGone(name: string, timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await getSandboxState(name)) === "missing") return;
+    await Bun.sleep(750);
+  }
+  throw new Error(
+    `openlock-18c: sandbox ${name} still not reported gone ${timeoutMs}ms after ` +
+      `its delete was accepted — skipping the provider delete to avoid a ` +
+      `second, misleading "attached to sandbox(es)" error`,
+  );
+}
+
+async function deleteSandboxAndWait(
+  cli: { argv: string[]; cwd: string | undefined },
+  sandboxName: string,
+): Promise<{ error: string | null; skipProviderDelete: boolean }> {
+  const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", sandboxName], cli.cwd);
+  if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
+    return {
+      error: `sandbox delete ${sandboxName} failed (exit ${r.code}): ${r.stderr}`,
+      skipProviderDelete: false,
+    };
+  }
+  if (r.code !== 0) return { error: null, skipProviderDelete: false }; // not-found — nothing to wait for.
+  try {
+    await waitForSandboxGone(sandboxName);
+    return { error: null, skipProviderDelete: false };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e), skipProviderDelete: true };
+  }
+}
+
 /**
  * Strict, loud gateway-side teardown (openlock-18c): deletes only the exact
  * sandbox/provider names THIS run registered — never a prefix sweep, since
- * this suite runs against the real dev gateway — sandbox-before-provider (a
- * provider still "attached to sandbox(es)" refuses deletion), and throws on
- * any real failure instead of discarding it. A sandbox-delete that fails only
- * because there was never one to delete (the test died before creating it)
- * is NOT an error — see `isSandboxNotFoundError`. Split out of `afterAll`
- * purely to keep that hook's cognitive complexity under biome's limit.
+ * this suite runs against the real dev gateway — sandbox-before-provider,
+ * WAITING for the sandbox's async teardown to land (see
+ * `deleteSandboxAndWait`/`waitForSandboxGone`) before the provider delete
+ * that would otherwise race it, and throws on any real failure instead of
+ * discarding it. A sandbox-delete that fails only because there was never
+ * one to delete (the test died before creating it) is NOT an error — see
+ * `isSandboxNotFoundError`. Split out of `afterAll` purely to keep that
+ * hook's cognitive complexity under biome's limit.
  */
 async function teardownGatewayState(
   cli: { argv: string[]; cwd: string | undefined },
@@ -102,13 +145,13 @@ async function teardownGatewayState(
   providerName: string | null,
 ): Promise<void> {
   const errors: string[] = [];
+  let skipProviderDelete = false;
   if (sandboxName !== null) {
-    const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", sandboxName], cli.cwd);
-    if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
-      errors.push(`sandbox delete ${sandboxName} failed (exit ${r.code}): ${r.stderr}`);
-    }
+    const outcome = await deleteSandboxAndWait(cli, sandboxName);
+    if (outcome.error !== null) errors.push(outcome.error);
+    skipProviderDelete = outcome.skipProviderDelete;
   }
-  if (providerName !== null) {
+  if (providerName !== null && !skipProviderDelete) {
     const r = await spawnAndCapture([...cli.argv, "provider", "delete", providerName], cli.cwd);
     if (r.code !== 0) {
       errors.push(`provider delete ${providerName} failed (exit ${r.code}): ${r.stderr}`);
