@@ -44,6 +44,7 @@ import { defaultStateDir } from "../paths";
 import {
   classifyProcNetTcpBind,
   classifyReadinessOutcome,
+  clearGatewayStateFiles,
   findGatewayDriverMismatch,
   findGatewayPortRecordMismatch,
   formatForeignGatewayAdoptionError,
@@ -659,5 +660,43 @@ describe("gatewayStatus port field (openlock-x8m8)", () => {
     const status = gatewayStatus();
     expect(status.running).toBe(false);
     expect(status.port).toBe(resolveGatewayPort(dir));
+  });
+});
+
+describe("clearGatewayStateFiles (openlock-u60k)", () => {
+  // Both abort-after-spawn paths in waitForGatewayReady now route through
+  // this helper (see its doc comment) instead of keeping their own copy of
+  // the three unlinks — this is the honest unit-testable surface of that
+  // change. waitForGatewayReady itself stays out of reach here on purpose:
+  // it calls process.exit(1) directly, and no port-override seam exists for
+  // startGateway (see this file's header comment) to drive it end-to-end.
+  let dir = "";
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "openlock-clear-gateway-state-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("removes the pid, driver, and port files when all three are present", () => {
+    writeFileSync(join(dir, "gateway.pid"), "12345");
+    writeFileSync(join(dir, "gateway.driver"), "podman");
+    writeFileSync(join(dir, "gateway.port"), "18081");
+    clearGatewayStateFiles(dir);
+    expect(existsSync(join(dir, "gateway.pid"))).toBe(false);
+    expect(existsSync(join(dir, "gateway.driver"))).toBe(false);
+    expect(existsSync(join(dir, "gateway.port"))).toBe(false);
+  });
+
+  it("no-ops cleanly when none of the three files exist", () => {
+    expect(() => clearGatewayStateFiles(dir)).not.toThrow();
+  });
+
+  it("removes whichever subset is present without erroring on the missing ones", () => {
+    writeFileSync(join(dir, "gateway.pid"), "12345");
+    clearGatewayStateFiles(dir);
+    expect(existsSync(join(dir, "gateway.pid"))).toBe(false);
   });
 });
