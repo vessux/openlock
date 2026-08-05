@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import {
   computeBaseTag,
   detectBaseImageDrift,
@@ -142,5 +142,42 @@ describe("ensureBase flow", () => {
       },
     });
     expect(built).toBe(true);
+  });
+
+  // openlock-6qfr: the runtime's raw pull-failure output has no framing
+  // saying it's expected/non-fatal, which misled a real diagnosis. Assert
+  // the notice fires on the fallback path and stays silent on the happy path.
+  it("logs a non-fatal notice when the pull fails and falls back to build", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tag = await ensureBase("FROM x", {
+        imageExists: async () => false,
+        tryPull: async () => false,
+        build: async () => {},
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = warn.mock.calls[0]?.[0];
+      expect(message).toContain(tag);
+      expect(message).toContain("non-fatal");
+      expect(message).toContain("Building it locally");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not log the non-fatal notice when the pull succeeds", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await ensureBase("FROM x", {
+        imageExists: async () => false,
+        tryPull: async () => true,
+        build: async () => {
+          throw new Error("should not build");
+        },
+      });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

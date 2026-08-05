@@ -6,11 +6,33 @@ name: base-image
 # host tries `<runtime> pull <tag>` before any local build, so a fresh install
 # skips the slow apt/node/uv install whenever this image is available.
 #
-# Trigger: release tags only. A released binary embeds a frozen
-# base.Containerfile, so building on the tag guarantees that release's base
-# hash exists in ghcr. base.Containerfile changes rarely, so the idempotency
-# check skips the (QEMU-emulated, ~10-15 min arm64) build when the tag is
-# already present. Manual dispatch is kept as an escape hatch / bootstrap.
+# Trigger: release tags, PLUS main pushes that touch base.Containerfile
+# (openlock-6qfr). A released binary embeds a frozen base.Containerfile, so
+# building on the tag guarantees that release's base hash exists in ghcr —
+# that's still the durable per-release guarantee and the tag trigger stays
+# for it. But base.Containerfile can change on main (e.g. PR #133's nftables
+# fix) well before the next release is tagged, and the content-addressed tag
+# for that new hash is never built until it is — every live-integration run
+# (and every fresh install) in that window pays a full local rebuild
+# (apt + node + uv) instead of a cheap pull, and the resulting registry-pull
+# failure reads like a hard error with nothing saying a non-fatal local
+# build follows. The main-push trigger closes that window: `paths:` narrows
+# it to base.Containerfile itself, so a main push that doesn't touch that
+# file never runs this workflow at all, and the existing idempotency check
+# below skips the (QEMU-emulated, ~10-15 min arm64) build whenever the
+# computed tag is already present — so the only marginal cost this trigger
+# ever adds is one cheap `docker buildx imagetools inspect` per
+# base.Containerfile-touching push whose hash was already published.
+# Manual dispatch is kept as an escape hatch / bootstrap.
+#
+# DO NOT "fix" the apparent tags-vs-paths conflict below by splitting the
+# trigger or dropping `paths:`. It looks like `paths:` would also gate the
+# tag trigger (which would be release-breaking: a tagged release could ship
+# with its base hash unpublished, the exact guarantee the tag trigger
+# exists to provide). It does not — GitHub documents that "path filters are
+# not evaluated for pushes of tags", verified against the Actions workflow-
+# syntax reference on 2026-08-05. So a tag push always builds regardless of
+# what it touched, and `paths:` only ever narrows the main-branch trigger.
 #
 # ONE-TIME SETUP: the first push creates a PRIVATE ghcr package. Flip
 # ghcr.io/vessux/openlock-base to public (GitHub → Packages → Package settings)
@@ -21,6 +43,10 @@ on:
   push:
     tags:
       - "v*.*.*"
+    branches:
+      - main
+    paths:
+      - "containers/base.Containerfile"
   workflow_dispatch:
 
 permissions:
