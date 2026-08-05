@@ -15,11 +15,11 @@
 // loop: a process spawned post-create via the new path actually goes via
 // the proxy with cred_inject + header strip applied.
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { buildOpenshellExecArgv } from "../../src/sandbox/container";
+import { buildOpenshellExecArgv, getSandboxState } from "../../src/sandbox/container";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
@@ -90,12 +90,145 @@ async function waitForSandboxReady(
   throw new Error(`sandbox ${sessionName} did not reach Ready state within ${timeoutMs}ms`);
 }
 
+/** Best-effort reap of the detached `sandbox create` child (openlock-18c) —
+ * split out of `afterAll` purely to keep that hook's cognitive complexity
+ * under biome's limit. Tolerates the process already being dead. */
+async function reapLiveProc(proc: ReturnType<typeof Bun.spawn> | null): Promise<void> {
+  if (proc === null) return;
+  try {
+    proc.kill();
+    await proc.exited;
+  } catch {
+    // Already dead — fine.
+  }
+}
+
+/**
+ * True when `sandbox delete` failed only because the sandbox doesn't exist
+ * — a harmless "nothing to clean up" outcome (e.g. the test died before
+ * ever creating one), not a leak. Matches the literal stderr text from a
+ * verified live probe against the real gateway (2026-08-05): `openshell
+ * sandbox delete <nonexistent>` exits 1 with stderr `Error:   × code: 'Some
+ * requested entity was not found', message: "sandbox not found"`. A
+ * sandbox that still EXISTS and can't be removed (the real leak signature
+ * — e.g. "attached to sandbox(es)") does not match this and stays loud.
+ * (Contrast `provider delete` on a nonexistent name, which is already exit
+ * 0 — no matcher needed there.)
+ */
+function isSandboxNotFoundError(stderr: string): boolean {
+  return stderr.includes("sandbox not found");
+}
+
+// openlock-18c DISCOVERY: `sandbox delete` returns exit 0 when the gateway
+// ACCEPTS the delete, not when it COMPLETES — the provider stays "attached
+// to sandbox(es)" until the async teardown actually lands, so
+// sandbox-before-provider ordering alone is NOT sufficient. See
+// harness-binary-cred-inject.test.ts's `waitForSandboxGone` for the full
+// discovery writeup (CI evidence, why "unreachable" != "gone") — DO NOT
+// "simplify" this wait away.
+async function waitForSandboxGone(name: string, timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await getSandboxState(name)) === "missing") return;
+    await Bun.sleep(750);
+  }
+  throw new Error(
+    `openlock-18c: sandbox ${name} still not reported gone ${timeoutMs}ms after ` +
+      `its delete was accepted — skipping the provider delete to avoid a ` +
+      `second, misleading "attached to sandbox(es)" error`,
+  );
+}
+
+async function deleteSandboxAndWait(
+  cli: { argv: string[]; cwd: string | undefined },
+  sandboxName: string,
+): Promise<{ error: string | null; skipProviderDelete: boolean }> {
+  const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", sandboxName], cli.cwd);
+  if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
+    return {
+      error: `sandbox delete ${sandboxName} failed (exit ${r.code}): ${r.stderr}`,
+      skipProviderDelete: false,
+    };
+  }
+  if (r.code !== 0) return { error: null, skipProviderDelete: false }; // not-found — nothing to wait for.
+  try {
+    await waitForSandboxGone(sandboxName);
+    return { error: null, skipProviderDelete: false };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e), skipProviderDelete: true };
+  }
+}
+
+/**
+ * Strict, loud gateway-side teardown (openlock-18c): deletes only the exact
+ * sandbox/provider names THIS run registered — never a prefix sweep, since
+ * this suite runs against the real dev gateway — sandbox-before-provider,
+ * WAITING for the sandbox's async teardown to land (see
+ * `deleteSandboxAndWait`/`waitForSandboxGone`) before the provider delete
+ * that would otherwise race it, and throws on any real failure instead of
+ * discarding it. Split out of `afterAll` purely to keep that hook's
+ * cognitive complexity under biome's limit.
+ */
+async function teardownGatewayState(
+  cli: { argv: string[]; cwd: string | undefined },
+  sandboxName: string | null,
+  providerName: string | null,
+): Promise<void> {
+  const errors: string[] = [];
+  let skipProviderDelete = false;
+  if (sandboxName !== null) {
+    const outcome = await deleteSandboxAndWait(cli, sandboxName);
+    if (outcome.error !== null) errors.push(outcome.error);
+    skipProviderDelete = outcome.skipProviderDelete;
+  }
+  if (providerName !== null && !skipProviderDelete) {
+    const r = await spawnAndCapture([...cli.argv, "provider", "delete", providerName], cli.cwd);
+    if (r.code !== 0) {
+      errors.push(`provider delete ${providerName} failed (exit ${r.code}): ${r.stderr}`);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(
+      `openlock-18c: gateway teardown left leaked state behind:\n${errors.join("\n")}`,
+    );
+  }
+}
+
 describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
+  // openlock-18c: see harness-binary-cred-inject.test.ts for the full
+  // mechanism writeup (bun test timeout runs afterEach/afterAll but not an
+  // in-body try/finally). Also fixes the same second bug as its siblings:
+  // `removeContainer` did a raw `podman rm -f`, never `sandbox delete`,
+  // leaving the gateway's own sandbox record behind even on a clean run.
+  // Additionally tracks the detached `sandbox create` (foreground "sleep
+  // infinity") child process: a timeout mid-test used to leave it running
+  // forever, since the in-body `createProc.kill()` never ran either.
+  // NOT a prefix sweep — only the exact name(s) this run registers are ever
+  // deleted; this suite runs against the real dev gateway.
+  let registeredSandbox: string | null = null;
+  let registeredProvider: string | null = null;
+  let liveCreateProc: ReturnType<typeof Bun.spawn> | null = null;
+
+  afterAll(
+    async () => {
+      await reapLiveProc(liveCreateProc);
+      liveCreateProc = null;
+      if (registeredSandbox === null && registeredProvider === null) return;
+      const cli = await getCliInvocation();
+      await teardownGatewayState(cli, registeredSandbox, registeredProvider);
+    },
+    // openlock-18c: explicit timeout required — hooks default to 5000ms
+    // regardless of the `it`'s own budget, and podman teardown exceeds that.
+    // See harness-binary-cred-inject.test.ts's afterAll for the full story.
+    120_000,
+  );
+
   it.skipIf(!LIVE)(
     "buildOpenshellExecArgv path enforces proxy + cred_inject post-create",
     async () => {
       const sessionName = `ol-hnp-${Date.now().toString(36)}`;
-      const containerName = `openshell-sandbox-${sessionName}`;
+      registeredSandbox = sessionName;
+      registeredProvider = PROVIDER_NAME;
       const tmp = mkdtempSync(join(tmpdir(), "openlock-hnp-"));
       const repoDir = join(tmp, "repo");
       mkdirSync(repoDir);
@@ -108,15 +241,9 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
       const removeProvider = async (): Promise<void> => {
+        // Best-effort, pre-create only (may not exist yet). The `afterAll`
+        // teardown above is the strict path.
         await spawnAndCapture([...argvHead, "provider", "delete", PROVIDER_NAME], cli.cwd);
-      };
-      const removeContainer = async (): Promise<void> => {
-        await spawnAndCapture([
-          process.env.OPENLOCK_RUNTIME ?? "podman",
-          "rm",
-          "-f",
-          containerName,
-        ]);
       };
 
       try {
@@ -177,8 +304,11 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
           stdout: "ignore",
           stderr: "ignore",
         });
-        // Don't await createProc.exited — it only returns when the container
-        // foreground exits (i.e. never, since we sleep).
+        // Registered for afterAll (openlock-18c): don't await createProc.exited
+        // here — it only returns when the container foreground exits (i.e.
+        // never, since we sleep) — but a timeout or early throw below must
+        // still be able to reap it.
+        liveCreateProc = createProc;
         await waitForSandboxReady(argvHead, cli.cwd, sessionName);
 
         // The fix under test: post-create exec via openshell sandbox exec.
@@ -236,9 +366,11 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
         // Reap to free the supervisor SSH session + gateway slot before the
         // next test runs (sibling integration tests share the same gateway).
         await createProc.exited;
+        liveCreateProc = null;
       } finally {
-        await removeContainer();
-        await removeProvider();
+        // Gateway-side cleanup (createProc, sandbox, provider) lives in the
+        // describe's `afterAll` above, which survives a timeout this
+        // `finally` would not — see openlock-18c comment there.
         rmSync(tmp, { recursive: true, force: true });
       }
     },
