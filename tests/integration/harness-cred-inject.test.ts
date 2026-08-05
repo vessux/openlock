@@ -137,11 +137,17 @@ describe("harness cred_inject mechanism (live integration)", () => {
   let registeredSandbox: string | null = null;
   let registeredProvider: string | null = null;
 
-  afterAll(async () => {
-    if (registeredSandbox === null && registeredProvider === null) return;
-    const cli = await getCliInvocation();
-    await teardownGatewayState(cli, registeredSandbox, registeredProvider);
-  });
+  afterAll(
+    async () => {
+      if (registeredSandbox === null && registeredProvider === null) return;
+      const cli = await getCliInvocation();
+      await teardownGatewayState(cli, registeredSandbox, registeredProvider);
+    },
+    // openlock-18c: explicit timeout required — hooks default to 5000ms
+    // regardless of the `it`'s own budget, and podman teardown exceeds that.
+    // See harness-binary-cred-inject.test.ts's afterAll for the full story.
+    120_000,
+  );
 
   it.skipIf(!LIVE)(
     "opencode policy + cred_inject rewrites headers via proxy echo mode",

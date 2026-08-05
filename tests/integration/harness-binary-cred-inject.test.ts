@@ -154,14 +154,27 @@ describe("harness binary triggers cred_inject (live integration)", () => {
   let registeredSandbox: string | null = null;
   let registeredProvider: string | null = null;
 
-  afterAll(async () => {
-    // Skip entirely (no getCliInvocation() call, which can hit the network
-    // in non-dev-mode) when the LIVE test never ran/never got far enough to
-    // register anything — the common case under plain `bun run test`.
-    if (registeredSandbox === null && registeredProvider === null) return;
-    const cli = await getCliInvocation();
-    await teardownGatewayState(cli, registeredSandbox, registeredProvider);
-  });
+  afterAll(
+    async () => {
+      // Skip entirely (no getCliInvocation() call, which can hit the network
+      // in non-dev-mode) when the LIVE test never ran/never got far enough to
+      // register anything — the common case under plain `bun run test`.
+      if (registeredSandbox === null && registeredProvider === null) return;
+      const cli = await getCliInvocation();
+      await teardownGatewayState(cli, registeredSandbox, registeredProvider);
+    },
+    // openlock-18c: hooks do NOT inherit the `it`'s own timeout (180_000
+    // below) — bun defaults EVERY hook to 5000ms regardless of the test's
+    // budget. Podman sandbox teardown (`openshell sandbox delete`) routinely
+    // exceeds that, so the default silently CUT OFF this afterAll mid-delete
+    // (observed as "killed 2 dangling processes" + 5 hook-timeout failures
+    // in CI, docker's leg passed only because docker is faster — not
+    // evidence of correctness). That's worse than a red check: a cut-off
+    // delete can leave exactly the leaked state this hook exists to prevent.
+    // 120_000 matches the lower end of this file's `it` budgets; teardown is
+    // 2 CLI calls, so this is headroom, not a real wait.
+    120_000,
+  );
 
   it.skipIf(!LIVE)(
     `claude_code: /usr/local/bin/claude runs L7 echo via ${POLICY_NAME}`,

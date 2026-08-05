@@ -179,13 +179,19 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
   let registeredProvider: string | null = null;
   let liveCreateProc: ReturnType<typeof Bun.spawn> | null = null;
 
-  afterAll(async () => {
-    await reapLiveProc(liveCreateProc);
-    liveCreateProc = null;
-    if (registeredSandbox === null && registeredProvider === null) return;
-    const cli = await getCliInvocation();
-    await teardownGatewayState(cli, registeredSandbox, registeredProvider);
-  });
+  afterAll(
+    async () => {
+      await reapLiveProc(liveCreateProc);
+      liveCreateProc = null;
+      if (registeredSandbox === null && registeredProvider === null) return;
+      const cli = await getCliInvocation();
+      await teardownGatewayState(cli, registeredSandbox, registeredProvider);
+    },
+    // openlock-18c: explicit timeout required — hooks default to 5000ms
+    // regardless of the `it`'s own budget, and podman teardown exceeds that.
+    // See harness-binary-cred-inject.test.ts's afterAll for the full story.
+    120_000,
+  );
 
   it.skipIf(!LIVE || BEARER === null)(
     "openrouter.ai accepts the cred_inject-rewritten Bearer and responds at API level",

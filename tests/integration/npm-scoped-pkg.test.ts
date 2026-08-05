@@ -87,17 +87,26 @@ describe("npm scoped packages via default-js policy", () => {
   // deleted; this suite runs against the real dev gateway.
   let registeredSandbox: string | null = null;
 
-  afterAll(async () => {
-    if (registeredSandbox === null) return;
-    const cli = await getCliInvocation();
-    const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", registeredSandbox], cli.cwd);
-    if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
-      throw new Error(
-        `openlock-18c: gateway teardown left leaked state behind: sandbox delete ` +
-          `${registeredSandbox} failed (exit ${r.code}): ${r.stderr}`,
+  afterAll(
+    async () => {
+      if (registeredSandbox === null) return;
+      const cli = await getCliInvocation();
+      const r = await spawnAndCapture(
+        [...cli.argv, "sandbox", "delete", registeredSandbox],
+        cli.cwd,
       );
-    }
-  });
+      if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
+        throw new Error(
+          `openlock-18c: gateway teardown left leaked state behind: sandbox delete ` +
+            `${registeredSandbox} failed (exit ${r.code}): ${r.stderr}`,
+        );
+      }
+    },
+    // openlock-18c: explicit timeout required — hooks default to 5000ms
+    // regardless of the `it`'s own budget, and podman teardown exceeds that.
+    // See harness-binary-cred-inject.test.ts's afterAll for the full story.
+    120_000,
+  );
 
   it.skipIf(!LIVE)(
     "fetch of @scope%2Fname is allowed (allow_encoded_slash: true on npm endpoint)",
