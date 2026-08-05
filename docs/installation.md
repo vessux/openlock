@@ -102,6 +102,20 @@ The gateway's port is derived from the state dir, not fixed:
   relocated state dir; check `openlock gateway status` (its `port` field) or
   `openlock doctor` if you need to know it.
 
+**`OPENLOCK_STATE_DIR` alone does not fully isolate a relocated instance.**
+It relocates openlock's own state (gateway pid/log/config/database, JWT
+material, sessions) and derives that instance's port, but the openshell
+gateway it starts also registers itself into a *separate*, shared registry
+at `~/.config/openshell/gateways/podman-dev/metadata.json` — a path keyed by
+`XDG_CONFIG_HOME` (defaulting to `~/.config`, independent of
+`OPENLOCK_STATE_DIR`) and by a fixed gateway name, the same for every
+instance. Two openlock instances relocated only via `OPENLOCK_STATE_DIR`
+still both write that one file: whichever starts last repoints it at its own
+(possibly throwaway) port, breaking every other instance's ability to reach
+its gateway until someone notices and runs `gateway stop`/`gateway start` to
+repair it. A genuinely isolated instance — including anything throwaway,
+like a test — must also set `XDG_CONFIG_HOME` to a directory of its own.
+
 ## Prerequisites
 
 - [podman](https://podman.io) — `podman machine` started on macOS, or a reachable rootless socket on Linux (`systemctl --user enable --now podman.socket`)
