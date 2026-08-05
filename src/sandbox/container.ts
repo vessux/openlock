@@ -421,6 +421,19 @@ export async function assertSandboxNotExited(
 
 export interface WaitForSandboxReadyOpts extends AssertSandboxNotExitedOpts {
   timeoutMs?: number;
+  // openlock-ur15: test seam, NOT a live-state mutator — a pure clock, so
+  // optional-with-a-real-default is fine here (contrast the project rule
+  // against optional-with-a-real-default for live-state mutator deps, e.g.
+  // logout.ts's clearGateway). Defaults to the real Date.now/Bun.sleep, so
+  // production behavior is unchanged. `sleep` MUST advance whatever `now`
+  // reports next (a fake clock does this by constructing sleep to add its
+  // own ms to a shared counter `now` reads) — a seam that only fakes sleep
+  // while `deadline`/the loop condition still read the real clock makes the
+  // generic-timeout tests busy-spin for the real timeoutMs, spawning
+  // subprocesses as fast as possible, which is worse than the flake this
+  // fixes. See container.test.ts's makeFakeClock.
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 // Wait until the openshell-sandbox supervisor reports the sandbox in Ready
@@ -432,11 +445,11 @@ export async function waitForSandboxReady(
   name: string,
   opts: WaitForSandboxReadyOpts = {},
 ): Promise<void> {
-  const { timeoutMs = 60_000, tolerateStopped } = opts;
+  const { timeoutMs = 60_000, tolerateStopped, now = Date.now, sleep = Bun.sleep } = opts;
   const cli = await getCliInvocation();
   const argv = buildOpenshellExecArgv(cli.argv, name, ["/bin/true"], { tty: "off" });
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
     const proc = Bun.spawn(argv, {
       cwd: cli.cwd,
       stdin: "ignore",
@@ -445,7 +458,7 @@ export async function waitForSandboxReady(
     });
     if ((await proc.exited) === 0) return;
     await assertSandboxNotExited(name, { tolerateStopped });
-    await Bun.sleep(500);
+    await sleep(500);
   }
   // Deliberately strict here (no tolerateStopped) even though the loop above
   // polled tolerantly: a Stopped phase we were willing to wait out mid-poll

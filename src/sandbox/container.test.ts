@@ -507,6 +507,30 @@ describe("getSandboxState (openlock-vtl)", () => {
   });
 });
 
+// openlock-ur15: waitForSandboxReady's poll loop burns real Bun.sleep(500)
+// ticks plus 2 real subprocess spawns per iteration. Under full-suite
+// parallel load that starves this file's timer/scheduler enough to blow
+// wall-clock assertions (`toBeLessThan(2000)` observing 5-12s) and even trip
+// per-test timeouts. A virtual clock makes the whole describe deterministic
+// and near-instant: `sleep` advances the same counter `now` reads, so the
+// loop's real `deadline = now() + timeoutMs` condition resolves after
+// exactly as many (instant) sleeps as production would take real ones —
+// unlike a seam that only fakes `sleep`, which would leave `deadline` keyed
+// to the real clock and make the generic-timeout tests below busy-spin for
+// the real timeoutMs, spawning subprocesses as fast as possible.
+function makeFakeClock(startMs = 0) {
+  let virtualNow = startMs;
+  const sleeps: number[] = [];
+  return {
+    now: () => virtualNow,
+    sleep: async (ms: number): Promise<void> => {
+      sleeps.push(ms);
+      virtualNow += ms;
+    },
+    sleeps,
+  };
+}
+
 describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
   const savedBin = process.env.OPENLOCK_OPENSHELL_BIN;
 
@@ -560,15 +584,21 @@ describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
 
   describe("waitForSandboxReady", () => {
     it("keeps polling through a post-Start Stopped phase mid-budget (does not fail on the first sighting)", async () => {
-      // Loose upper bound (well above one 500ms poll tick, well below the
-      // full budget) proves it tolerated at least one Stopped reading
-      // instead of throwing on the very first poll.
+      // openlock-ur15: was a loose upper bound on real elapsed ms; the real
+      // property it protects is "went round the loop at least twice / slept
+      // at least once" instead of throwing on the very first poll — assert
+      // that directly against the fake clock's recorded sleeps.
       process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
-      const start = Date.now();
+      const clock = makeFakeClock();
       await expect(
-        waitForSandboxReady("sess", { tolerateStopped: true, timeoutMs: 1500 }),
+        waitForSandboxReady("sess", {
+          tolerateStopped: true,
+          timeoutMs: 1500,
+          now: clock.now,
+          sleep: clock.sleep,
+        }),
       ).rejects.toThrow(/exited during provisioning/);
-      expect(Date.now() - start).toBeGreaterThanOrEqual(500);
+      expect(clock.sleeps.length).toBeGreaterThanOrEqual(1);
     });
 
     // openlock-hsn: if a resume-triggered Start reports success but the
@@ -577,18 +607,26 @@ describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
     // the final strict check must still surface the real cause (with logs).
     it("surfaces the exited error (with supervisor logs), not a bare timeout, when Stopped never resolves under tolerateStopped", async () => {
       process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
+      const clock = makeFakeClock();
       await expect(
-        waitForSandboxReady("sess", { tolerateStopped: true, timeoutMs: 700 }),
+        waitForSandboxReady("sess", {
+          tolerateStopped: true,
+          timeoutMs: 700,
+          now: clock.now,
+          sleep: clock.sleep,
+        }),
       ).rejects.toThrow(/exited during provisioning.*fake supervisor log/s);
     });
 
     it("fast-fails on Stopped when not tolerated, well before the timeout budget", async () => {
+      // openlock-ur15: was a real-elapsed-ms upper bound; the real property
+      // is "fast-failed on the FIRST poll iteration" — assert zero sleeps.
       process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Stopped");
-      const start = Date.now();
-      await expect(waitForSandboxReady("sess", { timeoutMs: 5000 })).rejects.toThrow(
-        /exited during provisioning/,
-      );
-      expect(Date.now() - start).toBeLessThan(2000);
+      const clock = makeFakeClock();
+      await expect(
+        waitForSandboxReady("sess", { timeoutMs: 5000, now: clock.now, sleep: clock.sleep }),
+      ).rejects.toThrow(/exited during provisioning/);
+      expect(clock.sleeps).toHaveLength(0);
     });
 
     // openlock-ddd: this is the actual bug — a sandbox racing a delete
@@ -597,12 +635,14 @@ describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
     // not reach Ready state", instead of failing fast with the real,
     // knowable cause.
     it("fast-fails on Deleting with an accurate message, well before the timeout budget", async () => {
+      // openlock-ur15: same property as above — zero sleeps, exactly one
+      // poll iteration — asserted against the fake clock instead of ms.
       process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Deleting");
-      const start = Date.now();
-      await expect(waitForSandboxReady("sess", { timeoutMs: 5000 })).rejects.toThrow(
-        /sess is being deleted/,
-      );
-      expect(Date.now() - start).toBeLessThan(2000);
+      const clock = makeFakeClock();
+      await expect(
+        waitForSandboxReady("sess", { timeoutMs: 5000, now: clock.now, sleep: clock.sleep }),
+      ).rejects.toThrow(/sess is being deleted/);
+      expect(clock.sleeps).toHaveLength(0);
     });
 
     // The final strict check must only ever escalate to a more specific
@@ -612,18 +652,22 @@ describe("assertSandboxNotExited / waitForSandboxReady (openlock-weo)", () => {
     // Provisioning and Unknown are both real phases that collapse to
     // ContainerState "other" and must both keep polling rather than fail
     // fast (openlock-ddd: Unknown deliberately gets no special treatment).
+    // openlock-ur15: these two used to burn a real 700ms each (busy-spinning
+    // subprocess spawns until the deadline) — fake clock makes them instant.
     it("still reports the generic timeout for a sandbox that is merely slow (Provisioning, never Stopped/dead)", async () => {
       process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Provisioning");
-      await expect(waitForSandboxReady("sess", { timeoutMs: 700 })).rejects.toThrow(
-        /did not reach Ready state within 700ms/,
-      );
+      const clock = makeFakeClock();
+      await expect(
+        waitForSandboxReady("sess", { timeoutMs: 700, now: clock.now, sleep: clock.sleep }),
+      ).rejects.toThrow(/did not reach Ready state within 700ms/);
     });
 
     it("still reports the generic timeout for phase Unknown (driver couldn't determine state, not proof of death)", async () => {
       process.env.OPENLOCK_OPENSHELL_BIN = writeFakeOpenshellCli("Unknown");
-      await expect(waitForSandboxReady("sess", { timeoutMs: 700 })).rejects.toThrow(
-        /did not reach Ready state within 700ms/,
-      );
+      const clock = makeFakeClock();
+      await expect(
+        waitForSandboxReady("sess", { timeoutMs: 700, now: clock.now, sleep: clock.sleep }),
+      ).rejects.toThrow(/did not reach Ready state within 700ms/);
     });
   });
 });
