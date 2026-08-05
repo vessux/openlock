@@ -108,6 +108,23 @@ export async function ensureBase(
   if (await d.imageExists(runtime, tag)) return tag;
   if (await d.tryPull(runtime, tag)) return tag;
 
+  // openlock-6qfr: `tryPull` inherits the runtime's raw stderr (podman's
+  // "Error: unable to copy from source docker://... manifest unknown" or
+  // similar), which reads like a hard failure with nothing around it saying
+  // what happens next — that ambiguity misled a real diagnosis. A failed
+  // pull here is EXPECTED whenever this exact content hash hasn't been
+  // published to ghcr yet (e.g. a base.Containerfile change landed on main
+  // but no release has been tagged since — see
+  // .github/workflows/base-image.yml's header) and is always NON-FATAL: the
+  // local build below is the intended fallback, not an error path. Placed
+  // here rather than inside `defaultTryPull` so it also fires for injected
+  // test/deps callers and stays next to the branch it explains.
+  console.warn(
+    `Registry pull of ${tag} failed (see above) — expected and non-fatal ` +
+      "when this exact base hasn't been published yet. Building it locally " +
+      "instead (first build is slow: apt + node + uv install).",
+  );
+
   const hash = tag.slice(GHCR_BASE_PREFIX.length);
   const ctx = contextDirForHash(hash);
   mkdirSync(ctx, { recursive: true });
