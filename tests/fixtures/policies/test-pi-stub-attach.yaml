@@ -1,0 +1,38 @@
+# Test-only policy for openlock-3zjx's harness-ATTACH exit regression test
+# (tests/integration/compiled-binary-harness-attach.test.ts). The stub `pi`
+# binary that test installs exits immediately and makes NO network call, so
+# no endpoint here is ever actually exercised — this only needs to be
+# schema-valid and mirror the shape the real `pi` + `openrouter` pairing
+# uses in production (see src/providers/openrouter.ts's policyEndpoints).
+# Synthetic identifiers only; no production provider names or credentials.
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
+  read_write: [/sandbox, /tmp, /dev/null]
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  pi_stub_attach_test:
+    binaries:
+      - { path: /usr/local/bin/pi }
+    endpoints:
+      - host: mock.pi-stub-attach.test
+        port: 8443
+        protocol: rest
+        enforcement: enforce
+        echo: true
+        rules: [{ allow: { method: GET, path: "/**" } }]
+        cred_inject:
+          provider: openrouter
+          strip_headers: [Authorization]
+          inject:
+            - { header: Authorization, from_credential: OPENROUTER_BEARER_TOKEN }
+    allowed_secrets: [OPENROUTER_BEARER_TOKEN]
