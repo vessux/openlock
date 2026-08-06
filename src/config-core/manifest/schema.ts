@@ -18,7 +18,7 @@ export const MOUNT_TYPES: readonly MountType[] = [
   "git-bundle",
 ];
 export const CREDENTIAL_ENTRY_KEYS = new Set(["name", "values"]);
-export const CREDENTIAL_SOURCE_KEYS = new Set(["from_env"]);
+export const CREDENTIAL_SOURCE_KEYS = new Set(["from_env", "literal"]);
 
 function err(path: string, message: string, fix?: string): Issue {
   return fix === undefined
@@ -117,16 +117,34 @@ function validateEnv(doc: Record<string, unknown>, issues: Issue[]): void {
 
 function validateCredentialSource(vp: string, src: unknown, issues: Issue[]): void {
   if (!isPlainObject(src)) {
-    issues.push(err(vp, "credential source must be a mapping like { from_env: VAR }"));
+    issues.push(
+      err(vp, "credential source must be a mapping like { from_env: VAR } or { literal: VALUE }"),
+    );
     return;
   }
   for (const k of Object.keys(src)) {
     if (!CREDENTIAL_SOURCE_KEYS.has(k)) {
-      issues.push(err(`${vp}.${k}`, `unknown source key "${k}" (allowed: from_env)`));
+      issues.push(err(`${vp}.${k}`, `unknown source key "${k}" (allowed: from_env, literal)`));
     }
   }
-  if (typeof src.from_env !== "string" || src.from_env.length === 0) {
-    issues.push(err(`${vp}.from_env`, "'from_env' must be a non-empty string"));
+  const hasFromEnv = "from_env" in src;
+  const hasLiteral = "literal" in src;
+  if (hasFromEnv && hasLiteral) {
+    issues.push(
+      err(vp, "credential source must declare exactly one of 'from_env' or 'literal', not both"),
+    );
+    return;
+  }
+  if (!hasFromEnv && !hasLiteral) {
+    issues.push(err(vp, "credential source must declare one of 'from_env' or 'literal'"));
+    return;
+  }
+  if (hasFromEnv) {
+    if (typeof src.from_env !== "string" || src.from_env.length === 0) {
+      issues.push(err(`${vp}.from_env`, "'from_env' must be a non-empty string"));
+    }
+  } else if (typeof src.literal !== "string" || src.literal.length === 0) {
+    issues.push(err(`${vp}.literal`, "'literal' must be a non-empty string"));
   }
 }
 
