@@ -203,6 +203,48 @@ jobs:
           groups "$USER"
 
       - name: Integration tests (OPENLOCK_LIVE_INTEGRATION=1)
+        id: integration
         env:
           OPENLOCK_LIVE_INTEGRATION: "1"
         run: bun test tests/integration/
+
+      - name: Assert gateway is clean after live-integration (bd openlock-n73d)
+        # WHY THIS STEP EXISTS: openlock-18c (PR #144) fixed the suite's
+        # resource leak (per-file teardown registry + unconditional
+        # `afterAll` + a wait for the async `sandbox delete`), but nothing
+        # asserted the fix keeps working. This job cannot catch a
+        # regression on its own — it always starts from a FRESH gateway, so
+        # a leak here is invisible; it only resurfaces on a SECOND run
+        # sharing gateway state (e.g. a developer's own dev gateway) as a
+        # confusing "provider already exists" / "attached to sandbox(es)"
+        # error, which is exactly how the original leak got misread as a
+        # product defect instead of a test-teardown bug. This step makes
+        # that failure mode a red check here instead.
+        #
+        # `if: always()` — this must run even when the "Integration tests"
+        # step above failed, because a failed run (which may skip `afterAll`
+        # partway through, per the bun-test-timeout-skips-afterAll gotcha
+        # openlock-18c ran into) is the most likely time for residue to be
+        # left behind, and that residue is exactly what we want surfaced.
+        # This does NOT mask a real test failure: a GitHub Actions job is
+        # red if ANY step fails, so a failing "Integration tests" step
+        # already fails the job regardless of what this step reports.
+        #
+        # Deliberately read-only — see the script's own header for why this
+        # is an assertion, never a delete sweep (openlock-18c already
+        # rejected that shape once, for the same suite, against the same
+        # kind of gateway).
+        #
+        # The condition is `!cancelled() && integration didn't skip` rather
+        # than a bare `always()`: the assertion is only meaningful if the
+        # suite actually ran. If an earlier setup step failed (podman/docker
+        # install, or the fork-release preflight), the `integration` step is
+        # skipped and no gateway ever came up — `sandbox list` would then
+        # fail against an unreachable gateway and bury the real failure
+        # under a confusing secondary error. Skipping cancellations avoids
+        # the same noise on a cancelled run. A genuine test FAILURE still
+        # runs this step (outcome is `failure`, not `skipped`), which is the
+        # case that matters most: a failed/timed-out run is the most likely
+        # to leave residue behind.
+        if: ${{ !cancelled() && steps.integration.outcome != 'skipped' }}
+        run: bun run scripts/check-live-integration-residue.ts
