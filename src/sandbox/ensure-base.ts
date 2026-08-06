@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { withLock } from "../lock";
 import { type Runtime, resolveRuntime } from "../runtime";
 
 // Inlined here (not imported from image-build) to avoid a circular import,
@@ -105,32 +106,48 @@ export async function ensureBase(
     build: deps?.build ?? defaultBuild,
   };
 
+  // Fast, unlocked path — see image-build.ts's ensureImage for the same
+  // shape/rationale: the common case ("already built") never touches a
+  // lock file.
   if (await d.imageExists(runtime, tag)) return tag;
-  if (await d.tryPull(runtime, tag)) return tag;
-
-  // openlock-6qfr: `tryPull` inherits the runtime's raw stderr (podman's
-  // "Error: unable to copy from source docker://... manifest unknown" or
-  // similar), which reads like a hard failure with nothing around it saying
-  // what happens next — that ambiguity misled a real diagnosis. A failed
-  // pull here is EXPECTED whenever this exact content hash hasn't been
-  // published to ghcr yet (e.g. a base.Containerfile change landed on main
-  // but no release has been tagged since — see
-  // .github/workflows/base-image.yml's header) and is always NON-FATAL: the
-  // local build below is the intended fallback, not an error path. Placed
-  // here rather than inside `defaultTryPull` so it also fires for injected
-  // test/deps callers and stays next to the branch it explains.
-  console.warn(
-    `Registry pull of ${tag} failed (see above) — expected and non-fatal ` +
-      "when this exact base hasn't been published yet. Building it locally " +
-      "instead (first build is slow: apt + node + uv install).",
-  );
 
   const hash = tag.slice(GHCR_BASE_PREFIX.length);
   const ctx = contextDirForHash(hash);
-  mkdirSync(ctx, { recursive: true });
-  writeFileSync(join(ctx, "Dockerfile"), baseContent);
-  await d.build(runtime, tag, ctx);
-  return tag;
+  // openlock-jyk: this IS the bug report's real production site (`openlock
+  // sandbox` -> ensureSandbox -> ensureBase, for the openlock-base FROM
+  // case) — the "first build is slow: apt + node + uv install" warning
+  // below is verbatim the "each independently re-downloading Node and uv"
+  // the ticket cites. Locks the PULL as well as the build, not just the
+  // build: two processes racing the same registry pull is the same kind of
+  // duplicated work, and a waiter that acquires the lock after another
+  // process's successful pull must see the image already present and
+  // return without building (the re-check below, re-run inside the lock).
+  return withLock(`${ctx}.lock`, async () => {
+    if (await d.imageExists(runtime, tag)) return tag;
+    if (await d.tryPull(runtime, tag)) return tag;
+
+    // openlock-6qfr: `tryPull` inherits the runtime's raw stderr (podman's
+    // "Error: unable to copy from source docker://... manifest unknown" or
+    // similar), which reads like a hard failure with nothing around it saying
+    // what happens next — that ambiguity misled a real diagnosis. A failed
+    // pull here is EXPECTED whenever this exact content hash hasn't been
+    // published to ghcr yet (e.g. a base.Containerfile change landed on main
+    // but no release has been tagged since — see
+    // .github/workflows/base-image.yml's header) and is always NON-FATAL: the
+    // local build below is the intended fallback, not an error path. Placed
+    // here rather than inside `defaultTryPull` so it also fires for injected
+    // test/deps callers and stays next to the branch it explains.
+    console.warn(
+      `Registry pull of ${tag} failed (see above) — expected and non-fatal ` +
+        "when this exact base hasn't been published yet. Building it locally " +
+        "instead (first build is slow: apt + node + uv install).",
+    );
+
+    mkdirSync(ctx, { recursive: true });
+    writeFileSync(join(ctx, "Dockerfile"), baseContent);
+    await d.build(runtime, tag, ctx);
+    return tag;
+  });
 }
 
 async function defaultImageExists(runtime: Runtime, tag: string): Promise<boolean> {
