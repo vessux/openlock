@@ -160,9 +160,41 @@ describe("credentials schema", () => {
     expect(issues.some((i) => i.path === "credentials[0].values.A.from_env")).toBe(true);
   });
 
-  it("unknown source-spec key errors", () => {
+  it("unknown source-spec key errors, with the updated allowed-list message", () => {
     const issues = ok({ credentials: [{ name: "x", values: { A: { stored: true } } }] });
-    expect(issues.some((i) => i.path === "credentials[0].values.A.stored")).toBe(true);
+    const issue = issues.find((i) => i.path === "credentials[0].values.A.stored");
+    expect(issue?.message).toBe('unknown source key "stored" (allowed: from_env, literal)');
+  });
+
+  it("valid literal source passes", () => {
+    const issues = ok({
+      credentials: [
+        {
+          name: "anthropic-meta",
+          values: { ANTHROPIC_BETA: { literal: "code-execution-2025-01-01" } },
+        },
+      ],
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it("both from_env and literal present errors, distinctly from either alone", () => {
+    const issues = ok({
+      credentials: [{ name: "x", values: { A: { from_env: "X", literal: "Y" } } }],
+    });
+    const issue = issues.find((i) => i.path === "credentials[0].values.A");
+    expect(issue?.message).toMatch(/exactly one of 'from_env' or 'literal', not both/);
+  });
+
+  it("neither from_env nor literal present errors", () => {
+    const issues = ok({ credentials: [{ name: "x", values: { A: {} } }] });
+    const issue = issues.find((i) => i.path === "credentials[0].values.A");
+    expect(issue?.message).toMatch(/must declare one of 'from_env' or 'literal'/);
+  });
+
+  it("empty-string literal errors", () => {
+    const issues = ok({ credentials: [{ name: "x", values: { A: { literal: "" } } }] });
+    expect(issues.some((i) => i.path === "credentials[0].values.A.literal")).toBe(true);
   });
 
   it("credential entry that is not a mapping errors", () => {

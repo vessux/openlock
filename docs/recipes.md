@@ -63,7 +63,18 @@ credentials:
       GITHUB_TOKEN: { from_env: GITHUB_TOKEN }
 ```
 
-`{ from_env: VAR }` is the **only** source form — there is no way to write a literal value directly into `config.yaml` (by design: it would get committed). The value is read from your host environment at `openlock sandbox` time.
+`{ from_env: VAR }` reads the value from your host environment at `openlock sandbox` time — use it for anything secret, since it keeps the value out of the committed file.
+
+For a value that is **not** secret — an API version/feature-flag string like `anthropic-beta`, `anthropic-version`, or `user-agent` — write it directly with `{ literal: VALUE }` instead of forcing yourself to export a host env var just to satisfy `from_env`:
+
+```yaml
+credentials:
+  - name: anthropic-meta
+    values:
+      ANTHROPIC_BETA: { literal: "oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14" }
+```
+
+`literal` is still a `credentials:` entry, provisioned into the gateway as a `generic` provider value exactly like a `from_env` one — it is **not** a separate "literal header" mechanism, just a second way to supply the value. Reference it from `policy.yaml`'s `cred_inject.from_credential` the same way you would a secret. Because it ends up in `.openlock/config.yaml` verbatim, never put an actual secret behind `literal` — that defeats the point of `from_env`.
 
 ## Egress allowlist
 

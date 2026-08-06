@@ -24,19 +24,25 @@ export interface Mount {
   readOnly?: boolean;
 }
 
-/** A source spec for one credential value. v1 supports host-env references only.
+/** A source spec for one credential value: either `{ from_env: VAR }` (the
+ * value is read from a host env var at run-time, never committed and never
+ * injected into the sandbox env) or `{ literal: VALUE }` (the value is the
+ * literal string, declared directly in config.yaml — for non-secret values
+ * such as an `anthropic-beta`/`anthropic-version`/`user-agent` string that
+ * don't need to live in a host env var). Both variants are routed through the
+ * same generic-provider/cred_inject machinery — `literal` is not a separate
+ * mechanism, just a second way to supply the value.
  * Not exported standalone: nothing outside this file needs to name it directly
  * (consumers go through `CredentialBundle["values"]`); re-add `export` if a
  * later unit needs to import it by name. */
-interface CredentialSource {
-  from_env: string;
-}
+type CredentialSource = { from_env: string } | { literal: string };
 
 /** A named secondary-credential bundle declared in .openlock/config.yaml.
  * Provisioned into the gateway as a `generic` provider and attached to the
  * sandbox so `cred_inject.from_credential` in policy.yaml can resolve it.
- * The credential VALUE is read from host env at run-time, never committed and
- * never injected into the sandbox env. */
+ * Each value is either read from host env at run-time (`from_env`, never
+ * committed, never injected into the sandbox env) or declared inline
+ * (`literal`, for non-secret values). */
 export interface CredentialBundle {
   name: string;
   values: Record<string, CredentialSource>;
