@@ -23,9 +23,12 @@
 // suite's own teardown) do the deleting.
 //
 // PREFIXES ARE DERIVED FROM THE SUITE ITSELF, not invented. As of
-// openlock-18c, the suite has no shared teardown helper — the
-// registry+afterAll pattern is duplicated inline across all 6 files it
-// touches — so the prefixes below were found by reading all 6:
+// openlock-qaed, the registry+afterAll pattern lives in a shared helper
+// (tests/integration/helpers/gateway-teardown.ts) that all 6 files below
+// use — before that fix, it was duplicated inline (openlock-18c) and one
+// file (npm-scoped-pkg.test.ts) had fallen through without the async-delete
+// wait, which is what caused the `ol-npm-*` residue this check exists to
+// catch. The prefixes below were found by reading all 6 files:
 //   tests/integration/harness-binary-cred-inject.test.ts   -> sandbox `ol-hb-<ts36>`,       provider "openlock-test-hb-claude"
 //   tests/integration/harness-cred-inject.test.ts          -> sandbox `ol-echo-<ts36>`,     provider "openlock-test-echo"
 //   tests/integration/npm-scoped-pkg.test.ts                -> sandbox `ol-npm-<ts36>`,      (creates no provider)
