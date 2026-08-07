@@ -34,11 +34,28 @@ if (mode === "holder") {
     const result = await withLock(
       lockPath,
       async () => {
+        // DELIBERATELY NON-ATOMIC, and load-bearing — do NOT "fix" this into an
+        // O_EXCL create-if-absent (which is what CodeQL's js/file-system-race
+        // remediation advice would have you do here). This check-then-act IS
+        // the race `withLock` exists to serialize, and the test's power depends
+        // on it staying racy: lock.test.ts case (a) asserts exactly ONE
+        // `" start"` line, and `start` is logged below only AFTER this check
+        // passes. With a genuinely atomic marker, a broken/no-op `withLock`
+        // would still yield one `start` (the loser would EEXIST out before
+        // logging) and the test would pass while proving nothing. Racy, both
+        // processes see no marker, both log `start`, and the assertion fails —
+        // which is the whole point. Safe because this is a test-only fixture
+        // writing into a per-test tmpdir with no untrusted input.
         if (existsSync(markerPath)) return { built: false };
         appendFileSync(logPath, `${runId} start\n`);
+        // The failure counter, by contrast, has no such requirement — read it
+        // by fd/exception rather than existsSync-then-read, so it doesn't add a
+        // second, gratuitous check-then-act to the file above.
         let remaining = 0;
-        if (existsSync(failuresRemainingPath)) {
+        try {
           remaining = Number(readFileSync(failuresRemainingPath, "utf-8"));
+        } catch {
+          remaining = 0; // absent counter ⇒ no simulated failures requested
         }
         if (remaining > 0) {
           writeFileSync(failuresRemainingPath, String(remaining - 1));
