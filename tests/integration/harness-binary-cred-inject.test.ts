@@ -31,13 +31,13 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { getSandboxState } from "../../src/sandbox/container";
 import { computeBaseTag, GHCR_BASE_PREFIX } from "../../src/sandbox/ensure-base";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureSandbox } from "../../src/sandbox/image-build";
 import { seedContainerfile } from "../../src/sandbox/seed-containerfile";
+import { teardownGatewayState } from "./helpers/gateway-teardown";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const SECRET_VALUE = "smoke-value-harness-binary";
@@ -60,125 +60,6 @@ async function spawnAndCapture(
     new Response(proc.stderr).text(),
   ]);
   return { code, stdout, stderr };
-}
-
-/**
- * True when `sandbox delete` failed only because the sandbox doesn't exist
- * — a harmless "nothing to clean up" outcome (e.g. the test died before
- * ever creating one), not a leak. Matches the literal stderr text from a
- * verified live probe against the real gateway (2026-08-05): `openshell
- * sandbox delete <nonexistent>` exits 1 with stderr `Error:   × code: 'Some
- * requested entity was not found', message: "sandbox not found"`. A
- * sandbox that still EXISTS and can't be removed (the real leak signature
- * — e.g. "attached to sandbox(es)") does not match this and stays loud.
- * (Contrast `provider delete` on a nonexistent name, which is already exit
- * 0 — no matcher needed there.)
- */
-function isSandboxNotFoundError(stderr: string): boolean {
-  return stderr.includes("sandbox not found");
-}
-
-/**
- * openlock-18c DISCOVERY — the reason sandbox-before-provider ordering alone
- * is NOT sufficient: `sandbox delete` returns exit 0 when the gateway
- * ACCEPTS the delete, not when it COMPLETES. The gateway tears the sandbox
- * down ASYNCHRONOUSLY, and a provider stays "attached to sandbox(es)" until
- * that finishes. Observed live in CI on podman (job 92302866248):
- * `sandbox delete ol-echo-<x>` returned exit 0, then microseconds later
- * `provider delete openlock-test-echo` failed with `provider
- * 'openlock-test-echo' is attached to sandbox(es): ol-echo-<x>` — the exact
- * leaked-state error this teardown exists to prevent. Docker's teardown
- * lands fast enough to hide this race — a docker-leg pass is NOT evidence
- * this wait is unnecessary. DO NOT "simplify" this wait away: the ordering
- * alone looks sufficient and demonstrably is not.
- *
- * Polls `getSandboxState` (src/sandbox/container.ts) until it reports
- * "missing" — the gateway AFFIRMATIVELY saying the sandbox is gone.
- * Deliberately not "anything other than the delete having been issued":
- * `getSandboxState` also returns "unreachable" for a transport hiccup
- * (openlock-vtl), which is explicitly NOT proof of absence and must keep
- * polling, never be mistaken for gone.
- */
-async function waitForSandboxGone(name: string, timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if ((await getSandboxState(name)) === "missing") return;
-    await Bun.sleep(750);
-  }
-  throw new Error(
-    `openlock-18c: sandbox ${name} still not reported gone ${timeoutMs}ms after ` +
-      `its delete was accepted — skipping the provider delete to avoid a ` +
-      `second, misleading "attached to sandbox(es)" error`,
-  );
-}
-
-/**
- * Deletes one sandbox and, if the delete was ACCEPTED (exit 0 — not a
- * not-found no-op), waits for it to actually land before the caller touches
- * the provider — see `waitForSandboxGone`'s doc for why this wait exists.
- * `skipProviderDelete: true` only when that wait times out, so the caller
- * doesn't fall through and attempt a provider delete that would just
- * produce a second, confusing error against a sandbox already known to
- * still be there.
- */
-async function deleteSandboxAndWait(
-  cli: { argv: string[]; cwd: string | undefined },
-  sandboxName: string,
-): Promise<{ error: string | null; skipProviderDelete: boolean }> {
-  const r = await spawnAndCapture([...cli.argv, "sandbox", "delete", sandboxName], cli.cwd);
-  if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
-    return {
-      error: `sandbox delete ${sandboxName} failed (exit ${r.code}): ${r.stderr}`,
-      skipProviderDelete: false,
-    };
-  }
-  if (r.code !== 0) return { error: null, skipProviderDelete: false }; // not-found — nothing to wait for.
-  try {
-    await waitForSandboxGone(sandboxName);
-    return { error: null, skipProviderDelete: false };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e), skipProviderDelete: true };
-  }
-}
-
-/**
- * Strict, loud gateway-side teardown (openlock-18c): deletes only the exact
- * sandbox/provider names THIS run registered — never a prefix sweep, since
- * this suite runs against the real dev gateway — sandbox-before-provider,
- * WAITING for the sandbox's async teardown to land (see
- * `deleteSandboxAndWait`/`waitForSandboxGone`) before the provider delete
- * that would otherwise race it, and throws on any real failure instead of
- * discarding it. A sandbox-delete that fails only because there was never
- * one to delete (the test died before creating it) is NOT an error — see
- * `isSandboxNotFoundError`. Split out of `afterAll` purely to keep that
- * hook's cognitive complexity under biome's limit.
- */
-async function teardownGatewayState(
-  cli: { argv: string[]; cwd: string | undefined },
-  sandboxName: string | null,
-  providerName: string | null,
-): Promise<void> {
-  const errors: string[] = [];
-  let skipProviderDelete = false;
-  if (sandboxName !== null) {
-    const outcome = await deleteSandboxAndWait(cli, sandboxName);
-    if (outcome.error !== null) errors.push(outcome.error);
-    skipProviderDelete = outcome.skipProviderDelete;
-  }
-  if (providerName !== null && !skipProviderDelete) {
-    const r = await spawnAndCapture([...cli.argv, "provider", "delete", providerName], cli.cwd);
-    if (r.code !== 0) {
-      errors.push(`provider delete ${providerName} failed (exit ${r.code}): ${r.stderr}`);
-    }
-  }
-  // Loud on purpose (openlock-18c): a silently-discarded teardown failure is
-  // exactly what let leaked gateway state poison the next run. Throwing here
-  // fails the suite instead of hiding it.
-  if (errors.length > 0) {
-    throw new Error(
-      `openlock-18c: gateway teardown left leaked state behind:\n${errors.join("\n")}`,
-    );
-  }
 }
 
 async function gitInit(dir: string): Promise<void> {

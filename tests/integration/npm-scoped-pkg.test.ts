@@ -17,6 +17,7 @@ import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
+import { teardownGatewayState } from "./helpers/gateway-teardown";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 
@@ -60,50 +61,39 @@ async function gitInit(dir: string): Promise<void> {
   if (commit.code !== 0) throw new Error(`git commit failed: ${commit.stderr}`);
 }
 
-/**
- * True when `sandbox delete` failed only because the sandbox doesn't exist
- * — a harmless "nothing to clean up" outcome (e.g. the test died before
- * ever creating one), not a leak. Matches the literal stderr text from a
- * verified live probe against the real gateway (2026-08-05): `openshell
- * sandbox delete <nonexistent>` exits 1 with stderr `Error:   × code: 'Some
- * requested entity was not found', message: "sandbox not found"`. A
- * sandbox that still EXISTS and can't be removed (the real leak signature
- * — e.g. "attached to sandbox(es)") does not match this and stays loud.
- * (Contrast `provider delete` on a nonexistent name, which is already exit
- * 0 — no matcher needed there.)
- */
-function isSandboxNotFoundError(stderr: string): boolean {
-  return stderr.includes("sandbox not found");
-}
-
 describe("npm scoped packages via default-js policy", () => {
   // openlock-18c: see harness-binary-cred-inject.test.ts for the full
   // mechanism writeup (bun test timeout runs afterEach/afterAll but not an
   // in-body try/finally). Also fixes the same second bug as its siblings:
   // `removeContainer` did a raw `podman rm -f`, never `sandbox delete`,
   // leaving the gateway's own sandbox record behind even on a clean run.
-  // No provider is created in this test, so only the sandbox is registered.
+  // No provider is created in this test, so only the sandbox is registered
+  // (teardownGatewayState is called with providerName: null).
   // NOT a prefix sweep — only the exact name this run registers is ever
   // deleted; this suite runs against the real dev gateway.
+  //
+  // openlock-qaed: this file used to issue `sandbox delete` and return
+  // without waiting for the gateway's async teardown to land — the ONE
+  // live-integration file that never got the wait-for-"missing" fix its
+  // siblings all have (tests/integration/helpers/gateway-teardown.ts). That
+  // let the test PASS while the sandbox (`ol-npm-*`) was still mid-teardown,
+  // intermittently tripping the read-only gateway-clean check in CI (bd
+  // openlock-n73d / PR #147). Migrated to the shared helper so this file now
+  // waits like the rest of the suite.
   let registeredSandbox: string | null = null;
 
   afterAll(
     async () => {
       if (registeredSandbox === null) return;
       const cli = await getCliInvocation();
-      const r = await spawnAndCapture(
-        [...cli.argv, "sandbox", "delete", registeredSandbox],
-        cli.cwd,
-      );
-      if (r.code !== 0 && !isSandboxNotFoundError(r.stderr)) {
-        throw new Error(
-          `openlock-18c: gateway teardown left leaked state behind: sandbox delete ` +
-            `${registeredSandbox} failed (exit ${r.code}): ${r.stderr}`,
-        );
-      }
+      await teardownGatewayState(cli, registeredSandbox, null);
     },
     // openlock-18c: explicit timeout required — hooks default to 5000ms
-    // regardless of the `it`'s own budget, and podman teardown exceeds that.
+    // regardless of the `it`'s own budget. openlock-qaed raises the stakes
+    // on this further: teardownGatewayState now waits (up to 60s, see
+    // waitForSandboxGone in the shared helper) for the async `sandbox
+    // delete` to actually land before returning, on top of the podman
+    // teardown time itself — both must fit inside this timeout.
     // See harness-binary-cred-inject.test.ts's afterAll for the full story.
     120_000,
   );
