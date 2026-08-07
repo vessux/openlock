@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { _resetConfigDirWarningForTests } from "./paths";
 import {
   credentialsPath,
   deleteProvider,
@@ -51,6 +52,40 @@ describe("credentialsPath", () => {
       expect(credentialsPath()).toBe(join(xdg, "openlock", "credentials.json"));
     } finally {
       delete process.env.XDG_CONFIG_HOME;
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("credentialsPath honors OPENLOCK_CONFIG_DIR (openlock-6pwu)", () => {
+  it("resolves under the override dir, used AS-IS with no 'openlock' suffix", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "openlock-config-dir-"));
+    process.env.OPENLOCK_CONFIG_DIR = scratch;
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(credentialsPath()).toBe(join(scratch, "credentials.json"));
+    } finally {
+      err.mockRestore();
+      delete process.env.OPENLOCK_CONFIG_DIR;
+      _resetConfigDirWarningForTests();
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("wins over XDG_CONFIG_HOME when both are set", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "openlock-config-dir-"));
+    const xdg = mkdtempSync(join(tmpdir(), "xdg-"));
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.OPENLOCK_CONFIG_DIR = scratch;
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(credentialsPath()).toBe(join(scratch, "credentials.json"));
+    } finally {
+      err.mockRestore();
+      delete process.env.OPENLOCK_CONFIG_DIR;
+      delete process.env.XDG_CONFIG_HOME;
+      _resetConfigDirWarningForTests();
+      rmSync(scratch, { recursive: true, force: true });
       rmSync(xdg, { recursive: true, force: true });
     }
   });
