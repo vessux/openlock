@@ -75,7 +75,12 @@ export function loadDeclaredCredentialsMerged(
   return out;
 }
 
-/** True when a .gitignore body ignores config.local.yaml (bare or root-anchored). */
+/** True when a .gitignore body ignores config.local.yaml (bare or root-anchored).
+ * openlock-ztf: `validate`'s only caller passes it `.openlock/.gitignore`'s own
+ * content — this deliberately does NOT consult `git check-ignore`, so a
+ * repo-root or parent `.gitignore` that also covers the file is invisible here
+ * and the caller's "not covered" note fires anyway. Accepted false positive
+ * (see the note text at cli/validate.ts), not a bug to fix in this function. */
 export function gitignoreCoversLocalConfig(content: string | null): boolean {
   if (content === null) return false;
   return content
@@ -91,7 +96,24 @@ export function gitignoreCoversLocalConfig(content: string | null): boolean {
  * merged effective config and returns only issues the per-file passes didn't
  * already report (deduped by severity+message; cross-file collisions carry a
  * message no single-file pass produced). Callers should only invoke this when
- * both files are schema-clean and a local file exists. */
+ * both files are schema-clean and a local file exists.
+ *
+ * openlock-ztf: two known, accepted imprecisions in the issues this returns —
+ * not worth fixing without threading per-mount source-file provenance through
+ * `mergeManifestDocs` (`mounts` is a plain base++local concat, per merge.ts's
+ * `mergeList`), which is plumbing this cosmetic gap doesn't justify:
+ *  1. `.path` (e.g. `mounts[3]`) is the index into the MERGED array, not
+ *     config.local.yaml's own index — it's offset by config.yaml's mount
+ *     count. The message text still names the actual colliding target, so a
+ *     user isn't misled about *what* collided, only *which array slot*.
+ *  2. `.file` is unconditionally `"config.local.yaml"` (see the call below)
+ *     even when the collision is genuinely cross-file — i.e. one of the two
+ *     colliding mounts actually lives in config.yaml. This half is more
+ *     misleading than (1): the issue can point a user at the wrong file
+ *     entirely for one side of the collision.
+ * index.test.ts pins today's (imprecise) `.path` value in "catches a
+ * cross-file duplicate mount target..." — a future provenance fix must
+ * consciously update that assertion, not accidentally satisfy it. */
 function lintMergedConfig(
   configPath: string,
   localConfigPath: string,
@@ -102,6 +124,16 @@ function lintMergedConfig(
   const baseDoc = yaml.load(readFileSync(configPath, "utf-8")) ?? {};
   const localDoc = yaml.load(readFileSync(localConfigPath, "utf-8")) ?? {};
   const merged = mergeManifestDocs(baseDoc, localDoc);
+  // openlock-ztf: the dedup key (severity+message) has no path component, so
+  // a within-file duplicate already reported for config.local.yaml alone
+  // (e.g. two local mounts sharing a target) can suppress a DIFFERENT,
+  // genuinely cross-file duplicate at that same target — the message text is
+  // identical either way ("duplicate target X" carries no index). Benign:
+  // the within-file duplicate already told the user about target X, and once
+  // that one is fixed, the cross-file duplicate (if still present) surfaces
+  // on the next `validate` run since its message is no longer "already
+  // reported". Not fixed — see index.test.ts's "...documented limitation..."
+  // test for the pinned current behaviour.
   const known = new Set(alreadyReported.map((i) => `${i.severity} ${i.message}`));
   return lintManifest(merged, projectDir, { ...opts, file: "config.local.yaml" }).filter(
     (mi) => !known.has(`${mi.severity} ${mi.message}`),
