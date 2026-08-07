@@ -50,6 +50,26 @@ jobs:
         runtime: [podman, docker]
     env:
       OPENLOCK_RUNTIME: ${{ matrix.runtime }}
+      # bd openlock-o4t4: asserts this runner is a disposable host, i.e. a
+      # test may safely mutate REAL host state (credentials, a real dev
+      # gateway, real podman/docker storage) here rather than being
+      # confined to synthetic tmpdir state. This runner qualifies: it is a
+      # throwaway ubuntu-24.04 VM provisioned fresh for this job, with a
+      # brand-new HOME and no operator credentials/gateway/containers on it
+      # to begin with — nothing here needs to survive the job, so there is
+      # nothing to protect by refusing. Set at job level (not just on the
+      # "Integration tests" step) so it's visible to every step, matching
+      # where OPENLOCK_RUNTIME already lives.
+      #
+      # tests/integration/disposable-host.test.ts is the other half of this:
+      # a guard that turns "this var got silently dropped from this job" red
+      # instead of letting every disposable-host-gated test start silently
+      # refusing (or, worse, silently skipping) forever. See that file's own
+      # comment for the exact CI-detection condition. The local-machine
+      # equivalent of this marker (a disposable VM on a developer's own
+      # laptop) is intentionally NOT set here — that is bd openlock-uze8,
+      # a separate not-yet-built piece; this var is CI-only today.
+      OPENLOCK_DISPOSABLE_HOST: "1"
     steps:
       - uses: actions/checkout@v6
 
