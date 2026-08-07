@@ -59,8 +59,14 @@ export function validateCmd(args: string[]): void {
     const giPath = join(folder, ".gitignore");
     const gi = existsSync(giPath) ? readFileSync(giPath, "utf-8") : null;
     if (!gitignoreCoversLocalConfig(gi)) {
+      // openlock-ztf: precise about what was actually inspected, not just
+      // softened wording. Only .openlock/.gitignore is checked (no
+      // `git check-ignore` — see gitignoreCoversLocalConfig's doc comment),
+      // so a repo-level/parent .gitignore that already covers this file
+      // produces this same note; that's an accepted false positive, not a bug.
       console.log(
-        "note: config.local.yaml is not covered by .openlock/.gitignore — add `config.local.yaml` so personal overrides aren't committed.",
+        "note: config.local.yaml is not listed in .openlock/.gitignore — add `config.local.yaml` there so personal overrides aren't committed. " +
+          "(Only .openlock/.gitignore is checked; if you ignore it via a repo-level .gitignore, this note is expected.)",
       );
     }
   }
