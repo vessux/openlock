@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 // Embedded at build time via Bun's `with { type: "text" }` import attribute.
 import BASE_CONTAINERFILE from "../../containers/base.Containerfile" with { type: "text" };
+import { withLock } from "../lock";
 import { type Runtime, resolveRuntime } from "../runtime";
 import { ensureBase as defaultEnsureBase, isOpenlockBaseRef, parseFromImage } from "./ensure-base";
 
@@ -65,21 +66,54 @@ export async function ensureImage(args: EnsureImageArgs): Promise<ImageRef> {
   const tag = computeImageTag(args.containerfileContent, args.tagPrefix);
   const hash = tag.split(":")[1];
 
+  // Fast, unlocked path: the overwhelmingly common call is "already built" —
+  // skip ever touching the lock file for it. `noCache` intentionally forces
+  // a rebuild, so this check (and its locked re-check below) are both
+  // skipped when set, matching the pre-lock behavior.
   if (!args.noCache && (await imageExists(runtime, tag))) {
     return { tag, built: false };
   }
 
   const dir = contextDirForHash(hash);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "Dockerfile"), args.containerfileContent);
+  // openlock-jyk: from here on, the exists re-check AND the build run under
+  // a cross-process lock keyed by the image hash, so two concurrent callers
+  // building identical Containerfile content serialize onto one real build
+  // instead of each independently re-downloading Node/uv. The re-check
+  // re-runs INSIDE the lock (not just trusted from the unlocked check above)
+  // because another contender may have finished its own build in the time
+  // it took us to acquire the lock.
+  //
+  // NOTE for the next reader: `ensureImage` itself has NO production
+  // caller — the real `openlock sandbox` path is session.ts ->
+  // `ensureSandbox` below, which has (and now locks) its own equivalent
+  // check-then-build sites. `ensureImage` is exercised by
+  // tests/integration/*.test.ts, several of which call it with identical
+  // (containerfileContent, tagPrefix) — real contention under parallel test
+  // workers — which is why it's still worth locking, just not the site the
+  // original bug report's "openlock sandbox" framing describes.
+  //
+  // Deliberately does NOT cache or serialize on FAILURE: if the closure
+  // below throws (this call's build failed), the lock is released and the
+  // rejection surfaces to THIS caller only — a later, independent
+  // `ensureImage` call that was waiting re-runs this same check-then-build
+  // itself once it acquires the lock, so it can still rescue an earlier
+  // failure (the accidental resilience openlock-jp2 documented and this
+  // change must not regress).
+  return withLock(`${dir}.lock`, async () => {
+    if (!args.noCache && (await imageExists(runtime, tag))) {
+      return { tag, built: false };
+    }
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "Dockerfile"), args.containerfileContent);
 
-  const buildArgs = buildImageBuildArgv(runtime, tag, dir, args.noCache);
-  const proc = Bun.spawn(buildArgs, { stdout: "inherit", stderr: "inherit" });
-  const code = await proc.exited;
-  if (code !== 0) {
-    throw new Error(`${runtime} build failed (exit ${code}): ${buildArgs.join(" ")}`);
-  }
-  return { tag, built: true };
+    const buildArgs = buildImageBuildArgv(runtime, tag, dir, args.noCache);
+    const proc = Bun.spawn(buildArgs, { stdout: "inherit", stderr: "inherit" });
+    const code = await proc.exited;
+    if (code !== 0) {
+      throw new Error(`${runtime} build failed (exit ${code}): ${buildArgs.join(" ")}`);
+    }
+    return { tag, built: true };
+  });
 }
 
 export interface EnsureSandboxDeps {
@@ -120,10 +154,18 @@ export async function ensureSandbox(
 
   const hash = userTag.split(":")[1];
   const ctx = contextDirForHash(hash);
-  mkdirSync(ctx, { recursive: true });
-  writeFileSync(join(ctx, "Dockerfile"), userContainerfileContent);
-  await d.build(runtime, userTag, ctx, { noCache: rebuild, pull: rebuild });
-  return userTag;
+  // openlock-jyk: this is the actual `openlock sandbox` production hot
+  // path — two concurrent invocations building the identical user
+  // Containerfile now serialize onto one real build. `rebuild` still
+  // bypasses the short-circuit exactly as it does above (mirrors `noCache`
+  // in `ensureImage`), so the locked re-check is skipped when set too.
+  return withLock(`${ctx}.lock`, async () => {
+    if (!rebuild && (await d.imageExists(runtime, userTag))) return userTag;
+    mkdirSync(ctx, { recursive: true });
+    writeFileSync(join(ctx, "Dockerfile"), userContainerfileContent);
+    await d.build(runtime, userTag, ctx, { noCache: rebuild, pull: rebuild });
+    return userTag;
+  });
 }
 
 async function defaultImageExistsInternal(runtime: Runtime, tag: string): Promise<boolean> {

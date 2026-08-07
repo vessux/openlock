@@ -2,7 +2,11 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "project": ["src/**/*.ts"],
   "entry": ["scripts/print-fork-asset-urls.ts"],
-  "ignore": ["src/cli/_picker-smoke.ts"],
+  "ignore": [
+    "src/cli/_picker-smoke.ts",
+    "src/_lock-smoke.ts",
+    "src/sandbox/_ensure-image-smoke.ts"
+  ],
   "ignoreDependencies": ["bun-types"],
   "ignoreBinaries": ["tsc"]
 }

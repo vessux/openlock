@@ -181,3 +181,59 @@ describe("ensureBase flow", () => {
     }
   });
 });
+
+// openlock-jyk: ensureBase is the bug report's REAL production site
+// (`openlock sandbox` -> ensureSandbox -> ensureBase, for the
+// openlock-base FROM case — see this file's "first build is slow: apt +
+// node + uv install" warning, which is the exact resource the ticket cites
+// two concurrent invocations would each redundantly download). Deliberately
+// in-process/deterministic via the existing EnsureBaseDeps injection —
+// withLock's own cross-process semantics are covered generically in
+// ../lock.test.ts; this proves ensureBase's WIRING onto it.
+describe("ensureBase lock wiring (openlock-jyk)", () => {
+  it("re-checks imageExists INSIDE the lock — a pull or build finished by someone else while we waited is honored, not redone", async () => {
+    let calls = 0;
+    const tag = await ensureBase("FROM lock-wiring-recheck", {
+      // false on the unlocked fast-path check, true on the locked re-check —
+      // simulates another process finishing its pull/build while we waited.
+      imageExists: async () => {
+        calls++;
+        return calls > 1;
+      },
+      tryPull: async () => {
+        throw new Error("should not pull — the locked re-check should have short-circuited");
+      },
+      build: async () => {
+        throw new Error("should not build — the locked re-check should have short-circuited");
+      },
+    });
+    expect(tag).toMatch(/^ghcr\.io\/vessux\/openlock-base:/);
+    expect(calls).toBe(2);
+  });
+
+  it("releases the lock after a failed build so an independent later call can retry and succeed (jp2 resilience)", async () => {
+    const baseContent = "FROM lock-wiring-retry";
+    const deps = {
+      imageExists: async () => false,
+      tryPull: async () => false, // always falls through to build
+    };
+
+    await expect(
+      ensureBase(baseContent, {
+        ...deps,
+        build: async () => {
+          throw new Error("boom");
+        },
+      }),
+    ).rejects.toThrow("boom");
+
+    // Same content -> same tag -> same lock path. If the failed attempt
+    // above hadn't released the lock, this would hang (and the test's
+    // default timeout would fail it) instead of succeeding.
+    const tag = await ensureBase(baseContent, {
+      ...deps,
+      build: async () => {},
+    });
+    expect(tag).toMatch(/^ghcr\.io\/vessux\/openlock-base:/);
+  });
+});

@@ -184,3 +184,58 @@ describe("ensureSandbox", () => {
     expect(tag).toMatch(/^openlock-sandbox:[0-9a-f]{12}$/);
   });
 });
+
+// openlock-jyk: proves the lock wiring on ensureSandbox's user-tag
+// check-then-build site — the real `openlock sandbox` production path
+// (session.ts -> ensureSandbox). Deliberately in-process and deterministic
+// via the existing EnsureSandboxDeps injection rather than real subprocess
+// contention: withLock's own cross-process semantics are already covered in
+// ../lock.test.ts (and end-to-end for ensureImage in
+// image-build-lock.test.ts); what's unproven here is WIRING — that
+// ensureSandbox's closure actually runs inside the lock and behaves like
+// ensureImage's reference shape.
+describe("ensureSandbox lock wiring (openlock-jyk)", () => {
+  it("re-checks imageExists INSIDE the lock — a build finished by someone else while we waited is honored, not redone", async () => {
+    let calls = 0;
+    const tag = await ensureSandbox("FROM ghcr.io/vessux/openlock-base:abc\n", undefined, {
+      ensureBase: async () => "ghcr.io/vessux/openlock-base:abc",
+      // false on the unlocked fast-path check, true on the locked re-check —
+      // simulates another process finishing its build while we waited.
+      imageExists: async () => {
+        calls++;
+        return calls > 1;
+      },
+      build: async () => {
+        throw new Error("should not build — the locked re-check should have short-circuited");
+      },
+    });
+    expect(tag).toMatch(/^openlock-sandbox:[0-9a-f]{12}$/);
+    expect(calls).toBe(2);
+  });
+
+  it("releases the lock after a failed build so an independent later call can retry and succeed (jp2 resilience)", async () => {
+    const userContent = "FROM ghcr.io/vessux/openlock-base:lock-retry\n";
+    const deps = {
+      ensureBase: async () => "ghcr.io/vessux/openlock-base:lock-retry",
+      imageExists: async () => false,
+    };
+
+    await expect(
+      ensureSandbox(userContent, undefined, {
+        ...deps,
+        build: async () => {
+          throw new Error("boom");
+        },
+      }),
+    ).rejects.toThrow("boom");
+
+    // Same content -> same tag -> same lock path. If the failed attempt
+    // above hadn't released the lock, this would hang (and the test's
+    // default timeout would fail it) instead of succeeding.
+    const tag = await ensureSandbox(userContent, undefined, {
+      ...deps,
+      build: async () => {},
+    });
+    expect(tag).toMatch(/^openlock-sandbox:[0-9a-f]{12}$/);
+  });
+});
