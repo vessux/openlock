@@ -91,3 +91,44 @@ describe("validateCmd output (byte-identical guard, openlock-j9t7)", () => {
     expect(exitCode).toBe(1);
   });
 });
+
+// openlock-ztf item 1: the gitignore advisory only ever inspects
+// .openlock/.gitignore (see gitignoreCoversLocalConfig's doc comment in
+// config-core/index.ts) — it deliberately does NOT shell out to
+// `git check-ignore`. A repo-root or parent .gitignore that also covers
+// config.local.yaml is invisible to it, so the note fires anyway. This is a
+// DOCUMENTED, ACCEPTED false positive (fails safe: over-warns rather than
+// silently missing an uncovered file) — this test pins today's behaviour, not
+// a desired end state. Do not "fix" it into passing by teaching the check
+// about other .gitignore locations without updating this test's premise.
+describe("validateCmd gitignore advisory — accepted false positive (openlock-ztf item 1)", () => {
+  let root: string;
+  let logs: string[];
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "openlock-validate-gitignore-"));
+    logs = [];
+    spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
+    const folder = join(root, ".openlock");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "config.yaml"), "args: [--x]\n");
+    writeFileSync(join(folder, "policy.yaml"), "version: 1\n");
+    writeFileSync(join(folder, "config.local.yaml"), "args: [--y]\n");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("still fires when config.local.yaml is covered only by a repo-root .gitignore, not .openlock/.gitignore", () => {
+    // Git itself would ignore config.local.yaml via this rule — but the
+    // advisory never looks here, only at .openlock/.gitignore.
+    writeFileSync(join(root, ".gitignore"), "config.local.yaml\n");
+    validateCmd([root]);
+    expect(logs.some((l) => l.startsWith("note: config.local.yaml is not listed"))).toBe(true);
+  });
+});

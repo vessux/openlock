@@ -386,7 +386,7 @@ describe("config.local.yaml support", () => {
     expect(issues.some((i) => i.message.includes("anthropic"))).toBe(false);
   });
 
-  it("catches a cross-file duplicate mount target that only appears when merged", () => {
+  it("catches a cross-file duplicate mount target that only appears when merged, but pins today's imprecise MERGED-array index (openlock-ztf item 2 — DOCUMENTED, ACCEPTED limitation, not the desired end state)", () => {
     seed({
       "config.yaml":
         "mounts:\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n",
@@ -395,9 +395,18 @@ describe("config.local.yaml support", () => {
       "policy.yaml": "version: 1\n",
     });
     const issues = lintFolder(dir, { offline: true });
-    expect(
-      issues.some((i) => i.file === "config.local.yaml" && /duplicate target/i.test(i.message)),
-    ).toBe(true);
+    const dup = issues.find(
+      (i) => i.file === "config.local.yaml" && /duplicate target/i.test(i.message),
+    );
+    expect(dup).toBeDefined();
+    // Merged mounts = config.yaml's mount ++ config.local.yaml's mount, so
+    // this reports "mounts[1]" — the MERGED array's index — even though the
+    // colliding mount is config.local.yaml's OWN index 0. See
+    // lintMergedConfig's doc comment (index.ts): fixing this needs per-mount
+    // source-file provenance threaded through mergeManifestDocs, which this
+    // cosmetic gap doesn't justify. A future provenance fix must consciously
+    // update this assertion, not silently satisfy it.
+    expect(dup?.path).toBe("mounts[1].target");
   });
 
   it("does not double-report a duplicate target that already exists within config.yaml alone", () => {
@@ -410,5 +419,28 @@ describe("config.local.yaml support", () => {
     const issues = lintFolder(dir, { offline: true });
     const dupTargetIssues = issues.filter((i) => /duplicate target/i.test(i.message));
     expect(dupTargetIssues.length).toBe(1);
+  });
+
+  it("suppresses a genuinely cross-file duplicate target when config.local.yaml already has its OWN internal duplicate at the same target (openlock-ztf item 3 — DOCUMENTED, ACCEPTED masking, not the desired end state)", () => {
+    seed({
+      "config.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n",
+      // Two local mounts share a target with EACH OTHER *and* with config.yaml's
+      // mount above. The within-file pass on config.local.yaml alone reports
+      // "duplicate target ...shared" once (its own two mounts colliding); the
+      // merged pass's genuinely-cross-file duplicates (config.yaml's mount vs.
+      // either local mount) carry the exact same message text (no index in the
+      // message) and are deduped away by lintMergedConfig's severity+message
+      // key. See lintMergedConfig's doc comment (index.ts) — not a correctness
+      // bug, just under-tested until now. Fixing the within-file duplicate
+      // makes the cross-file one resurface on the next `validate` run.
+      "config.local.yaml":
+        "mounts:\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n  - source: .\n    target: /sandbox/.openlock/shared\n    type: bind\n",
+      "policy.yaml": "version: 1\n",
+    });
+    const issues = lintFolder(dir, { offline: true });
+    const dupTargetIssues = issues.filter((i) => /duplicate target/i.test(i.message));
+    expect(dupTargetIssues.length).toBe(1);
+    expect(dupTargetIssues[0]?.file).toBe("config.local.yaml");
   });
 });
