@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveConfigDir } from "./paths";
 import type { ProviderId } from "./providers/types";
 
 /** Gateway-side credential-refresh material captured HOST-side at login. Lets
@@ -28,9 +28,7 @@ export interface CredentialsFileV2 {
 }
 
 export function credentialsPath(): string {
-  const xdg = process.env.XDG_CONFIG_HOME;
-  const base = xdg && xdg.length > 0 ? xdg : join(process.env.HOME ?? homedir(), ".config");
-  return join(base, "openlock", "credentials.json");
+  return join(resolveConfigDir(), "credentials.json");
 }
 
 function emptyFile(): CredentialsFileV2 {
