@@ -13,8 +13,8 @@
 // CI never runs this — no real key in CI secrets. Local-only.
 
 import { afterAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildOpenshellExecArgv } from "../../src/sandbox/container";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
@@ -22,24 +22,22 @@ import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 import { teardownGatewayState } from "./helpers/gateway-teardown";
+import { loadRealOpenRouterBearerForLiveIntegrationOnly } from "./helpers/real-credentials";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
-const CRED_PATH = join(homedir(), ".config", "openlock", "credentials.json");
 
-function loadOpenRouterBearer(): string | null {
-  if (!existsSync(CRED_PATH)) return null;
-  try {
-    const raw = JSON.parse(readFileSync(CRED_PATH, "utf-8")) as {
-      providers?: Record<string, { credentials?: Record<string, string> }>;
-    };
-    const token = raw.providers?.openrouter?.credentials?.OPENROUTER_BEARER_TOKEN;
-    return token ?? null;
-  } catch {
-    return null;
-  }
-}
-
-const BEARER = loadOpenRouterBearer();
+// openlock-q7b8: the real-credentials.json read moved to
+// tests/integration/helpers/real-credentials.ts — that is now the ONLY
+// sanctioned place in the tree allowed to construct this path (enforced by
+// scripts/check-real-state-access.ts). This call is unconditional at module
+// scope, same as before the extraction, because `it.skipIf` below needs
+// BEARER's value at collection time to decide whether to skip — but the
+// helper itself now checks OPENLOCK_LIVE_INTEGRATION internally and returns
+// null without touching disk at all when it isn't "1", so a plain
+// `bun run test` no longer reads the real file even read-only (a
+// strengthening over the pre-extraction behavior, which read it
+// unconditionally regardless of LIVE).
+const BEARER = loadRealOpenRouterBearerForLiveIntegrationOnly();
 const PROVIDER_NAME = "openlock-test-or-real";
 const FIXTURE_POLICY = resolve(
   __dirname,
