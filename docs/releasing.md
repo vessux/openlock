@@ -259,22 +259,36 @@ Since v0.13.0 this is at least *visible*: `detectBaseImageDrift()` warns in both
 and the `openlock sandbox` preflight. It warns and never blocks, because a stale pin builds fine and
 may be deliberate.
 
-**But nothing announces it at upgrade time, and that is the assumption most likely to mislead you
-when deciding whether a release needs a migration note.** Installing a new CLI prints nothing about
-the base image — `install.sh` reports the install path and runs `doctor` in whatever directory you
-happen to be in, which is usually not a project. The drift warning is *reactive and per-project*: it
-fires only the next time you run `openlock doctor` or `openlock sandbox` **inside** an affected
-project. So a user with five projects gets five separate warnings, each deferred until they next
-touch that project — possibly weeks later, possibly never for one they have parked. Nobody is ever
-told "this upgrade changed the base; N of your projects are now stale".
+**Since openlock-u7ca, a base-image change IS announced at upgrade time** — this does not depend on
+which release you're writing notes for, so don't assume it away. The mechanism is a small marker
+file (`base-tag.seen`) under the state dir (`~/.local/state/openlock` by default), checked by
+`announceBaseImageChangeIfNeeded()` (`src/sandbox/base-image-announce.ts`) at the very top of
+`cli.ts`'s `main()`, before any flag or command handling — so it fires on the very next invocation
+of *any* `openlock` command after the binary was swapped, not only inside a project directory and
+not only when `doctor`/sandbox preflight happens to run. It is deliberately NOT an `install.sh`
+hook: a `bun link` dev install bypasses `install.sh` entirely, so only a check inside the CLI itself
+covers every install method.
 
-That is a real gap, not a design intent, and it is filed as `openlock-u7ca` (the outgoing binary is
-still on disk when `install.sh` runs, and both versions can self-report their base hash offline in
-~40ms, so the comparison is cheap and available). Until it ships:
+On the invocation where the recorded tag differs from the currently embedded one, it prints to
+stderr (never stdout, so `--json` output stays clean) which projects — among those the session store
+knows about — are still pinned to the old base, and separately reports any known project path that
+couldn't be checked (moved or deleted) rather than silently dropping it. The remedy is unchanged:
+`openlock update-base --project <dir>`, then rebuild.
 
-**Any release that changes `base.Containerfile` needs an explicit migration note in the changelog**,
-because the changelog is the only surface that will actually tell anyone. The nftables fix (#133)
-stranded every pre-existing project.
+Two gaps remain, deliberately not solved by the marker mechanism:
+
+- A project that was `openlock init`ed but never had a sandbox created is invisible to the session
+  store, so it never appears in the affected-projects report — there is no read path from a bare
+  `.openlock/` directory back to "projects that exist", only from recorded sessions.
+- The announcement fires on the *next* invocation after the upgrade, whenever that happens to be —
+  a user who doesn't run `openlock` again for weeks still finds out weeks later, just via a CLI
+  message instead of a doctor/preflight warning.
+
+Because of those two gaps, **a release that changes `base.Containerfile` should still carry an
+explicit migration note in the changelog** — the CLI announcement is real, immediate signal for
+almost every user now, but it is not a complete substitute for that note. The nftables fix (#133)
+stranded every pre-existing project; that specific failure mode (silence, forever, for a parked
+project) is what openlock-u7ca fixed.
 
 ### `openlock-sandbox:<hash>` — local only, never published
 

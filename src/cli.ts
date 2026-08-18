@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import pkg from "../package.json" with { type: "json" };
+import { announceBaseImageChangeIfNeeded } from "./sandbox/base-image-announce";
 import { computeBaseTag } from "./sandbox/ensure-base";
 import { BASE_CONTAINERFILE } from "./sandbox/image-build";
 
@@ -54,6 +55,15 @@ Common flags:
 `.trim();
 
 function main(): void {
+  // openlock-u7ca: fires on EVERY invocation, before any flag/command
+  // handling below — this is deliberate. Gating this behind a specific
+  // command (doctor, sandbox preflight) would reproduce the exact "the
+  // information exists, the surface that would show it never runs" defect
+  // this check exists to fix. Synchronous, cheap (local sha256 + a couple of
+  // small file reads), and internally guaranteed never to throw — see its
+  // own doc comment in sandbox/base-image-announce.ts.
+  announceBaseImageChangeIfNeeded();
+
   const args = process.argv.slice(2);
 
   // Global flags (--version/-v, --print-base-tag, and --help/-h below) are
