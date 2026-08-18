@@ -101,6 +101,14 @@ network_policies:
           - allow:
               method: GET
               path: /**
+      - host: models.opencode.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /**
     allowed_secrets:
       - OPENROUTER_BEARER_TOKEN
   pi:

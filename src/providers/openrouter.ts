@@ -69,6 +69,29 @@ export const OPENROUTER: ProviderPlugin = {
         rules: [{ allow: { method: "GET", path: "/**" } }],
         // no cred_inject — public read-only model metadata
       },
+      // models.opencode.ai is opencode's OWN model-metadata service, and as of
+      // 1.18.18 it is the host opencode actually calls at startup — models.dev
+      // is still referenced inside the binary but was not requested even once
+      // across two observed runs. Both are allowed rather than swapping one for
+      // the other: the strings coexist in the shipped binary, so which one a
+      // given release reaches for is opencode's private business, and allowing
+      // only the currently-observed host would re-break on any release that
+      // falls back.
+      //
+      // This was found by live verification of the 1.18.9 -> 1.18.18 bump, not
+      // by any test: the denial is not fatal-looking from the outside. opencode
+      // reports its own opaque `UnknownError` with a server-log reference, the
+      // inference request is never attempted, and openrouter.ai appears nowhere
+      // in the egress log — so the failure reads as an OpenRouter or credential
+      // fault rather than a blocked metadata host. Same class as the models.dev
+      // note above; the only new information is the hostname.
+      {
+        host: "models.opencode.ai",
+        port: 443,
+        protocol: "rest",
+        rules: [{ allow: { method: "GET", path: "/**" } }],
+        // no cred_inject — public read-only model metadata
+      },
     ];
   },
 
