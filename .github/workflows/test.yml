@@ -82,10 +82,11 @@ jobs:
       - name: Preflight — fork release assets published? (bd openlock-lpc)
         # OPENSHELL_FORK_TAG pins a fork *tag*; the fork's own release
         # workflow builds cross-platform binaries asynchronously and can
-        # take hours after the tag push (see CLAUDE.md's release-line
-        # model). If this job runs before assets land, ensureFromRelease's
-        # `curl -f` 404s (exit 22) deep inside gateway startup, ~10+ minutes
-        # into a 20-minute job, after podman/subuid setup has already run.
+        # take hours after the tag push (see docs/releasing.md, Part 1 —
+        # the release-line model). If this job runs before assets land,
+        # ensureFromRelease's `curl -f` 404s (exit 22) deep inside gateway
+        # startup, ~10+ minutes into a 20-minute job, after podman/subuid
+        # setup has already run.
         # Check the same URLs the real download uses (asked of
         # fork-binaries.ts, not re-derived here) and fail fast and
         # unambiguously instead.

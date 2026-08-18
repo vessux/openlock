@@ -16,3 +16,7 @@ Start with the [README](../README.md) for the golden path (install → doctor �
 - [Policies](./policies.md)
 - [Security & runtime](./security.md)
 - [Agent config reference](./agent-config-reference.md) — complete machine-readable config/policy schema + decision procedure for AI agents
+
+## Maintainers
+
+- [Releasing](./releasing.md) — how a release is cut across both repos, how the `openlock-base` image is managed, and when to cut a prerelease
