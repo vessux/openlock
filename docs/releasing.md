@@ -7,8 +7,12 @@ registry whose lifecycle is different again — and none of that is discoverable
 place. Everything here has been verified against the workflows and the registry rather than
 recalled.
 
-Related: the fork **upstream-sync** ritual (rebasing the delta onto a new upstream) lives in
-`CLAUDE.md`. This document starts where that one ends: you have a fork state you want to ship.
+Scope: this document starts once you have a fork state you want to ship. The fork **upstream-sync**
+ritual that produces that state — rebasing the delta onto a new upstream, squeezing it, pre-flighting
+proto collisions — is **not in this repository** and is not linked here on purpose: it currently lives
+only in a maintainer's local, untracked agent-instruction file, so any link from a tracked doc would
+dangle for everyone else. Bringing maintainer guidance into a committed file is tracked as
+`openlock-yya`; until that lands, treat the sync ritual as an external prerequisite.
 
 ---
 
@@ -253,8 +257,24 @@ does not change that.** Users must run `openlock update-base --project <dir>` an
 
 Since v0.13.0 this is at least *visible*: `detectBaseImageDrift()` warns in both `openlock doctor`
 and the `openlock sandbox` preflight. It warns and never blocks, because a stale pin builds fine and
-may be deliberate. **Any release that changes `base.Containerfile` needs an explicit migration note
-in the changelog** — the nftables fix (#133) stranded every pre-existing project.
+may be deliberate.
+
+**But nothing announces it at upgrade time, and that is the assumption most likely to mislead you
+when deciding whether a release needs a migration note.** Installing a new CLI prints nothing about
+the base image — `install.sh` reports the install path and runs `doctor` in whatever directory you
+happen to be in, which is usually not a project. The drift warning is *reactive and per-project*: it
+fires only the next time you run `openlock doctor` or `openlock sandbox` **inside** an affected
+project. So a user with five projects gets five separate warnings, each deferred until they next
+touch that project — possibly weeks later, possibly never for one they have parked. Nobody is ever
+told "this upgrade changed the base; N of your projects are now stale".
+
+That is a real gap, not a design intent, and it is filed as `openlock-u7ca` (the outgoing binary is
+still on disk when `install.sh` runs, and both versions can self-report their base hash offline in
+~40ms, so the comparison is cheap and available). Until it ships:
+
+**Any release that changes `base.Containerfile` needs an explicit migration note in the changelog**,
+because the changelog is the only surface that will actually tell anyone. The nftables fix (#133)
+stranded every pre-existing project.
 
 ### `openlock-sandbox:<hash>` — local only, never published
 
