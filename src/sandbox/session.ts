@@ -29,7 +29,9 @@ import {
 } from "./container";
 import { resolveCredentialValues } from "./credentials";
 import {
+  branchReattachWarning,
   computeBuildInputsHashFromFiles,
+  debugEgressReattachWarning,
   decideReattachAction,
   findUnattachedCredentialBundles,
   type ReattachAction,
@@ -409,6 +411,15 @@ async function createSession(
       // derived from `resolved.credentials` on reattach) because attach only
       // ever happens at create — this IS what actually got attached.
       attachedCredentialBundles: attachProviders,
+      // openlock-tgfk: the ground truth a later reattach's --debug-egress/
+      // --branch request is compared against — see SessionMeta's doc
+      // comments and sandbox/drift.ts's debugEgressReattachWarning/
+      // branchReattachWarning. Always set (debugEgress even when `false`,
+      // branch as `null` rather than omitted when absent) so a legacy
+      // session (field key missing entirely) stays distinguishable from a
+      // session genuinely created without either flag.
+      debugEgress,
+      branch: branch ?? null,
     };
     saveSession(sessionsDir(), meta);
 
@@ -932,6 +943,32 @@ async function resolveOrCreateSession(
   // ResolvedSession's doc comment for why it gets re-emitted later.
   const attachStale = async () => {
     const policyWarningLines = enforcePolicyPreflight(policyIssues, { policyWillBeApplied: false });
+    // openlock-tgfk: --debug-egress and --branch are cold build inputs that
+    // only ever take effect at container CREATE time — a plain reattach
+    // can't apply either to the already-running container, and silently
+    // discarding them is worse than useless for --debug-egress specifically
+    // (a diagnostic flag whose empty result is easily misread as evidence
+    // rather than as "never instrumented"). Compared against `m.debugEgress`/
+    // `m.branch` — the recorded CREATE-time ground truth — NOT fired on the
+    // bare fact that the flag was passed again: a request that's ALREADY
+    // satisfied by what the running container actually booted with must stay
+    // silent, or this warning becomes exactly the manufactured false
+    // evidence the ticket is about (see debugEgressReattachWarning's doc
+    // comment). Printed immediately (matching enforcePolicyPreflight's own
+    // print-now behavior) AND pushed into policyWarningLines for the
+    // post-harness reprint — the immediate print is the ONLY copy a
+    // scripted/--no-attach caller ever sees (that branch returns before
+    // reprintPolicyWarningsAfterAttach runs), while the reprint is what
+    // survives an interactive harness's TUI wiping this line within a
+    // fraction of a second.
+    for (const line of [
+      debugEgressReattachWarning(m.name, debugEgress, m.debugEgress),
+      branchReattachWarning(m.name, branch, m.branch),
+    ]) {
+      if (line === null) continue;
+      console.warn(line);
+      policyWarningLines.push(line);
+    }
     const handle = await reattachSession(m, resolved.mounts, providerId, resolved.credentials);
     return { ...handle, policyWarningLines };
   };

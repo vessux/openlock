@@ -30,6 +30,29 @@ export interface SessionMeta {
    * don't warn. A present-but-empty array means "genuinely nothing was
    * declared/attached at create time", which is a real, comparable value. */
   attachedCredentialBundles?: string[];
+  /** Whether `--debug-egress` was passed at CREATE time (openlock-tgfk) — the
+   * supervisor's log level is fixed for the container's lifetime, so this is
+   * the recorded ground truth a later reattach compares a fresh
+   * `--debug-egress` request against (see sandbox/drift.ts
+   * debugEgressReattachWarning). Always set (even to `false`) by
+   * createSession going forward — `false` is a real, comparable measurement
+   * ("this container is definitely NOT running at debug level"), not the
+   * same as absence. Absent on sessions created before this field existed:
+   * that means "unknown", exactly like buildInputsHash's absence — can't
+   * compare, so the warning must hedge rather than assert a fact we don't
+   * have. */
+  debugEgress?: boolean;
+  /** The `--branch` value passed at CREATE time (openlock-tgfk), or `null` if
+   * none was passed — the workdir is git-cloned at a branch only inside
+   * createSession's one-shot setup script, so this is the recorded ground
+   * truth a later reattach's `--branch` request is compared against (see
+   * sandbox/drift.ts branchReattachWarning). Always set by createSession
+   * going forward, using `null` (not omitting the key) for "created with no
+   * --branch" — a real, comparable value distinct from the key being absent
+   * entirely. Key absent means a session created before this field existed:
+   * "unknown", exactly like buildInputsHash's absence — can't compare, so
+   * the warning must hedge rather than assert a fact we don't have. */
+  branch?: string | null;
 }
 
 // Legacy meta files (pre-slim-images) may carry extra fields like `caps` or

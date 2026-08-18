@@ -322,6 +322,104 @@ describe("session-store attachedCredentialBundles field (openlock-04t)", () => {
   });
 });
 
+describe("session-store debugEgress/branch fields (openlock-tgfk)", () => {
+  let baseDir: string;
+
+  function setup(): string {
+    baseDir = mkdtempSync(join(tmpdir(), "openlock-session-tgfk-"));
+    return baseDir;
+  }
+
+  function cleanup(): void {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+
+  it("round-trips debugEgress: false (a real, comparable measurement — not absence)", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-debug-false",
+        name: "sb-debug-false",
+        repoPath: "/some/repo",
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-08-18T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "claude_code",
+        debugEgress: false,
+        branch: null,
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.debugEgress).toBe(false);
+      expect(loaded?.branch).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("round-trips debugEgress: true and a recorded branch string", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-debug-true",
+        name: "sb-debug-true",
+        repoPath: "/some/repo",
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-08-18T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "claude_code",
+        debugEgress: true,
+        branch: "feature/x",
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.debugEgress).toBe(true);
+      expect(loaded?.branch).toBe("feature/x");
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Migration-safety case, same shape as attachedCredentialBundles's: a
+  // session written before these fields existed must read back as
+  // `undefined` — the "unknown, can't compare" signal the drift warnings key
+  // on — NOT silently coerced to `false`/`null`, which would read as a real,
+  // comparable measurement (SessionMeta.debugEgress's doc comment: absent !=
+  // false; SessionMeta.branch's doc comment: absent != null).
+  it("legacy record with both fields entirely absent reads back as undefined, NOT false/null", () => {
+    setup();
+    try {
+      const id = "legacy-no-tgfk-fields";
+      mkdirSync(join(baseDir, id), { recursive: true });
+      writeFileSync(
+        join(baseDir, id, "meta.json"),
+        JSON.stringify({
+          id,
+          name: "sb-legacy-tgfk",
+          repoPath: "/some/repo",
+          image: "openlock-core",
+          policy: "default",
+          createdAt: "2026-05-01T00:00:00Z",
+          lastAttachedAt: null,
+          attachedPid: null,
+          harness: "claude_code",
+          // no debugEgress/branch keys at all — pre-dates openlock-tgfk.
+        }),
+      );
+      const loaded = loadSession(baseDir, id);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.debugEgress).toBeUndefined();
+      expect(loaded?.branch).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("sessionsDir (openlock-x8m8)", () => {
   // Before x8m8, sessionsDir() independently recomputed
   // `join(HOME, ".local", "state", "openlock", "sessions")` inline — an

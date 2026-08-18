@@ -331,3 +331,55 @@ describe("warnOnUnattachedCredentialBundles (openlock-04t)", () => {
     expect(calls[0]).toContain("were never attached");
   });
 });
+
+// openlock-tgfk wiring guard: the bug in the original ticket was a missing
+// CALL SITE (debugEgress/branch were parsed and accepted but never checked
+// against anything on a plain reattach), not a missing string builder — the
+// pure functions in drift.ts were already unit-testable in isolation before
+// this guard existed, and none of those tests would fail if the call site
+// wiring them into attachStale were deleted. This test reads session.ts's
+// own source and asserts the ACTUAL CALL EXPRESSIONS appear inside
+// attachStale specifically — a bare `toContain("debugEgressReattachWarning")`
+// would already be satisfied by the import statement at the top of the file
+// and would pass even with the call site removed, which is exactly the kind
+// of permanently-green check this project has shipped before (a check whose
+// filter doesn't match reality). Scoping to the extracted attachStale body
+// (rather than the whole file) also guards against the call appearing
+// somewhere irrelevant.
+describe("attachStale wires the tgfk reattach warnings (openlock-tgfk)", () => {
+  const SESSION_TS_PATH = join(import.meta.dir, "session.ts");
+  const source = readFileSync(SESSION_TS_PATH, "utf-8");
+
+  // Relies on session.ts's current formatting (one arrow-function const per
+  // line, closing `};` on its own line) — same fragility the project already
+  // accepts for cli.ts's switch-case parser in _commands.test.ts; a reformat
+  // that breaks this would fail this test loudly (ENOENT-style thrown error)
+  // rather than silently passing on the wrong slice.
+  function extractAttachStaleBody(src: string): string {
+    const startMarker = "const attachStale = async () => {";
+    const start = src.indexOf(startMarker);
+    if (start === -1) {
+      throw new Error("attachStale not found in session.ts — was it renamed or removed?");
+    }
+    const end = src.indexOf("\n  };", start);
+    if (end === -1) {
+      throw new Error("attachStale's closing '};' not found in session.ts");
+    }
+    return src.slice(start, end);
+  }
+
+  const body = extractAttachStaleBody(source);
+
+  it("calls debugEgressReattachWarning with the recorded ground truth (m.debugEgress)", () => {
+    expect(body).toContain("debugEgressReattachWarning(m.name, debugEgress, m.debugEgress)");
+  });
+
+  it("calls branchReattachWarning with the recorded ground truth (m.branch)", () => {
+    expect(body).toContain("branchReattachWarning(m.name, branch, m.branch)");
+  });
+
+  it("actually surfaces a non-null result (prints immediately AND queues it for reprint), not call-and-discard", () => {
+    expect(body).toContain("console.warn(line)");
+    expect(body).toContain("policyWarningLines.push(line)");
+  });
+});
