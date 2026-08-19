@@ -28,10 +28,22 @@ afterEach(() => {
 // "no such session: X" the fast, deterministic, hermetic outcome for any
 // session name, letting these tests assert dispatch actually happened
 // without depending on gateway state.
+//
+// openlock-u7ca: also passes OPENLOCK_STATE_DIR explicitly, matching the
+// same path HOME's override already derives it to under resolveStateDir()'s
+// current precedence — every spawn here now runs through
+// announceBaseImageChangeIfNeeded(), which reads/writes a marker file under
+// the resolved state dir on EVERY invocation, including --version/--help/
+// --print-base-tag. HOME alone happens to already isolate this given no
+// ambient OPENLOCK_STATE_DIR, but making it explicit doesn't depend on that.
 function runCli(args: string[]) {
   return Bun.spawn({
     cmd: ["bun", "src/cli.ts", ...args],
-    env: { ...process.env, HOME: tmpHome },
+    env: {
+      ...process.env,
+      HOME: tmpHome,
+      OPENLOCK_STATE_DIR: join(tmpHome, ".local", "state", "openlock"),
+    },
     stdout: "pipe",
     stderr: "pipe",
   });

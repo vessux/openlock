@@ -6,8 +6,21 @@ import { join } from "node:path";
 let tmpHome: string;
 let originalHome: string | undefined;
 
+// The state dir this suite's spawns resolve to. Overriding HOME already
+// isolates resolveStateDir() under its current precedence (explicit >
+// OPENLOCK_STATE_DIR > HOME-relative default) as long as OPENLOCK_STATE_DIR
+// isn't set in the ambient environment — but that's an incidental
+// consequence of HOME being overridden for session-store isolation, not a
+// deliberate one. Passing OPENLOCK_STATE_DIR explicitly (openlock-u7ca) makes
+// the isolation intent stand on its own, independent of that precedence
+// detail and immune to a stray OPENLOCK_STATE_DIR in whoever's shell runs
+// this suite.
+function stateDirFor(home: string): string {
+  return join(home, ".local", "state", "openlock");
+}
+
 function makeSession(name: string) {
-  const dir = join(tmpHome, ".local", "state", "openlock", "sessions", name);
+  const dir = join(stateDirFor(tmpHome), "sessions", name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "meta.json"),
@@ -42,7 +55,7 @@ describe("openlock __list-sessions", () => {
     makeSession("beta");
     const proc = Bun.spawn({
       cmd: ["bun", "run", "src/cli.ts", "__list-sessions"],
-      env: { ...process.env, HOME: tmpHome },
+      env: { ...process.env, HOME: tmpHome, OPENLOCK_STATE_DIR: stateDirFor(tmpHome) },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -56,7 +69,7 @@ describe("openlock __list-sessions", () => {
   it("prints nothing and exits 0 when no sessions exist", async () => {
     const proc = Bun.spawn({
       cmd: ["bun", "run", "src/cli.ts", "__list-sessions"],
-      env: { ...process.env, HOME: tmpHome },
+      env: { ...process.env, HOME: tmpHome, OPENLOCK_STATE_DIR: stateDirFor(tmpHome) },
       stdout: "pipe",
       stderr: "pipe",
     });
