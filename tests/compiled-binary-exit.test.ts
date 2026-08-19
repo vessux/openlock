@@ -55,10 +55,25 @@ const EXIT_TIMEOUT_MS = 10_000;
 
 let binPath: string;
 let workDir: string;
+// openlock-q7b8: cli.ts's main() now calls announceBaseImageChangeIfNeeded()
+// unconditionally, before ANY of these flags' own short-circuits (see
+// src/cli.ts and src/sandbox/base-image-announce.ts, bd openlock-u7ca) — it
+// reads/writes a marker file under the resolved state dir on every
+// invocation, including --version/--help/no-args, not just
+// --print-base-tag. Without OPENLOCK_STATE_DIR this spawn fell through to
+// the developer's REAL default state dir (confirmed: it had already written
+// ~/.local/state/openlock/base-tag.seen on this machine before this fix),
+// which is exactly the synthetic-state-only rule this project was burned
+// into adopting (feedback_tests_synthetic_state_only.md) — this file's own
+// sibling retrofits (src/cli/print-base-tag.test.ts et al., same bd
+// openlock-u7ca) already isolate this same call for every OTHER spawn path;
+// this compiled-binary path was the one missed.
+let stateDir: string;
 
 beforeAll(async () => {
   workDir = mkdtempSync(join(tmpdir(), "openlock-compiled-exit-"));
   binPath = join(workDir, "openlock");
+  stateDir = mkdtempSync(join(tmpdir(), "openlock-compiled-exit-state-"));
   const build = Bun.spawn(
     [
       "bun",
@@ -79,6 +94,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   rmSync(workDir, { recursive: true, force: true });
+  rmSync(stateDir, { recursive: true, force: true });
 });
 
 /**
@@ -91,6 +107,7 @@ async function runWithTimeout(
   args: string[],
 ): Promise<{ exitCode: number; stdout: string; timedOut: boolean }> {
   const proc = Bun.spawn([binPath, ...args], {
+    env: { ...process.env, OPENLOCK_STATE_DIR: stateDir },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
