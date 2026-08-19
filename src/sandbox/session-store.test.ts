@@ -420,6 +420,75 @@ describe("session-store debugEgress/branch fields (openlock-tgfk)", () => {
   });
 });
 
+describe("session-store providerId field (openlock-xz6d)", () => {
+  let baseDir: string;
+
+  function setup(): string {
+    baseDir = mkdtempSync(join(tmpdir(), "openlock-session-xz6d-"));
+    return baseDir;
+  }
+
+  function cleanup(): void {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+
+  it("round-trips a recorded providerId", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-provider",
+        name: "sb-provider",
+        repoPath: "/some/repo",
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-08-18T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "opencode",
+        providerId: "openrouter",
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.providerId).toBe("openrouter");
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Migration-safety case, same shape as attachedCredentialBundles's and
+  // debugEgress/branch's: a session written before this field existed must
+  // read back as `undefined` — the "unknown, can't compare, inject nothing"
+  // signal `openlock exec` keys on (see SessionMeta.providerId's doc
+  // comment) — never coerced into a guessed provider.
+  it("legacy record with providerId entirely absent reads back as undefined", () => {
+    setup();
+    try {
+      const id = "legacy-no-provider-field";
+      mkdirSync(join(baseDir, id), { recursive: true });
+      writeFileSync(
+        join(baseDir, id, "meta.json"),
+        JSON.stringify({
+          id,
+          name: "sb-legacy-provider",
+          repoPath: "/some/repo",
+          image: "openlock-core",
+          policy: "default",
+          createdAt: "2026-05-01T00:00:00Z",
+          lastAttachedAt: null,
+          attachedPid: null,
+          harness: "claude_code",
+          // no providerId key at all — pre-dates openlock-xz6d.
+        }),
+      );
+      const loaded = loadSession(baseDir, id);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.providerId).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("sessionsDir (openlock-x8m8)", () => {
   // Before x8m8, sessionsDir() independently recomputed
   // `join(HOME, ".local", "state", "openlock", "sessions")` inline — an

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveStateDir } from "../paths";
+import type { ProviderId } from "../providers/types";
 import type { Harness } from "./harness";
 
 export interface SessionMeta {
@@ -53,6 +54,21 @@ export interface SessionMeta {
    * "unknown", exactly like buildInputsHash's absence — can't compare, so
    * the warning must hedge rather than assert a fact we don't have. */
   branch?: string | null;
+  /** The `ProviderId` selected at CREATE time (openlock-xz6d) — the ground
+   * truth `openlock exec` compares against to inject the SAME provider env
+   * placeholders an attached harness gets (see sandbox/container.ts
+   * buildSandboxEnv / sandboxEnvPlaceholders). `resolveProvider` is a pure
+   * function of (harness, CLI flag, env, global config), so recomputing it
+   * at exec time COULD read a different, possibly-wrong answer if any of
+   * those inputs changed since create (an env var, a global default, a new
+   * provider becoming compatible with the harness — see resolve.ts's own
+   * "wire up the OpenCode Claude-auth plugin" hint) — recording avoids ever
+   * guessing wrong. Always set by createSession going forward. Absent on
+   * sessions created before this field existed: "unknown", not "no
+   * provider" — on absence, exec must inject NO placeholders, exactly its
+   * historical (buggy) behavior, never a guessed provider's placeholder for
+   * a possibly-different provider. */
+  providerId?: ProviderId;
 }
 
 // Legacy meta files (pre-slim-images) may carry extra fields like `caps` or

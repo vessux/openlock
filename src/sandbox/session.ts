@@ -420,6 +420,11 @@ async function createSession(
       // session genuinely created without either flag.
       debugEgress,
       branch: branch ?? null,
+      // openlock-xz6d: the ground truth `openlock exec` compares against to
+      // inject the SAME provider env placeholders an attached harness gets —
+      // see SessionMeta.providerId's doc comment for why this is recorded
+      // rather than recomputed from the harness at exec time.
+      providerId,
     };
     saveSession(sessionsDir(), meta);
 
