@@ -118,3 +118,114 @@ export function findUnattachedCredentialBundles(
   const attached = new Set(recordedAttached);
   return declaredNames.filter((name) => !attached.has(name));
 }
+
+/**
+ * Warning line when `--debug-egress` is requested on a path that will NOT
+ * (re-)apply it — a plain reattach to an already-running container (bd
+ * openlock-tgfk). `debugEgress` is a cold build input: it only ever takes
+ * effect as `--log-level debug` in the supervisor's CREATE-time argv (see
+ * `container.ts`'s `buildOpenshellCreateArgv`), and the supervisor is pid 1
+ * in that container — its log level cannot be hot-applied once running (see
+ * the comment on session.ts's reattach path).
+ *
+ * `recordedAtCreate` is the ground truth from `SessionMeta.debugEgress` (set
+ * by createSession going forward — see its doc comment): `true`/`false` is a
+ * real, comparable measurement of what the running container actually booted
+ * with; `undefined` means a legacy session created before this field
+ * existed, i.e. genuinely unknown, NOT "false" (absent != false — the same
+ * rule `buildInputsHash`'s absence already follows).
+ *
+ * Three outcomes:
+ * - not requested: nothing to say, `null`.
+ * - requested AND recorded === true: already satisfied — the container is
+ *   already running at debug level, so reattaching changes nothing that
+ *   needs reporting. Returning a warning here would itself be the exact
+ *   false positive this function exists to prevent (confidently asserting
+ *   "no debug lines" about a container that already has them).
+ * - requested AND recorded === false: a confirmed, known mismatch — worded
+ *   with the concrete, KNOWN consequence (no debug lines at all) rather than
+ *   a generic "flag ignored". This is a diagnostic flag whose entire purpose
+ *   is mid-incident investigation, and a misleading diagnostic (an empty
+ *   debug capture silently misread as "cred_inject never fired") is worse
+ *   than an absent one. See the colleague-401 incident this bd issue cites:
+ *   59 HTTP POSTs and zero debug lines were misread as proof cred_inject
+ *   aborted, when nothing had been instrumented at all.
+ * - requested AND recorded === undefined: an UNKNOWN mismatch (legacy
+ *   session) — hedged wording that states what we can't know rather than
+ *   asserting the container has no debug lines, which we cannot actually
+ *   confirm. Asserting a fact we don't have would be the same manufactured-
+ *   evidence failure this whole fix is about, just relocated to the legacy
+ *   case instead of eliminated.
+ */
+export function debugEgressReattachWarning(
+  sessionName: string,
+  requested: boolean,
+  recordedAtCreate: boolean | undefined,
+): string | null {
+  if (!requested) return null;
+  if (recordedAtCreate === true) return null;
+  if (recordedAtCreate === false) {
+    return (
+      `openlock: --debug-egress requested, but sandbox "${sessionName}" was created WITHOUT it ` +
+      "and is already running — the supervisor's log level is fixed at container CREATE time " +
+      "and cannot be changed on a running sandbox, so its egress log will contain NO debug " +
+      "lines. Re-run with --rebuild to recreate the sandbox at debug level."
+    );
+  }
+  return (
+    `openlock: --debug-egress requested, but sandbox "${sessionName}" is already running and ` +
+    "openlock does not know whether it was created with debug logging (created before this was " +
+    "tracked) — the supervisor's log level cannot be changed on a running sandbox regardless of " +
+    "which it was. Unless it was created with --debug-egress, its egress log will contain no " +
+    "debug lines. Re-run with --rebuild to recreate the sandbox at debug level and be sure."
+  );
+}
+
+/**
+ * Warning line when `--branch` is requested on a plain reattach (openlock-
+ * tgfk "while there" finding — same silent-drop shape as debugEgress above,
+ * and the same ground-truth-vs-legacy split). The workdir is git-cloned at a
+ * specific branch only inside createSession's one-shot setup script (see
+ * `buildSetupCmd`'s `branchFlag`); `reattachSession` takes no `branch`
+ * parameter at all and never re-clones. By the time this runs,
+ * `validateBranchFlagAgainstWorkdir` has already confirmed a git-bundle
+ * workdir is declared (a non-git-bundle workdir or a missing one would have
+ * exited the process before reaching the reattach path).
+ *
+ * `recordedAtCreate` is `SessionMeta.branch`: `null` means "created with no
+ * --branch" (a real, comparable value — set explicitly by createSession,
+ * never omitted, going forward); a string is the branch it was created with;
+ * `undefined` means a legacy session created before this field existed —
+ * genuinely unknown, not the same as `null`.
+ *
+ * Same three outcomes as `debugEgressReattachWarning`: not requested -> null;
+ * requested and it matches what was recorded -> null (already satisfied,
+ * nothing to report); requested and recorded is known and differs (including
+ * recorded `null`, i.e. created with no branch at all) -> a confident warning
+ * naming the real mismatch; requested and recorded is `undefined` (legacy) ->
+ * a hedged warning that doesn't assert a fact we don't have.
+ */
+export function branchReattachWarning(
+  sessionName: string,
+  requested: string | undefined,
+  recordedAtCreate: string | null | undefined,
+): string | null {
+  if (requested === undefined) return null;
+  if (recordedAtCreate === requested) return null;
+  if (recordedAtCreate !== undefined) {
+    const createdWith =
+      recordedAtCreate === null ? "without a --branch" : `with branch "${recordedAtCreate}"`;
+    return (
+      `openlock: --branch ${requested} requested, but sandbox "${sessionName}" was created ` +
+      `${createdWith} and is already running — the workdir was already cloned at container ` +
+      "CREATE time and cannot be switched to a different branch on a running sandbox. Re-run " +
+      "with --rebuild to recreate the sandbox on that branch."
+    );
+  }
+  return (
+    `openlock: --branch ${requested} requested, but sandbox "${sessionName}" is already running ` +
+    "and openlock does not know which branch it was created with (created before this was " +
+    "tracked) — the workdir cannot be switched to a different branch on a running sandbox " +
+    "regardless. Re-run with --rebuild to recreate the sandbox on that branch and be sure."
+  );
+}

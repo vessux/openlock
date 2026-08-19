@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Mount } from "../config-core/types";
 import {
+  branchReattachWarning,
   computeBuildInputsHash,
   computeBuildInputsHashFromFiles,
+  debugEgressReattachWarning,
   decideReattachAction,
   findUnattachedCredentialBundles,
 } from "./drift";
@@ -278,5 +280,73 @@ describe("computeBuildInputsHashFromFiles", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("debugEgressReattachWarning (openlock-tgfk)", () => {
+  it("returns null when --debug-egress was not requested, regardless of recorded value", () => {
+    expect(debugEgressReattachWarning("my-session", false, true)).toBeNull();
+    expect(debugEgressReattachWarning("my-session", false, false)).toBeNull();
+    expect(debugEgressReattachWarning("my-session", false, undefined)).toBeNull();
+  });
+
+  it("returns null when requested AND the sandbox was already created with --debug-egress (already satisfied)", () => {
+    expect(debugEgressReattachWarning("my-session", true, true)).toBeNull();
+  });
+
+  it("warns with the KNOWN consequence when requested but recorded as created WITHOUT it", () => {
+    const warning = debugEgressReattachWarning("my-session", true, false);
+    expect(warning).not.toBeNull();
+    expect(warning).toContain('"my-session"');
+    expect(warning).toContain("--rebuild");
+    expect(warning).toContain("WITHOUT it");
+    expect(warning).toContain("NO debug lines");
+  });
+
+  it("warns with HEDGED wording (not a confident 'NO debug lines' claim) when the recorded value is unknown (legacy session)", () => {
+    const warning = debugEgressReattachWarning("my-session", true, undefined);
+    expect(warning).not.toBeNull();
+    expect(warning).toContain('"my-session"');
+    expect(warning).toContain("--rebuild");
+    expect(warning).toContain("does not know");
+    // Must NOT assert the confident, possibly-false claim used in the known-mismatch case.
+    expect(warning).not.toContain("NO debug lines");
+  });
+});
+
+describe("branchReattachWarning (openlock-tgfk)", () => {
+  it("returns null when --branch was not passed, regardless of recorded value", () => {
+    expect(branchReattachWarning("my-session", undefined, "main")).toBeNull();
+    expect(branchReattachWarning("my-session", undefined, null)).toBeNull();
+    expect(branchReattachWarning("my-session", undefined, undefined)).toBeNull();
+  });
+
+  it("returns null when the requested branch matches what was recorded at create (already satisfied)", () => {
+    expect(branchReattachWarning("my-session", "feature/x", "feature/x")).toBeNull();
+  });
+
+  it("warns naming both branches when requested differs from the recorded branch", () => {
+    const warning = branchReattachWarning("my-session", "feature/x", "main");
+    expect(warning).not.toBeNull();
+    expect(warning).toContain('"my-session"');
+    expect(warning).toContain("feature/x");
+    expect(warning).toContain('"main"');
+    expect(warning).toContain("--rebuild");
+  });
+
+  it("warns naming the requested branch when the sandbox was recorded as created with NO branch", () => {
+    const warning = branchReattachWarning("my-session", "feature/x", null);
+    expect(warning).not.toBeNull();
+    expect(warning).toContain("without a --branch");
+    expect(warning).toContain("feature/x");
+  });
+
+  it("warns with HEDGED wording when the recorded branch is unknown (legacy session)", () => {
+    const warning = branchReattachWarning("my-session", "feature/x", undefined);
+    expect(warning).not.toBeNull();
+    expect(warning).toContain('"my-session"');
+    expect(warning).toContain("feature/x");
+    expect(warning).toContain("--rebuild");
+    expect(warning).toContain("does not know which branch");
   });
 });
