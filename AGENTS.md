@@ -59,6 +59,17 @@ query.
 - No implicit provider selection: never infer or auto-select a provider. Require an explicit
   flag, env var, config value, or manifest entry, or error out.
 
+## On-demand skills
+
+`.claude/skills/` holds versioned, on-demand procedures — load one when its trigger applies,
+rather than carrying it in context always. Unlike the rest of `.claude/`, this directory is
+tracked.
+
+- `fork-upstream-sync` — syncing the vendored fork to a new upstream release.
+- `stacked-prs` — creating, pushing, or merging a `gh stack`.
+- `debug-sandbox-auth` — an unexplained auth failure talking to a provider from inside a sandbox.
+- `test-isolation` — writing or reviewing a test that touches config, credentials, the gateway, or a sandbox.
+
 ## Where the rest lives
 
 This file stays intentionally short. For everything else:
