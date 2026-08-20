@@ -20,3 +20,4 @@ Start with the [README](../README.md) for the golden path (install → doctor �
 ## Maintainers
 
 - [Releasing](./releasing.md) — how a release is cut across both repos, how the `openlock-base` image is managed, and when to cut a prerelease
+- [Fork upstream-sync runbook](./maintainers/fork-sync.md) — how the `openshell-fork` vendored fork gets synced to upstream: the release-line model, the proto-collision pre-flight, and the full gate
