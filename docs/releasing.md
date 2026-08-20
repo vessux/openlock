@@ -9,10 +9,7 @@ recalled.
 
 Scope: this document starts once you have a fork state you want to ship. The fork **upstream-sync**
 ritual that produces that state — rebasing the delta onto a new upstream, squeezing it, pre-flighting
-proto collisions — is **not in this repository** and is not linked here on purpose: it currently lives
-only in a maintainer's local, untracked agent-instruction file, so any link from a tracked doc would
-dangle for everyone else. Bringing maintainer guidance into a committed file is tracked as
-`openlock-yya`; until that lands, treat the sync ritual as an external prerequisite.
+proto collisions — is a separate runbook: see [Fork upstream-sync runbook](./maintainers/fork-sync.md).
 
 ---
 
