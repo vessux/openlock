@@ -11,6 +11,11 @@ dist/
 
 # Local-only project context — agent/editor configs and internal docs.
 # Not for the public repo. (docs/ is tracked/public; local artifacts live in .local/)
-.claude/
+# Exception: .claude/skills/ holds versioned, on-demand agent procedures and IS tracked —
+# everything else under .claude/ (settings, local config, agent-registry state, etc.) stays
+# ignored. A whole-directory ignore can't be negated per-child, hence the .claude/* + negation
+# form rather than a bare `!.claude/skills/`.
+.claude/*
+!.claude/skills/
 .mcp.json
 .local/
