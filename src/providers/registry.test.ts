@@ -2,9 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { PROVIDER_IDS, PROVIDERS, validateProviderId } from "./registry";
 
 describe("registry", () => {
-  it("includes anthropic and openrouter", () => {
+  it("includes anthropic, openrouter, and github_copilot", () => {
     expect(PROVIDER_IDS).toContain("anthropic");
     expect(PROVIDER_IDS).toContain("openrouter");
+    expect(PROVIDER_IDS).toContain("github_copilot");
   });
 
   it("PROVIDERS has an entry per id", () => {
@@ -40,6 +41,6 @@ describe("validateProviderId", () => {
 
   it("throws on unknown ids, listing allowed", () => {
     expect(() => validateProviderId("openai")).toThrow(/openai/);
-    expect(() => validateProviderId("openai")).toThrow(/anthropic, openrouter/);
+    expect(() => validateProviderId("openai")).toThrow(/anthropic, openrouter, github_copilot/);
   });
 });

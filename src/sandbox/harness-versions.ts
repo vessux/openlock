@@ -40,6 +40,13 @@ export const HARNESS_VERSIONS: Record<
     version: "0.84.2",
     distTag: "latest",
   },
+  // `@github/copilot` publishes no `stable` tag either — only `latest` and
+  // `prerelease` — so `latest` is its resolution target, same as opencode/pi.
+  copilot_cli: {
+    package: "@github/copilot",
+    version: "1.0.83",
+    distTag: "latest",
+  },
 };
 
 /** Renders the `npm install` line for a harness at a given version. */

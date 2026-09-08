@@ -19,3 +19,10 @@ providers:
       OPENROUTER_BEARER_TOKEN:
         source: file
         provider_id: openrouter
+
+  - name: github_copilot
+    type: generic
+    credentials:
+      GITHUB_COPILOT_PAT:
+        source: file
+        provider_id: github_copilot

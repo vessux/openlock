@@ -133,7 +133,7 @@ src/cred-refresh/     Credential refresh service
 src/config-core/policy/  Policy linter
 ```
 
-Per-harness installs (Claude Code / opencode / pi) aren't in `containers/` — they happen in each project's own `.openlock/Containerfile`, in the block after the `# ---- Harness ----` sentinel (see [Recipes](./docs/recipes.md) for a worked example of extending it).
+Per-harness installs (Claude Code / opencode / pi / Copilot CLI) aren't in `containers/` — they happen in each project's own `.openlock/Containerfile`, in the block after the `# ---- Harness ----` sentinel (see [Recipes](./docs/recipes.md) for a worked example of extending it).
 
 ## Development
 

@@ -1,7 +1,7 @@
 import type { Harness } from "../sandbox/harness";
 import type { ProviderRefreshMaterial } from "../tokens";
 
-export type ProviderId = "anthropic" | "openrouter";
+export type ProviderId = "anthropic" | "openrouter" | "github_copilot";
 type OpenshellProviderType = "claude" | "claude-oauth" | "generic";
 
 export interface ProviderCredentials {

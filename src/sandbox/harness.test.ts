@@ -1,17 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import {
-  HARNESSES,
-  harnessBinaryPath,
-  harnessLaunchArgv,
-  resolveHarness,
-  validateHarness,
-} from "./harness";
+import { HARNESSES, harnessLaunchArgv, resolveHarness, validateHarness } from "./harness";
 
 describe("HARNESSES", () => {
-  it("contains the three harnesses", () => {
+  it("contains the four harnesses", () => {
     expect(HARNESSES.has("claude_code")).toBe(true);
     expect(HARNESSES.has("opencode")).toBe(true);
     expect(HARNESSES.has("pi")).toBe(true);
+    expect(HARNESSES.has("copilot_cli")).toBe(true);
   });
 });
 
@@ -46,19 +41,10 @@ describe("harnessLaunchArgv", () => {
     expect(harnessLaunchArgv("pi", [])).toEqual(["pi"]);
     expect(harnessLaunchArgv("pi", ["-p", "hello"])).toEqual(["pi", "-p", "hello"]);
   });
-});
 
-describe("harnessBinaryPath", () => {
-  it("returns /usr/local/bin/claude for claude_code", () => {
-    expect(harnessBinaryPath("claude_code")).toBe("/usr/local/bin/claude");
-  });
-
-  it("returns /usr/local/bin/opencode for opencode", () => {
-    expect(harnessBinaryPath("opencode")).toBe("/usr/local/bin/opencode");
-  });
-
-  it("returns /usr/local/bin/pi for pi", () => {
-    expect(harnessBinaryPath("pi")).toBe("/usr/local/bin/pi");
+  it("returns copilot argv for copilot_cli", () => {
+    expect(harnessLaunchArgv("copilot_cli", [])).toEqual(["copilot"]);
+    expect(harnessLaunchArgv("copilot_cli", ["-p", "hello"])).toEqual(["copilot", "-p", "hello"]);
   });
 });
 

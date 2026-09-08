@@ -18,6 +18,7 @@ Pick the harness first; it determines which provider you can use. This is not do
 | `claude_code` | `@anthropic-ai/claude-code` | `anthropic` only | The Anthropic subscription flow flips Claude Code into OAuth mode via a staged credential file; no other harness has that mechanism. |
 | `opencode` | `opencode-ai` | `openrouter` only | opencode reads `OPENROUTER_API_KEY`. |
 | `pi` | `@earendil-works/pi-coding-agent` | `openrouter` only | Same OpenRouter env var; pi has no Anthropic-subscription route. |
+| `copilot_cli` | `@github/copilot` | `github_copilot` only | The CLI reads `COPILOT_GITHUB_TOKEN`; no other provider populates it. |
 
 There is no route to use an Anthropic subscription with `opencode` or `pi` — trying it errors immediately (`Provider 'anthropic' is not compatible with harness 'opencode'. Compatible harnesses: claude_code.`). If you want Claude models through `opencode` or `pi`, that means OpenRouter, not the Anthropic provider.
 
@@ -33,7 +34,7 @@ openlock login --provider anthropic    # first time only — see "Credentials" b
 openlock sandbox --provider anthropic  # launch (or resume) the sandbox
 ```
 
-Swap `claude_code` / `anthropic` for `opencode` / `openrouter` or `pi` / `openrouter` throughout if you're using one of those harnesses.
+Swap `claude_code` / `anthropic` for `opencode` / `openrouter`, `pi` / `openrouter`, or `copilot_cli` / `github_copilot` throughout if you're using one of those harnesses.
 
 **Why `--provider` is on the `sandbox` line, not just at `init`.** `.openlock/config.yaml` persists `harness:`, but there is no `provider:` key in the manifest — provider selection is explicit-only and separate from harness, every time. `openlock sandbox` resolves it from (in order) `--provider`, `OPENLOCK_PROVIDER`, then `default_provider:` in `~/.config/openlock/config.yaml`; if none of those is set it errors rather than guessing. `openlock setup` (interactive, not on this golden path) can persist a `default_provider` so you stop needing the flag — see [Recipes](./recipes.md#global-config).
 
@@ -47,6 +48,7 @@ Swap `claude_code` / `anthropic` for `opencode` / `openrouter` or `pi` / `openro
 
 - `openlock login --provider anthropic` imports your Claude subscription token from an isolated `claude auth login` — it never touches your real `~/.claude` config.
 - `openlock login --provider openrouter` prompts you to paste an OpenRouter API key (starts with `sk-or-`).
+- `openlock login --provider github_copilot` prompts you to paste a **user-owned, fine-grained** GitHub personal access token (`github_pat_...`) with the `Copilot Requests` permission — this covers business/enterprise plans too, since that permission cannot be granted to an org-owned token. Classic `ghp_`/`gho_` tokens are rejected. If your org enforces SAML SSO, the token must also be Authorized for that org in GitHub's token settings.
 - `openlock providers` shows what's stored and whether the gateway currently has a live copy.
 - For `opencode`/`pi`, check which models your specific key is actually allowed to use before picking one in `args:` — see `openlock providers models <id>` in [Recipes](./recipes.md#picking-a-model-your-key-is-allowed-to-use).
 
