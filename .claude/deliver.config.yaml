@@ -1,0 +1,13 @@
+# Adapter config read by the /sidekick and /deliver skills when spawning workers.
+# Plumbing only: it stops the gate and hard rules being re-derived from AGENTS.md and
+# hand-pasted into every worker prompt. It is deliberately NOT a process-discipline
+# mechanism — `skills:` is intentionally unset (all-or-nothing per worker; cannot
+# express the per-tier falsification requirement in AGENTS.md). See openlock-ie6z.
+adapter:
+  build_gate: "bun run lint && bun run typecheck"
+  hermetic_test: "bun run test && bun run knip"
+  rules:
+    - "Never run bare `bun test`; always `bun run test` (scoped to ./src/ ./tests/ ./scripts/)."
+    - "Tests use synthetic state only: never touch real credentials, the real dev gateway, or the real config dir. Use OPENLOCK_CONFIG_DIR / OPENLOCK_DISPOSABLE_HOST seams."
+    - "Never push to main; land everything via a PR."
+    - "Never commit, push, branch, or merge from a worker; leave changes in the working tree."

@@ -15,7 +15,10 @@ dist/
 # everything else under .claude/ (settings, local config, agent-registry state, etc.) stays
 # ignored. A whole-directory ignore can't be negated per-child, hence the .claude/* + negation
 # form rather than a bare `!.claude/skills/`.
+# Exception: .claude/deliver.config.yaml is the tracked sidekick/deliver adapter config
+# (gate + hard rules), also negated individually below.
 .claude/*
 !.claude/skills/
+!.claude/deliver.config.yaml
 .mcp.json
 .local/
