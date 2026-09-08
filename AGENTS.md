@@ -101,7 +101,8 @@ the load-bearing claim called out; the detailed policy lives outside this file.
 
 `.claude/skills/` holds versioned, on-demand procedures — load one when its trigger applies,
 rather than carrying it in context always. Unlike the rest of `.claude/`, this directory is
-tracked.
+tracked. `.claude/deliver.config.yaml` — the worker adapter config (gate + hard rules) read by
+the `/sidekick` and `/deliver` skills — is also tracked.
 
 - `fork-upstream-sync` — syncing the vendored fork to a new upstream release.
 - `stacked-prs` — creating, pushing, or merging a `gh stack`.
