@@ -159,12 +159,17 @@ jobs:
           # transient fetch error; `apt-get clean` drops partials between tries.
           # `if`-condition form keeps a failed attempt from tripping `set -e`.
           # `--force-overwrite` catches any /etc/containers/* file not purged above.
+          # `passt` must come from the same repo: podman 6.x drives rootless
+          # networking through pasta and passes `--map-guest-addr`, which the
+          # Ubuntu 24.04 passt build predates — every `podman build` then dies
+          # with "pasta failed with exit code 1 ... unrecognized option" (exit
+          # 125) before the first RUN step. See bd openlock-8ibe.
           for attempt in 1 2 3; do
             if sudo apt-get update -qq \
               && sudo apt-get install -y \
                 -o Dpkg::Options::=--force-overwrite \
                 -o Acquire::Retries=3 \
-                podman podman-gvproxy podman-aardvark-dns podman-netavark; then
+                podman podman-gvproxy podman-aardvark-dns podman-netavark passt; then
               break
             fi
             echo "::warning::podman install attempt ${attempt} failed; cleaning and retrying"
