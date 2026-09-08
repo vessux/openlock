@@ -81,6 +81,13 @@ bd close <id>           # done
 `bd ready` **is** the backlog — if it answered your question, you don't need a second roster
 query.
 
+Every ticket declares itself `EXECUTE-READY` or `INVESTIGATE-FIRST`, in the title or the first
+line of the description — declarative only, not a `bd` field. `EXECUTE-READY` means the
+load-bearing facts were verified at filing time and the work can start without scouting;
+`INVESTIGATE-FIRST` means the ticket knowingly defers a question that the work depends on.
+Factual claims in a description are marked verified (and how) or marked as an assumption, with
+the load-bearing claim called out; the detailed policy lives outside this file.
+
 ## Conventions
 
 - `docs/` is tracked and public; `.local/` is gitignored and holds long-form working artifacts
