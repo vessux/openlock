@@ -346,13 +346,20 @@ describe("runDoctorChecks gateway port record wiring (openlock-x8m8)", () => {
     "fails, naming the stale record, when the persisted record disagrees with the derived port",
     async () => {
       writeFileSync(join(dir, "gateway.pid"), String(process.pid));
-      writeFileSync(join(dir, "gateway.port"), "18500");
+      // The stale record must fall OUTSIDE the derived band (18082..18999):
+      // `dir` is a random mkdtemp path, so any in-band constant has a 1/918
+      // chance of colliding with the port it derives — the check is then
+      // (correctly) absent and this test flakes. openlock-vaff.
+      const derived = resolveGatewayPort(dir);
+      const stale = 17999;
+      expect(stale).not.toBe(derived);
+      writeFileSync(join(dir, "gateway.port"), String(stale));
       const results = await runDoctorChecks("podman");
       const r = results.find((x) => x.name === GATEWAY_PORT_RECORD_CHECK_NAME);
       expect(r).toBeDefined();
       expect(r?.ok).toBe(false);
-      expect(r?.detail).toContain("18500");
-      expect(r?.detail).toContain(String(resolveGatewayPort(dir)));
+      expect(r?.detail).toContain(String(stale));
+      expect(r?.detail).toContain(String(derived));
     },
     TIMEOUT_MS,
   );
