@@ -20,6 +20,8 @@ validation, so the effective config is what gets checked.
 - `cpu` — CPU limit forwarded verbatim to `openshell sandbox create --cpu` (e.g. `"2"`, `"500m"`, `"0.5"`). Omitted: openlock passes no `--cpu` at all, so the sandbox inherits openshell's own default rather than a value openlock invents.
 - `memory` — memory limit forwarded verbatim to `openshell sandbox create --memory` (e.g. `"4Gi"`, `"512Mi"`, `"8G"`). Omitted: same inherit-openshell's-default behavior as `cpu`.
 
+Both are baked in at container CREATE time; changing either after create is detected on reattach exactly like a Containerfile/policy/mounts change (a prompt, or a warning on a non-interactive reattach) and only takes effect via `--rebuild`.
+
 (There is no `caps` field — it is a rejected legacy key.)
 
 ## `.openlock/policy.yaml`

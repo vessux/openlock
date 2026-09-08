@@ -9,6 +9,7 @@ import {
   computeBuildInputsHashFromFiles,
   debugEgressReattachWarning,
   decideReattachAction,
+  findResourceDrift,
   findUnattachedCredentialBundles,
 } from "./drift";
 
@@ -164,6 +165,53 @@ describe("decideReattachAction", () => {
         interactive: false,
       }),
     ).toBe("rebuild");
+  });
+
+  it("omitted resourcesDrifted behaves exactly like before (no change to existing callers)", () => {
+    expect(
+      decideReattachAction({
+        storedHash: "abc",
+        currentHash: "abc",
+        rebuildFlag: false,
+        interactive: true,
+      }),
+    ).toBe("proceed");
+  });
+
+  it("resourcesDrifted: false behaves like omitted", () => {
+    expect(
+      decideReattachAction({
+        storedHash: "abc",
+        currentHash: "abc",
+        rebuildFlag: false,
+        interactive: true,
+        resourcesDrifted: false,
+      }),
+    ).toBe("proceed");
+  });
+
+  it("resourcesDrifted: true prompts even when the hash matches (interactive)", () => {
+    expect(
+      decideReattachAction({
+        storedHash: "abc",
+        currentHash: "abc",
+        rebuildFlag: false,
+        interactive: true,
+        resourcesDrifted: true,
+      }),
+    ).toBe("prompt");
+  });
+
+  it("resourcesDrifted: true warns-stale even when the hash matches (non-interactive)", () => {
+    expect(
+      decideReattachAction({
+        storedHash: "abc",
+        currentHash: "abc",
+        rebuildFlag: false,
+        interactive: false,
+        resourcesDrifted: true,
+      }),
+    ).toBe("warn-stale");
   });
 
   it("honors --rebuild on a legacy session with no stored hash", () => {
@@ -348,5 +396,43 @@ describe("branchReattachWarning (openlock-tgfk)", () => {
     expect(warning).toContain("feature/x");
     expect(warning).toContain("--rebuild");
     expect(warning).toContain("does not know which branch");
+  });
+});
+
+describe("findResourceDrift (openlock-tbkc)", () => {
+  it("returns null when recorded is undefined (legacy session — can't compare)", () => {
+    expect(findResourceDrift(undefined, { cpu: "4" })).toBeNull();
+  });
+
+  it("returns null when both fields match", () => {
+    expect(findResourceDrift({ cpu: "2", memory: "4Gi" }, { cpu: "2", memory: "4Gi" })).toBeNull();
+  });
+
+  it("returns null when both recorded and current are empty (created with no limits, still no limits)", () => {
+    expect(findResourceDrift({}, {})).toBeNull();
+  });
+
+  it("returns null when neither field is set on either side (undefined vs undefined counts as match)", () => {
+    expect(findResourceDrift({ cpu: undefined }, { cpu: undefined })).toBeNull();
+  });
+
+  it("reports a cpu change", () => {
+    expect(findResourceDrift({ cpu: "2" }, { cpu: "4" })).toBe('cpu "2" -> "4"');
+  });
+
+  it("reports a memory removal as -> none", () => {
+    expect(findResourceDrift({ memory: "4Gi" }, {})).toBe('memory "4Gi" -> none');
+  });
+
+  it("reports both fields changing, comma-joined", () => {
+    expect(findResourceDrift({ cpu: "2", memory: "4Gi" }, { cpu: "4", memory: "8Gi" })).toBe(
+      'cpu "2" -> "4", memory "4Gi" -> "8Gi"',
+    );
+  });
+
+  it("names the unchanged field alongside a changed one when the unchanged field had a real value", () => {
+    expect(findResourceDrift({ cpu: "2", memory: "4Gi" }, { cpu: "4", memory: "4Gi" })).toBe(
+      'cpu "2" -> "4", memory unchanged',
+    );
   });
 });

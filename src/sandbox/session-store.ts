@@ -69,6 +69,19 @@ export interface SessionMeta {
    * historical (buggy) behavior, never a guessed provider's placeholder for
    * a possibly-different provider. */
   providerId?: ProviderId;
+  /** The `cpu`/`memory` limits passed at CREATE time (openlock-tbkc) — these
+   * are baked into the container at create and cannot be changed on a
+   * running/stopped container, so this is the recorded ground truth a later
+   * reattach compares the CURRENT `.openlock/config.yaml` values against
+   * (see sandbox/drift.ts findResourceDrift). Always set by createSession
+   * going forward, using `{}` (not omitting the key) for "created with no
+   * cpu/memory limits" — a real, comparable value distinct from the key
+   * being absent entirely; the `cpu`/`memory` sub-keys are themselves
+   * omitted (not `null`) when that particular limit wasn't configured. Key
+   * absent means a session created before this field existed: "unknown",
+   * exactly like buildInputsHash's absence — can't compare, so drift
+   * detection must skip it rather than assert a fact we don't have. */
+  resources?: { cpu?: string; memory?: string };
 }
 
 // Legacy meta files (pre-slim-images) may carry extra fields like `caps` or

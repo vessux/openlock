@@ -61,7 +61,11 @@ export type ReattachAction =
 
 /**
  * Decide how to reattach given whether the container's baked-in build inputs
- * still match the current `.openlock/` config.
+ * still match the current `.openlock/` config. Cold inputs = Containerfile +
+ * mounts + policy content (`storedHash`/`currentHash`, see
+ * computeBuildInputsHash) plus cpu/memory (`resourcesDrifted`, see
+ * findResourceDrift) — all baked in at container CREATE time and unable to
+ * be applied to a running/stopped container.
  *
  * - An explicit `--rebuild` is honored first, regardless of drift: the user
  *   asked to force a fresh image build + container recreate, so we never
@@ -71,20 +75,67 @@ export type ReattachAction =
  *   existed; `currentHash` is `undefined` when the current inputs can't be
  *   read. Either way we can't compare, so (absent `--rebuild`) we proceed
  *   without prompting — never a false positive.
+ * - `resourcesDrifted` defaults to `false` so existing callers/tests that
+ *   don't pass it keep their exact prior behavior; cpu/memory drift is
+ *   OR-ed into the same `drifted` decision, so it flows through the same
+ *   prompt / warn-stale / rebuild outcomes as a hash mismatch.
  */
 export function decideReattachAction(args: {
   storedHash: string | undefined;
   currentHash: string | undefined;
   rebuildFlag: boolean;
   interactive: boolean;
+  resourcesDrifted?: boolean;
 }): ReattachAction {
   if (args.rebuildFlag) return "rebuild";
-  const drifted =
+  const hashDrifted =
     args.storedHash !== undefined &&
     args.currentHash !== undefined &&
     args.storedHash !== args.currentHash;
+  const drifted = hashDrifted || (args.resourcesDrifted ?? false);
   if (!drifted) return "proceed";
   return args.interactive ? "prompt" : "warn-stale";
+}
+
+/**
+ * Compares the cpu/memory limits recorded at container CREATE time against
+ * the current `.openlock/config.yaml` values, for reattach drift detection
+ * (openlock-tbkc). Unlike `computeBuildInputsHash` (deliberately NOT
+ * extended to include cpu/memory — that would make every existing session's
+ * recorded hash mismatch its own recomputed hash the first time it
+ * reattaches after this field ships, a false drift signal for sessions
+ * whose resources never changed), this is a separate ground-truth field
+ * comparison, same shape as `findUnattachedCredentialBundles` /
+ * `debugEgressReattachWarning` / `branchReattachWarning` below.
+ *
+ * `recorded` is `undefined` for sessions created before this field existed —
+ * genuinely unknown, so this returns `null` (never a signal), exactly the
+ * same "can't compare" contract as `storedHash`'s absence above. A
+ * present `{}` is a real, comparable value ("created with no limits at
+ * all"), so it IS compared against `current` like any other case.
+ *
+ * Returns `null` if both fields match (including undefined vs undefined),
+ * else a short, comma-joined description covering BOTH fields — e.g. `cpu
+ * "2" -> "4", memory unchanged` when only cpu changed, or `memory "4Gi" ->
+ * none` alone when cpu was never configured on either side (nothing to say
+ * about a field that was always absent) — enough detail for a warning line
+ * without forcing the caller to also print the unrelated hash mismatch.
+ */
+export function findResourceDrift(
+  recorded: { cpu?: string; memory?: string } | undefined,
+  current: { cpu?: string; memory?: string },
+): string | null {
+  if (recorded === undefined) return null;
+  const fmt = (v: string | undefined) => (v === undefined ? "none" : `"${v}"`);
+  const describe = (label: string, before: string | undefined, after: string | undefined) => {
+    if (before === after) return before === undefined ? null : `${label} unchanged`;
+    return `${label} ${fmt(before)} -> ${fmt(after)}`;
+  };
+  const cpu = describe("cpu", recorded.cpu, current.cpu);
+  const memory = describe("memory", recorded.memory, current.memory);
+  const changed = recorded.cpu !== current.cpu || recorded.memory !== current.memory;
+  if (!changed) return null;
+  return [cpu, memory].filter((p): p is string => p !== null).join(", ");
 }
 
 /**
