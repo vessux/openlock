@@ -489,6 +489,99 @@ describe("session-store providerId field (openlock-xz6d)", () => {
   });
 });
 
+describe("session-store resources field (openlock-tbkc)", () => {
+  let baseDir: string;
+
+  function setup(): string {
+    baseDir = mkdtempSync(join(tmpdir(), "openlock-session-tbkc-"));
+    return baseDir;
+  }
+
+  function cleanup(): void {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+
+  it("round-trips a present-and-empty object (created with no cpu/memory limits)", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-empty-resources",
+        name: "sb-empty-resources",
+        repoPath: "/some/repo",
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-09-08T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "claude_code",
+        resources: {},
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.resources).toEqual({});
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("round-trips recorded cpu/memory values", () => {
+    setup();
+    try {
+      const meta: SessionMeta = {
+        id: "test-id-with-resources",
+        name: "sb-with-resources",
+        repoPath: "/some/repo",
+        image: "openlock-core",
+        policy: "default",
+        createdAt: "2026-09-08T00:00:00Z",
+        lastAttachedAt: null,
+        attachedPid: null,
+        harness: "claude_code",
+        resources: { cpu: "2", memory: "4Gi" },
+      };
+      saveSession(baseDir, meta);
+      const loaded = loadSession(baseDir, meta.id);
+      expect(loaded?.resources).toEqual({ cpu: "2", memory: "4Gi" });
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Migration-safety case, same shape as attachedCredentialBundles's/
+  // debugEgress's/providerId's: a session written before this field existed
+  // must read back as `undefined` — the "unknown, can't compare" signal
+  // findResourceDrift keys on — never coerced into `{}` (which would read as
+  // "genuinely created with no limits" and flag drift against any current
+  // cpu/memory value on the very first reattach after this feature ships).
+  it("legacy record with resources entirely absent reads back as undefined, NOT {}", () => {
+    setup();
+    try {
+      const id = "legacy-no-resources-field";
+      mkdirSync(join(baseDir, id), { recursive: true });
+      writeFileSync(
+        join(baseDir, id, "meta.json"),
+        JSON.stringify({
+          id,
+          name: "sb-legacy-resources",
+          repoPath: "/some/repo",
+          image: "openlock-core",
+          policy: "default",
+          createdAt: "2026-05-01T00:00:00Z",
+          lastAttachedAt: null,
+          attachedPid: null,
+          harness: "claude_code",
+          // no resources key at all — pre-dates openlock-tbkc.
+        }),
+      );
+      const loaded = loadSession(baseDir, id);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.resources).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("sessionsDir (openlock-x8m8)", () => {
   // Before x8m8, sessionsDir() independently recomputed
   // `join(HOME, ".local", "state", "openlock", "sessions")` inline — an

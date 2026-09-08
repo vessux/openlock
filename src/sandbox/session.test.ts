@@ -383,3 +383,40 @@ describe("attachStale wires the tgfk reattach warnings (openlock-tgfk)", () => {
     expect(body).toContain("policyWarningLines.push(line)");
   });
 });
+
+describe("resolveOrCreateSession wires resource drift into reattach (openlock-tbkc)", () => {
+  const SESSION_TS_PATH = join(import.meta.dir, "session.ts");
+  const source = readFileSync(SESSION_TS_PATH, "utf-8");
+
+  function extractFunctionBody(src: string, startMarker: string): string {
+    const start = src.indexOf(startMarker);
+    if (start === -1) {
+      throw new Error(`${startMarker} not found in session.ts — was it renamed or removed?`);
+    }
+    const end = src.indexOf("\n}", start);
+    if (end === -1) {
+      throw new Error(`${startMarker}'s closing '}' not found in session.ts`);
+    }
+    return src.slice(start, end);
+  }
+
+  const body = extractFunctionBody(source, "async function resolveOrCreateSession(");
+
+  it("computes resourceDrift from the recorded ground truth (m.resources) against the resolved current values", () => {
+    expect(body).toContain("findResourceDrift(m.resources, {");
+    expect(body).toContain("cpu: resolved.cpu,");
+    expect(body).toContain("memory: resolved.memory,");
+  });
+
+  it("folds resourceDrift into decideReattachAction as resourcesDrifted", () => {
+    expect(body).toContain("resourcesDrifted: resourceDrift !== null");
+  });
+
+  it("passes resourceDrift into the interactive prompt", () => {
+    expect(body).toContain("promptRebuildOnDrift(m.name, resourceDrift)");
+  });
+
+  it("mentions the resource-drift reason in the warn-stale message when present", () => {
+    expect(body).toContain("resource limits changed");
+  });
+});

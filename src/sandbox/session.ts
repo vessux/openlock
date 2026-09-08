@@ -33,6 +33,7 @@ import {
   computeBuildInputsHashFromFiles,
   debugEgressReattachWarning,
   decideReattachAction,
+  findResourceDrift,
   findUnattachedCredentialBundles,
   type ReattachAction,
 } from "./drift";
@@ -425,6 +426,15 @@ async function createSession(
       // see SessionMeta.providerId's doc comment for why this is recorded
       // rather than recomputed from the harness at exec time.
       providerId,
+      // openlock-tbkc: the ground truth a later reattach's cpu/memory
+      // comparison uses (see sandbox/drift.ts findResourceDrift) — cpu/memory
+      // are baked in at container CREATE time, same as the other cold inputs
+      // above. Sub-keys omitted (not written as `undefined`) when that limit
+      // wasn't configured; the object itself is always present.
+      resources: {
+        ...(cpu !== undefined ? { cpu } : {}),
+        ...(memory !== undefined ? { memory } : {}),
+      },
     };
     saveSession(sessionsDir(), meta);
 
@@ -785,9 +795,10 @@ async function reattachSession(
 
 /** Blocking y/N prompt shown on reattach when the sandbox's cold build inputs
  * drifted. Default (empty answer) is No — never destroy the container unasked. */
-async function promptRebuildOnDrift(name: string): Promise<boolean> {
+async function promptRebuildOnDrift(name: string, resourceDrift: string | null): Promise<boolean> {
+  const reason = resourceDrift !== null ? ` (resource limits changed: ${resourceDrift})` : "";
   process.stdout.write(
-    `openlock: .openlock config/policy changed since sandbox "${name}" was built. Rebuild it now? [y/N] `,
+    `openlock: .openlock config/policy changed since sandbox "${name}" was built${reason}. Rebuild it now? [y/N] `,
   );
   const reader = Bun.stdin.stream().getReader();
   const { value } = await reader.read();
@@ -926,16 +937,27 @@ async function resolveOrCreateSession(
   // have vanished since create); decideReattachAction treats that as
   // "can't compare, proceed" unless --rebuild forces a recreate anyway.
   const currentHash = sessionBuildInputsHash(projectPath, resolved);
+  // openlock-tbkc: cpu/memory are cold build inputs too (baked in at
+  // container CREATE time, same as Containerfile/mounts/policy) but are NOT
+  // folded into buildInputsHash — see findResourceDrift's doc comment for
+  // why. `m.resources` absent (legacy session) means "can't compare",
+  // exactly like buildInputsHash's own absence.
+  const resourceDrift = findResourceDrift(m.resources, {
+    cpu: resolved.cpu,
+    memory: resolved.memory,
+  });
   const action: ReattachAction = decideReattachAction({
     storedHash: m.buildInputsHash,
     currentHash,
     rebuildFlag: rebuild,
     interactive,
+    resourcesDrifted: resourceDrift !== null,
   });
 
   if (action === "warn-stale") {
+    const reason = resourceDrift !== null ? ` (resource limits changed: ${resourceDrift})` : "";
     console.warn(
-      `openlock: .openlock config/policy changed since sandbox "${m.name}" was built; ` +
+      `openlock: .openlock config/policy changed since sandbox "${m.name}" was built${reason}; ` +
         "attaching the existing container unchanged. Re-run with --rebuild to apply the changes (recreates the sandbox).",
     );
   }
@@ -980,7 +1002,7 @@ async function resolveOrCreateSession(
 
   if (action === "proceed" || action === "warn-stale") return attachStale();
 
-  if (action === "prompt" && !(await promptRebuildOnDrift(m.name))) {
+  if (action === "prompt" && !(await promptRebuildOnDrift(m.name, resourceDrift))) {
     console.log(
       `Keeping existing sandbox "${m.name}"; changes not applied. Re-run with --rebuild to apply them later.`,
     );
