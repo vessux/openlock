@@ -1,6 +1,11 @@
-export type Harness = "claude_code" | "opencode" | "pi";
+export type Harness = "claude_code" | "opencode" | "pi" | "copilot_cli";
 
-export const HARNESSES: ReadonlySet<Harness> = new Set<Harness>(["claude_code", "opencode", "pi"]);
+export const HARNESSES: ReadonlySet<Harness> = new Set<Harness>([
+  "claude_code",
+  "opencode",
+  "pi",
+  "copilot_cli",
+]);
 
 export function validateHarness(value: string, source: string): Harness {
   if (!HARNESSES.has(value as Harness)) {
@@ -20,19 +25,14 @@ export function harnessLaunchArgv(harness: Harness, args: readonly string[]): st
       return ["opencode", ...args];
     case "pi":
       return ["pi", ...args];
+    case "copilot_cli":
+      return ["copilot", ...args];
   }
 }
 
-export function harnessBinaryPath(harness: Harness): string {
-  switch (harness) {
-    case "claude_code":
-      return "/usr/local/bin/claude";
-    case "opencode":
-      return "/usr/local/bin/opencode";
-    case "pi":
-      return "/usr/local/bin/pi";
-  }
-}
+// Per-binary scoping paths (per-arch for copilot_cli) live in
+// scripts/render-default-policies.ts's HARNESS_BIN, the real source of truth
+// for the rendered policy; no per-harness binary-path function here.
 
 export interface ResolveHarnessArgs {
   cliFlag: string | undefined;

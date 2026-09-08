@@ -167,6 +167,10 @@ describe("harnessEnvFor (openlock-04x)", () => {
     expect(harnessEnvFor("pi")).toEqual({ PI_OFFLINE: "1" });
   });
 
+  it("is empty for copilot_cli (no staged config dir; HOME=/sandbox from the base image covers writability)", () => {
+    expect(harnessEnvFor("copilot_cli")).toEqual({});
+  });
+
   it("buildSandboxEnv (attach path) and buildExecCmdArgv (exec path) agree on claude_code's env, by construction", () => {
     // Regression guard for the actual openlock-04x defect: both paths must
     // derive CLAUDE_CONFIG_DIR from the SAME function, not two copies that

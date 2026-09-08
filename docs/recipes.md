@@ -16,12 +16,12 @@ memory: "4Gi"   # also accepts e.g. "512Mi", "8G"
 `.openlock/config.yaml`'s `harness:` key is written by `openlock init` and read back by `openlock sandbox`, so you don't have to pass `--harness` every time:
 
 ```yaml
-harness: pi   # claude_code | opencode | pi
+harness: pi   # claude_code | opencode | pi | copilot_cli
 ```
 
 `openlock sandbox --harness <h>` overrides it for one invocation (falling back through `OPENLOCK_HARNESS`, then this file, then `default_harness:` in global config); it errors instead of switching if a session under that name already exists with a different harness, rather than silently reattaching to the wrong kind of container.
 
-The provider is **not** part of this file — remember to pass the matching `--provider` on `openlock sandbox` (or set `OPENLOCK_PROVIDER` / `default_provider:`). See the pairing table in [Quickstart](./quickstart.md#provider-and-harness-are-paired-not-a-free-choice): `claude_code` → `anthropic`; `opencode` and `pi` → `openrouter` only.
+The provider is **not** part of this file — remember to pass the matching `--provider` on `openlock sandbox` (or set `OPENLOCK_PROVIDER` / `default_provider:`). See the pairing table in [Quickstart](./quickstart.md#provider-and-harness-are-paired-not-a-free-choice): `claude_code` → `anthropic`; `opencode` and `pi` → `openrouter` only; `copilot_cli` → `github_copilot` only.
 
 ## Harness launch args
 
@@ -51,6 +51,26 @@ args:
 ```
 
 `anthropic` has no equivalent authenticated models endpoint (there's no per-key model allowlist concept for it in openlock) — `openlock providers models anthropic` errors saying so rather than returning an empty or fabricated list.
+
+## GitHub Copilot
+
+`copilot_cli` needs a **user-owned, fine-grained** GitHub personal access token (`github_pat_...`) with the `Copilot Requests` permission — that permission can't be granted to an org-owned token, so business/enterprise users authenticate with a personal-account token too. Classic `ghp_`/`gho_` tokens are rejected. If your org enforces SAML SSO, Authorize the token for that org in GitHub's token settings first.
+
+```bash
+openlock login --provider github_copilot   # paste your fine-grained PAT
+openlock sandbox --harness copilot_cli --provider github_copilot
+```
+
+For a non-interactive run (e.g. scripted/CI), pass the prompt and let the CLI proceed without further approval:
+
+```yaml
+args:
+  - -p
+  - "<prompt>"
+  - --allow-all-tools
+```
+
+Two hosts are denied by policy and this is expected: the CLI's own update check (`api.github.com/repos/github/copilot-cli/releases/latest`) and its telemetry endpoint both fail closed harmlessly — the CLI keeps working either way. GHEC data-residency accounts (`*.ghe.com` hosts) are not supported.
 
 ## Secondary credentials
 
@@ -124,8 +144,8 @@ network_policies:
 
 | Key | Values | Default | Purpose |
 |---|---|---|---|
-| `default_harness` | `claude_code` \| `opencode` \| `pi` | — | Used when `--harness`/`OPENLOCK_HARNESS`/the project's own `config.yaml` don't set one. |
-| `default_provider` | `anthropic` \| `openrouter` | — | Used when `--provider`/`OPENLOCK_PROVIDER` aren't set. There is no manifest-level provider key (see [Quickstart](./quickstart.md)), so this is the only way to stop passing `--provider` every time. |
+| `default_harness` | `claude_code` \| `opencode` \| `pi` \| `copilot_cli` | — | Used when `--harness`/`OPENLOCK_HARNESS`/the project's own `config.yaml` don't set one. |
+| `default_provider` | `anthropic` \| `openrouter` \| `github_copilot` | — | Used when `--provider`/`OPENLOCK_PROVIDER` aren't set. There is no manifest-level provider key (see [Quickstart](./quickstart.md)), so this is the only way to stop passing `--provider` every time. |
 | `default_runtime` | `podman` \| `docker` | — | Used when `OPENLOCK_RUNTIME` isn't set and autodetection is ambiguous. |
 | `reap_idle` | `"off"` or a duration (`"30m"`, `"2h"`, `"1d"`) | `off` | Auto-stop idle (running, unattached) sandboxes after `openlock sandbox` ends a session. Off by default — nothing is stopped behind your back; `openlock reap` always runs on demand regardless. |
 | `network_auto_reload` | `true` \| `false` | `false` | Opt-in: `openlock doctor` runs `podman network reload --all` automatically on detected sandbox → gateway unreachability, instead of only suggesting it. Podman/netavark-specific. |

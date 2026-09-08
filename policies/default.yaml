@@ -135,6 +135,152 @@ network_policies:
               from_credential: OPENROUTER_BEARER_TOKEN
     allowed_secrets:
       - OPENROUTER_BEARER_TOKEN
+  copilot_cli:
+    binaries:
+      - path: /usr/local/lib/node_modules/@github/copilot/node_modules/@github/copilot-linux-arm64/copilot
+      - path: /usr/local/lib/node_modules/@github/copilot/node_modules/@github/copilot-linux-x64/copilot
+      - path: /usr/local/bin/node
+    endpoints:
+      - host: api.github.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /copilot_internal/user
+          - allow:
+              method: GET
+              path: /copilot_internal/managed_settings
+        cred_inject:
+          provider: github_copilot
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: Authorization
+              from_credential: GITHUB_COPILOT_PAT
+              value_prefix: 'Bearer '
+      - host: api.individual.githubcopilot.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /models
+          - allow:
+              method: POST
+              path: /models/session
+          - allow:
+              method: POST
+              path: /chat/completions
+          - allow:
+              method: POST
+              path: /responses
+          - allow:
+              method: POST
+              path: /models/session/intent
+          - allow:
+              method: POST
+              path: /v1/messages
+          - allow:
+              method: POST
+              path: /mcp/readonly
+          - allow:
+              method: POST
+              path: /auto
+        cred_inject:
+          provider: github_copilot
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: Authorization
+              from_credential: GITHUB_COPILOT_PAT
+              value_prefix: 'Bearer '
+      - host: api.business.githubcopilot.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /models
+          - allow:
+              method: POST
+              path: /models/session
+          - allow:
+              method: POST
+              path: /chat/completions
+          - allow:
+              method: POST
+              path: /responses
+          - allow:
+              method: POST
+              path: /models/session/intent
+          - allow:
+              method: POST
+              path: /v1/messages
+          - allow:
+              method: POST
+              path: /mcp/readonly
+          - allow:
+              method: POST
+              path: /auto
+        cred_inject:
+          provider: github_copilot
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: Authorization
+              from_credential: GITHUB_COPILOT_PAT
+              value_prefix: 'Bearer '
+      - host: api.enterprise.githubcopilot.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: /models
+          - allow:
+              method: POST
+              path: /models/session
+          - allow:
+              method: POST
+              path: /chat/completions
+          - allow:
+              method: POST
+              path: /responses
+          - allow:
+              method: POST
+              path: /models/session/intent
+          - allow:
+              method: POST
+              path: /v1/messages
+          - allow:
+              method: POST
+              path: /mcp/readonly
+          - allow:
+              method: POST
+              path: /auto
+        cred_inject:
+          provider: github_copilot
+          strip_headers:
+            - Authorization
+            - x-api-key
+            - Cookie
+          inject:
+            - header: Authorization
+              from_credential: GITHUB_COPILOT_PAT
+              value_prefix: 'Bearer '
+    allowed_secrets:
+      - GITHUB_COPILOT_PAT
   npm_packages:
     binaries:
       - path: /usr/local/bin/npm

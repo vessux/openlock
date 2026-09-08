@@ -5,16 +5,23 @@ import { PROVIDER_IDS, PROVIDERS } from "../src/providers/registry";
 import type { PolicyEndpointSpec } from "../src/providers/types";
 import { HARNESSES, type Harness } from "../src/sandbox/harness";
 
-const HARNESS_BIN: Record<Harness, string> = {
-  claude_code: "/usr/local/bin/claude",
-  opencode: "/usr/local/bin/opencode",
-  pi: "/usr/local/bin/pi",
+const HARNESS_BIN: Record<Harness, readonly string[]> = {
+  claude_code: ["/usr/local/bin/claude"],
+  opencode: ["/usr/local/bin/opencode"],
+  pi: ["/usr/local/bin/pi"],
+  // Live-captured 2026-09-08: the process that opens the socket is the
+  // native per-arch platform binary, not the /usr/local/bin/copilot node
+  // shim — both linux arches are listed.
+  copilot_cli: [
+    "/usr/local/lib/node_modules/@github/copilot/node_modules/@github/copilot-linux-arm64/copilot",
+    "/usr/local/lib/node_modules/@github/copilot/node_modules/@github/copilot-linux-x64/copilot",
+  ],
 };
 
 function harnessBinaries(harness: Harness): Array<{ path: string }> {
   // Base image always ships node (under /usr/local/bin) + python3 (under
   // /usr/bin via apt). Single policy covers both; cap detection is gone.
-  return [{ path: HARNESS_BIN[harness] }, { path: "/usr/local/bin/node" }];
+  return [...HARNESS_BIN[harness].map((path) => ({ path })), { path: "/usr/local/bin/node" }];
 }
 
 function harnessBlock(harness: Harness): Record<string, unknown> {

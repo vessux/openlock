@@ -79,7 +79,7 @@ describe("validateCmd output (byte-identical guard, openlock-j9t7)", () => {
     expect(logs).toEqual([
       "  config.yaml:",
       '    credentials[0].name: credential bundle name "anthropic" collides with a built-in provider — choose a different name',
-      "      fix: rename this credentials[] entry to something other than: anthropic, openrouter",
+      "      fix: rename this credentials[] entry to something other than: anthropic, openrouter, github_copilot",
       `    [fs] mounts[0].source: source ${join(root, "nope")} does not exist`,
       "  policy.yaml:",
       '    network_policies.gh.endpoints[0].cred_inject: credential "GITHUB_TOKEN" is injected by policy but no provider supplies it — declare it under credentials: in config.yaml (or attach the provider)',

@@ -103,6 +103,16 @@ function renderArgs(args: string[], harness: Harness): string {
         "  # - openrouter/nvidia/nemotron-3-super-120b-a12b:free",
       ].join("\n");
     }
+    if (harness === "copilot_cli") {
+      return [
+        "args: []",
+        "  # copilot_cli + GitHub Copilot: pin a model from your account's catalog.",
+        "  # Example (verify it's still listed for your plan before relying on it):",
+        "  # - --model",
+        "  # - claude-sonnet-5",
+        "  # Some entries are plan-gated (billing.restricted_to: pro_plus/business/enterprise/max).",
+      ].join("\n");
+    }
     return ["args: []", "  # - --model", "  # - claude-sonnet-4-6"].join("\n");
   }
   return ["args:", ...args.map((a) => `  - ${JSON.stringify(a)}`)].join("\n");

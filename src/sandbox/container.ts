@@ -132,6 +132,10 @@ export function harnessEnvFor(harness: Harness): Record<string, string> {
       return {};
     case "pi":
       return { PI_OFFLINE: "1" };
+    case "copilot_cli":
+      // No config-dir env needed: the base image's HOME=/sandbox is already
+      // writable, which the CLI's first-run cache extraction requires.
+      return {};
   }
 }
 

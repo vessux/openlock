@@ -17,6 +17,7 @@ const FAKE_VERSIONS: Record<Harness, string> = {
   claude_code: "0.0.0-fixture-cc",
   opencode: "0.0.0-fixture-oc",
   pi: "0.0.0-fixture-pi",
+  copilot_cli: "0.0.0-fixture-cp",
 };
 
 function snap(name: string): string {

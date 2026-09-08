@@ -1,10 +1,12 @@
 import { ANTHROPIC } from "./anthropic";
+import { GITHUB_COPILOT } from "./github-copilot";
 import { OPENROUTER } from "./openrouter";
 import type { ProviderId, ProviderPlugin } from "./types";
 
 export const PROVIDERS: Record<ProviderId, ProviderPlugin> = {
   anthropic: ANTHROPIC,
   openrouter: OPENROUTER,
+  github_copilot: GITHUB_COPILOT,
 };
 
 export const PROVIDER_IDS: readonly ProviderId[] = Object.keys(PROVIDERS) as ProviderId[];
