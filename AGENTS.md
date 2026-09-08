@@ -28,6 +28,37 @@ and child processes inherit it, so it leaks straight through instead of isolatin
 "Back up the user's real state first, then run the test" is an anti-pattern, not a mitigation —
 if a test seems to need real state, that's a sign to add a proper seam, not to proceed.
 
+## Every new test must be shown to fail first
+
+Every new or changed test must be **demonstrated to fail** against the unfixed code (or with
+the guarded defect reintroduced) before it counts. Passing green was never the evidence; the
+red run is.
+
+- Unit / hermetic tests: run red locally before green.
+- CI-gated guards (scripts/workflows that fail the build on a condition): break the guard's
+  **subject** (the thing it checks), run the guard unpiped and show a non-zero exit, and prove
+  it stays quiet on a safe subject.
+- Live-integration tests (only run under `OPENLOCK_LIVE_INTEGRATION=1` against a real gateway):
+  the driver falsifies on a disposable host (`OPENLOCK_DISPOSABLE_HOST`), or the requirement is
+  explicitly waived and the waiver recorded on the PR.
+
+What does **not** count:
+
+1. An import/compile error is not falsification for a new function — revert the body, keep the
+   exports; the bug is usually a missing call site.
+2. Commenting out is not deleting; a source assertion can be fooled by its target's own comment
+   prose.
+3. `$?` after a pipe measures the pipe's last stage, not the guard.
+4. A gate that fires on a safe file is a false positive, and that is how gates get silenced.
+5. When the defect was a missing call site, the falsification must break the call, not the
+   function.
+
+Every PR body carries a `Falsification:` line stating how each new test was shown to fail (or
+`Falsification: waived — <why>` for live tiers).
+
+This is a convention, not a mechanism — it depends on the author doing it. The only true
+mechanism is mutation testing, which this repo does not run.
+
 ## `main` is protected by a ruleset
 
 `main` is guarded by a repository **ruleset**, not classic branch protection — `gh api
