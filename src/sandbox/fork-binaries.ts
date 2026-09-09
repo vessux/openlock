@@ -7,7 +7,7 @@ import { forkDir } from "../paths";
 // release ships, alongside any matching changes in openlock that depend
 // on fork-side behavior.
 const OPENSHELL_FORK_REPO = "vessux/OpenShell";
-export const OPENSHELL_FORK_TAG = "v0.8.3";
+export const OPENSHELL_FORK_TAG = "v0.9.0";
 
 type ForkBinary = "openshell-gateway" | "openshell-sandbox" | "openshell";
 

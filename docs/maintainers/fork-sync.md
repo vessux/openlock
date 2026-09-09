@@ -52,6 +52,15 @@ reviewable, re-appliable series.
    the diffstat. Each resulting changeset should independently pass the workspace build — a
    changeset that only compiles once later changesets land isn't a real unit.
 
+   **Check whether upstream has since shipped a fork feature, and drop ours if so.** Every fork
+   feature is conflict surface; one upstream has implemented natively is pure cost. The 0.9 sync
+   dropped the fork's Stop/Start lifecycle (upstream #2653 shipped a superset: same CLI verbs, same
+   `"Stopped"` phase label, plus a `STOPPING` phase) — after confirming openlock only reads the exit
+   code and a later `sandbox get`. When you drop a feature, the byte-identity check still holds
+   *modulo the drop*: revert the dropped feature's commit on the old tip and compare tree hashes
+   against the squeezed tip. If the revert doesn't apply cleanly, the feature is entangled with
+   something you are keeping — untangle by hand and say so in the commit message.
+
 3. **Cut the release line.** Branch `release/X.Y` off the freshly-synced `main` and replay the
    squeezed delta onto it (`git rebase upstream/main` from the delta branch is equivalent). That
    state becomes `vX.Y.0`.
@@ -90,6 +99,21 @@ reviewable, re-appliable series.
      reserved field are just ignored as unknown bytes — but renumbering is what breaks cross-
      version decode.
 
+   Then — before resolving the Rust conflicts — pre-flight the one collision class that is not a
+   proto at all: **a new upstream path that resolves credentials.** The per-binary
+   `allowed_secrets` moat is a *filter wrapped around a resolver* (`filter_resolver_by_policy` in
+   `supervisor-network/src/proxy.rs`). It protects exactly the resolvers it wraps and nothing
+   else, so any upstream refactor that constructs or swaps in a resolver somewhere new is a
+   fail-open hole until proven wrapped — and the unit suite cannot see it, because every test
+   passes with the filter covering nothing. The 0.9 sync hit this for real: upstream v0.0.116
+   materialises sandbox credentials as `ProviderCredentialState` and swaps in a per-request,
+   endpoint-scoped resolver in `l7/relay.rs` (`scoped_context_for_request`), bypassing the
+   filtered `ctx.secret_resolver` entirely; a second upstream branch forwarded the header block
+   *before* the `cred_inject` strip-and-replace ran. Grep both sides for `SecretResolver`
+   construction sites, `secret_resolver =` assignments, and any new `*_credentials` state, and for
+   each new site either route it through the filter or argue in the commit message why it cannot
+   carry a credential.
+
 5. **Run the full gate on the release-line tip — not a subset.**
 
    ```
@@ -123,9 +147,19 @@ reviewable, re-appliable series.
    > bypass-detection paths, which is to say much of what the fork's security model depends on,
    > since the supervisor only runs inside the Linux container. `cargo clippy`/`cargo test
    > --workspace` on macOS never compile that code at all; a green result proves nothing about it.
-   > For changes touching those paths, cross-compile instead: `cargo-zigbuild clippy --target
-   > aarch64-unknown-linux-gnu`. The general lesson: whenever a gate reports green, ask what that
-   > gate structurally cannot see before trusting it.
+   > Run the Linux leg on **every** sync, not only when you believe you touched those paths — a
+   > mechanical conflict resolution can leave a `#[cfg(target_os = "linux")]` test literal missing
+   > a fork field, and the 0.9 sync's Mac gate was fully green with exactly that break in it:
+   >
+   > ```
+   > mise trust <clone>/mise.toml   # zig comes via the mise shim; untrusted config = silent failure
+   > cargo-zigbuild clippy --target aarch64-unknown-linux-gnu --workspace --all-targets \
+   >   --features openshell-prover/bundled-z3 -- -D warnings
+   > ```
+   >
+   > Note the hyphenated binary: `cargo zigbuild clippy` (as a cargo subcommand) is rejected with
+   > "unexpected argument 'clippy'". The general lesson: whenever a gate reports green, ask what
+   > that gate structurally cannot see before trusting it.
 
    **z3 note.** `cargo tree -i z3-sys` is the source of truth for who pulls z3 in — this has
    changed upstream before, so don't assume the previous sync's answer still holds. For manual
