@@ -152,22 +152,30 @@ describe("openlock sandbox create -> upload -> marker -> setup script (live inte
 
       const env = { ...process.env, OPENLOCK_CONFIG_DIR: configDir, OPENLOCK_DISPOSABLE_HOST: "1" };
 
-      const createResult = await spawnAndCaptureEnv(
-        [
-          "bun",
-          "run",
-          CLI_PATH,
-          "sandbox",
-          fixtureDir,
-          "--no-attach",
-          "--provider",
-          "openrouter",
-          "--harness",
-          "opencode",
-        ],
-        REPO_ROOT,
-        env,
-      );
+      const createArgv = [
+        "bun",
+        "run",
+        CLI_PATH,
+        "sandbox",
+        fixtureDir,
+        "--no-attach",
+        "--provider",
+        "openrouter",
+        "--harness",
+        "opencode",
+      ];
+      let createResult = await spawnAndCaptureEnv(createArgv, REPO_ROOT, env);
+      if (
+        createResult.code !== 0 &&
+        /transport error|tcp connect error/.test(createResult.stderr)
+      ) {
+        // Another live test (compiled-binary-gateway-start) restarts the shared
+        // CI gateway; its pid file exists before it listens, so openlock's
+        // "Gateway already running" short-circuit can race the boot. One retry
+        // after a pause is enough; a real failure reproduces on the retry.
+        await Bun.sleep(5_000);
+        createResult = await spawnAndCaptureEnv(createArgv, REPO_ROOT, env);
+      }
       const match = createResult.stdout.match(
         /^Session (\S+) created \(detached, harness not attached\)\.$/m,
       );
