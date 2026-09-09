@@ -200,6 +200,31 @@ describe("openlock sandbox create -> upload -> marker -> setup script (live inte
         REPO_ROOT,
         env,
       );
+      if (execResult.code !== 0 || /^MISSING /m.test(execResult.stdout)) {
+        // Diagnostic for the setup script (the canonical main process): who
+        // it ran as, what landed under /sandbox, and whether the clone works
+        // by hand. Printed before the assertions fail so CI states WHY.
+        const diag = await spawnAndCaptureEnv(
+          [
+            "bun",
+            "run",
+            CLI_PATH,
+            "exec",
+            sessionName,
+            "--",
+            "/bin/bash",
+            "-c",
+            "id; echo HOME=$HOME PWD=$PWD; git --version; ls -la /sandbox /sandbox/repo /sandbox/.openlock /sandbox/.openlock/bundles 2>&1; " +
+              "cd /sandbox && git clone .openlock/bundles/repo.bundle /tmp/clone-probe 2>&1; echo clone_exit=$?; " +
+              "cat /proc/1/cmdline 2>/dev/null | tr '\\0' ' '; echo; ps -eo pid,user,args 2>/dev/null | head -20",
+          ],
+          REPO_ROOT,
+          env,
+        );
+        console.error(
+          `--- create-flow diagnostics (exit ${diag.code}) ---\n${diag.stdout}\n${diag.stderr}\n--- end ---`,
+        );
+      }
       expect(execResult.code).toBe(0);
       expect(execResult.stdout).not.toMatch(/^MISSING /m);
       expect(execResult.stdout).toMatch(/^OK \/sandbox\/\.openlock\/\.openlock-upload-complete$/m);
