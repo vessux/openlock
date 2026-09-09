@@ -19,10 +19,10 @@ import { join, resolve } from "node:path";
 import { buildOpenshellExecArgv } from "../../src/sandbox/container";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
-import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 import { teardownGatewayState } from "./helpers/gateway-teardown";
 import { loadRealOpenRouterBearerForLiveIntegrationOnly } from "./helpers/real-credentials";
+import { createDetachedSandbox, spawnAndCapture } from "./helpers/sandbox-lifecycle";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 
@@ -43,24 +43,6 @@ const FIXTURE_POLICY = resolve(
   __dirname,
   "../fixtures/policies/test-openrouter-real-upstream.yaml",
 );
-
-async function spawnAndCapture(
-  argv: string[],
-  cwd?: string,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-  });
-  const [code, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code, stdout, stderr };
-}
 
 async function gitInit(dir: string): Promise<void> {
   const init = await spawnAndCapture(["git", "init", "-q", "-b", "main"], dir);
@@ -84,55 +66,23 @@ async function gitInit(dir: string): Promise<void> {
   if (cfg.code !== 0) throw new Error(`git commit failed: ${cfg.stderr}`);
 }
 
-async function waitForSandboxReady(
-  cliPrefix: readonly string[],
-  cliCwd: string | undefined,
-  sessionName: string,
-  timeoutMs = 60_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const r = await spawnAndCapture(
-      [...cliPrefix, "sandbox", "exec", "--name", sessionName, "--no-tty", "--", "/bin/true"],
-      cliCwd,
-    );
-    if (r.code === 0) return;
-    await Bun.sleep(500);
-  }
-  throw new Error(`sandbox ${sessionName} did not reach Ready state within ${timeoutMs}ms`);
-}
-
-/** Best-effort reap of the detached `sandbox create` child (openlock-18c) —
- * split out of `afterAll` purely to keep that hook's cognitive complexity
- * under biome's limit. Tolerates the process already being dead. */
-async function reapLiveProc(proc: ReturnType<typeof Bun.spawn> | null): Promise<void> {
-  if (proc === null) return;
-  try {
-    proc.kill();
-    await proc.exited;
-  } catch {
-    // Already dead — fine.
-  }
-}
-
 describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)", () => {
   // openlock-18c: see harness-binary-cred-inject.test.ts for the full
   // mechanism writeup (bun test timeout runs afterEach/afterAll but not an
   // in-body try/finally). Also fixes the same second bug as its siblings:
   // `removeContainer` did a raw `podman rm -f`, never `sandbox delete`,
   // leaving the gateway's own sandbox record behind even on a clean run.
-  // Additionally tracks the detached `sandbox create` (foreground "sleep
-  // infinity") child process — see post-create-exec-proxy.test.ts for why.
-  // NOT a prefix sweep — only the exact name(s) this run registers are ever
-  // deleted; this suite runs against the real dev gateway.
+  // Fork v0.9.0 (#2726): `sandbox create --detach` returns once the sandbox
+  // exists rather than staying attached to a foreground command — see
+  // post-create-exec-proxy.test.ts for why this suite no longer tracks/reaps
+  // a long-lived `create` child. NOT a prefix sweep — only the exact name(s)
+  // this run registers are ever deleted; this suite runs against the real
+  // dev gateway.
   let registeredSandbox: string | null = null;
   let registeredProvider: string | null = null;
-  let liveCreateProc: ReturnType<typeof Bun.spawn> | null = null;
 
   afterAll(
     async () => {
-      await reapLiveProc(liveCreateProc);
-      liveCreateProc = null;
       if (registeredSandbox === null && registeredProvider === null) return;
       const cli = await getCliInvocation();
       await teardownGatewayState(cli, registeredSandbox, registeredProvider);
@@ -153,10 +103,6 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
       const repoDir = join(tmp, "repo");
       mkdirSync(repoDir);
       await gitInit(repoDir);
-
-      const staging = join(tmp, "staging", ".openlock");
-      mkdirSync(staging, { recursive: true });
-      await createBundle(repoDir, join(staging, "repo.bundle"));
 
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
@@ -194,39 +140,21 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
           tagPrefix: "openlock-base-it",
         });
 
-        const createArgv = [
-          ...argvHead,
-          "sandbox",
-          "create",
-          "--name",
-          sessionName,
-          "--from",
-          image.tag,
-          "--upload",
-          `${join(tmp, "staging")}:/sandbox/`,
-          "--no-git-ignore",
-          "--policy",
-          FIXTURE_POLICY,
-          "--provider",
-          PROVIDER_NAME,
-          "--no-tty",
-          "--",
-          "/bin/sh",
-          "-c",
-          "exec sleep infinity",
-        ];
-
-        const createProc = Bun.spawn(createArgv, {
-          cwd: cli.cwd,
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "ignore",
-        });
-        // Registered for afterAll (openlock-18c) — see
-        // post-create-exec-proxy.test.ts for why a timeout must still be
-        // able to reap this.
-        liveCreateProc = createProc;
-        await waitForSandboxReady(argvHead, cli.cwd, sessionName);
+        // Fork v0.9.0 (#2726): create's main process is the placeholder
+        // `sleep infinity`; `createDetachedSandbox` runs `sandbox create
+        // --detach` (returns once the sandbox exists, not once the main
+        // process exits) and polls until Ready — see
+        // post-create-exec-proxy.test.ts for the fuller writeup.
+        await createDetachedSandbox(
+          argvHead,
+          {
+            name: sessionName,
+            image: image.tag,
+            policy: FIXTURE_POLICY,
+            providers: [PROVIDER_NAME],
+          },
+          cli.cwd,
+        );
 
         // POST a tiny inference request to OpenRouter through the new exec
         // path. The body has a fake `Authorization: Bearer fake` header that
@@ -288,15 +216,10 @@ describe("post-create exec reaches authenticated OpenRouter (openlock-hnp e2e)",
         // network-level failure — those mean the request never reached
         // OpenRouter's edge.
         expect(["200", "402", "403", "404", "429", "400"]).toContain(httpCode);
-
-        createProc.kill();
-        // Reap to free supervisor + gateway slot for sibling tests.
-        await createProc.exited;
-        liveCreateProc = null;
       } finally {
-        // Gateway-side cleanup (createProc, sandbox, provider) lives in the
-        // describe's `afterAll` above, which survives a timeout this
-        // `finally` would not — see openlock-18c comment there.
+        // Gateway-side cleanup (sandbox, provider) lives in the describe's
+        // `afterAll` above, which survives a timeout this `finally` would
+        // not — see openlock-18c comment there.
         rmSync(tmp, { recursive: true, force: true });
       }
     },

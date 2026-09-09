@@ -22,32 +22,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
-import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 import { teardownGatewayState } from "./helpers/gateway-teardown";
+import { createDetachedSandbox, execInSandbox, spawnAndCapture } from "./helpers/sandbox-lifecycle";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const PROVIDER_NAME = "openlock-test-echo";
 const SECRET_VALUE = "smoke-value-12345";
 const FIXTURE_POLICY = resolve(__dirname, "../fixtures/policies/test-harness-mechanism.yaml");
-
-async function spawnAndCapture(
-  argv: string[],
-  cwd?: string,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-  });
-  const [code, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code, stdout, stderr };
-}
 
 async function gitInit(dir: string): Promise<void> {
   const init = await spawnAndCapture(["git", "init", "-q", "-b", "main"], dir);
@@ -110,10 +92,6 @@ describe("harness cred_inject mechanism (live integration)", () => {
       mkdirSync(repoDir);
       await gitInit(repoDir);
 
-      const staging = join(tmp, "staging", ".openlock");
-      mkdirSync(staging, { recursive: true });
-      await createBundle(repoDir, join(staging, "repo.bundle"));
-
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
       const removeProvider = async (): Promise<void> => {
@@ -166,31 +144,27 @@ describe("harness cred_inject mechanism (live integration)", () => {
           "https://mock.opencode.test:8443/",
         ].join(" ");
 
-        const sandboxArgv = [
-          ...argvHead,
-          "sandbox",
-          "create",
-          "--name",
-          sessionName,
-          "--from",
-          image.tag,
-          "--upload",
-          `${join(tmp, "staging")}:/sandbox/`,
-          "--no-git-ignore",
-          "--policy",
-          FIXTURE_POLICY,
-          "--provider",
-          PROVIDER_NAME,
-          "--no-tty",
-          "--",
-          "/bin/bash",
-          "-c",
-          curlCmd,
-        ];
+        await createDetachedSandbox(
+          argvHead,
+          {
+            name: sessionName,
+            image: image.tag,
+            policy: FIXTURE_POLICY,
+            providers: [PROVIDER_NAME],
+          },
+          cli.cwd,
+        );
 
-        const result = await spawnAndCapture(sandboxArgv, cli.cwd);
-        // openshell exit code reflects the foreground command; the curl
-        // output (echo JSON) is what we parse.
+        // Fork v0.9.0 (#2726): create's main process is the placeholder
+        // `sleep infinity`; the actual probe runs post-create via `sandbox
+        // exec`, and we parse ITS stdout (the echo JSON) rather than
+        // create's.
+        const result = await execInSandbox(
+          argvHead,
+          sessionName,
+          ["/bin/bash", "-c", curlCmd],
+          cli.cwd,
+        );
         const jsonStart = result.stdout.indexOf("{");
         if (jsonStart === -1) {
           throw new Error(
