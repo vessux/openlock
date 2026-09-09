@@ -15,29 +15,11 @@ import { join } from "node:path";
 import { defaultPolicyContent } from "../../src/sandbox/default-policies";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
-import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 import { teardownGatewayState } from "./helpers/gateway-teardown";
+import { createDetachedSandbox, execInSandbox, spawnAndCapture } from "./helpers/sandbox-lifecycle";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
-
-async function spawnAndCapture(
-  argv: string[],
-  cwd?: string,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-  });
-  const [code, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code, stdout, stderr };
-}
 
 async function gitInit(dir: string): Promise<void> {
   const init = await spawnAndCapture(["git", "init", "-q", "-b", "main"], dir);
@@ -108,10 +90,6 @@ describe("npm scoped packages via default-js policy", () => {
       mkdirSync(repoDir);
       await gitInit(repoDir);
 
-      const staging = join(tmp, "staging", ".openlock");
-      mkdirSync(staging, { recursive: true });
-      await createBundle(repoDir, join(staging, "repo.bundle"));
-
       const policyPath = join(tmp, "policy.yaml");
       writeFileSync(policyPath, defaultPolicyContent());
 
@@ -133,27 +111,27 @@ describe("npm scoped packages via default-js policy", () => {
         const probeCmd =
           "npm view @opencode-ai/plugin version --cache /tmp/npm-cache --no-update-notifier --no-fund --no-audit";
 
-        const sandboxArgv = [
-          ...argvHead,
-          "sandbox",
-          "create",
-          "--name",
-          sessionName,
-          "--from",
-          image.tag,
-          "--upload",
-          `${join(tmp, "staging")}:/sandbox/`,
-          "--no-git-ignore",
-          "--policy",
-          policyPath,
-          "--no-tty",
-          "--",
-          "/bin/bash",
-          "-c",
-          probeCmd,
-        ];
+        await createDetachedSandbox(
+          argvHead,
+          {
+            name: sessionName,
+            image: image.tag,
+            policy: policyPath,
+            providers: [],
+          },
+          cli.cwd,
+        );
 
-        const result = await spawnAndCapture(sandboxArgv, cli.cwd);
+        // Fork v0.9.0 (#2726): create's main process is the placeholder
+        // `sleep infinity`; the npm probe runs post-create via `sandbox
+        // exec`, and we assert on ITS exit code/stdout rather than
+        // create's.
+        const result = await execInSandbox(
+          argvHead,
+          sessionName,
+          ["/bin/bash", "-c", probeCmd],
+          cli.cwd,
+        );
         expect(result.code).toBe(0);
         // npm view prints just the version string on stdout.
         expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);

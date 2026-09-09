@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { CredentialBundle, Issue } from "../config-core";
@@ -17,15 +17,18 @@ import { type Runtime, resolveRuntime } from "../runtime";
 import { hasAnyProvider } from "../tokens";
 import { validateBranchFlagAgainstWorkdir } from "./branch-validation";
 import {
-  assertSandboxNotExited,
-  buildOpenshellExecArgv,
   buildSandboxEnv,
   deleteSandbox,
   execHarness,
   getSandboxState,
+  markStagingUploaded,
   openshellSandboxCreateAsync,
+  SETUP_COMPLETE_MARKER,
+  STAGING_UPLOADED_MARKER,
   startSandbox,
+  uploadStagingToSandbox,
   waitForSandboxReady,
+  waitForSetupComplete,
 } from "./container";
 import { resolveCredentialValues } from "./credentials";
 import {
@@ -40,7 +43,6 @@ import {
 import { startGateway, stopGateway } from "./ensure-gateway";
 import { ensureGenericProvider, ensureProvider } from "./ensure-provider";
 import { ensureRepoIsGit } from "./ensure-repo";
-import { getCliInvocation } from "./fork-binaries";
 import { prepareGitIdentity } from "./git-identity";
 import { createBundle, syncWorkspaceBundle } from "./git-sync";
 import { type Harness, resolveHarness } from "./harness";
@@ -262,6 +264,15 @@ function shq(value: string): string {
  */
 export function buildSetupCmd(bundleMounts: readonly Mount[], branch: string | undefined): string {
   const setupLines = [
+    // Fork v0.9.0: this script is the canonical main process and starts
+    // BEFORE the staging upload lands (upstream forbids --upload alongside a
+    // main command for exactly that reason). Wait for the marker
+    // markStagingUploaded drops after the upload completes; give up after
+    // ~120s with a non-zero exit, which upstream treats as a terminal
+    // main-process failure so the sandbox dies loudly instead of hanging with
+    // an empty /sandbox/.openlock. Idempotent on `podman start`: the marker
+    // persists in the container filesystem.
+    `i=0 ; while [ ! -e ${shq(STAGING_UPLOADED_MARKER)} ] ; do i=$((i+1)) ; if [ "$i" -ge 600 ] ; then echo 'openlock: staging upload marker never arrived' >&2 ; exit 1 ; fi ; sleep 0.2 ; done`,
     "cd /sandbox",
     "[ -f .openlock/.gitconfig ] && cp .openlock/.gitconfig .gitconfig",
     // Claude Code's CLAUDE_CONFIG_DIR must be writable by the sandbox user.
@@ -281,6 +292,10 @@ export function buildSetupCmd(bundleMounts: readonly Mount[], branch: string | u
       `[ -d ${shq(bm.target)}/.git ] || git clone ${branchFlag}${shq(`.openlock/bundles/${bundleName}`)} ${shq(bm.target)}`,
     );
   }
+  // Signal completion BEFORE handing PID over to sleep: openlock's
+  // waitForSetupComplete polls for this marker so `openlock sandbox` only
+  // returns (and a harness only attaches) once the workspace is in place.
+  setupLines.push(`touch ${shq(SETUP_COMPLETE_MARKER)}`);
   setupLines.push("exec sleep infinity");
   return setupLines.join(" ; ");
 }
@@ -357,7 +372,6 @@ async function createSession(
       const handle = await openshellSandboxCreateAsync({
         sessionName: name,
         imageTag,
-        uploadDir: staging,
         policy,
         providerId,
         command: ["/bin/bash", "-c", setupCmd],
@@ -368,20 +382,17 @@ async function createSession(
         memory,
       });
 
-      // Don't await handle.exited — it blocks until the container stops.
-      // Do detect early failure so we don't write meta for a phantom session.
-      const earlyFail = await Promise.race([
-        handle.exited.then((code) => ({ early: true as const, code })),
-        Bun.sleep(2000).then(() => ({ early: false as const })),
-      ]);
-      if (!earlyFail.early) {
+      // `--detach`: create returns once the sandbox exists (fork v0.9.0 /
+      // upstream v0.0.116). Exit 0 = created; anything else = failed create.
+      const code = await handle.exited;
+      if (code === 0) {
         createdOk = true;
         break;
       }
-      lastExitCode = earlyFail.code;
+      lastExitCode = code;
       if (attempt < MAX_CREATE_ATTEMPTS) {
         console.warn(
-          `openshell sandbox create exited early (code ${earlyFail.code}); retrying once (supervisor first-handshake race)...`,
+          `openshell sandbox create failed (code ${code}); retrying once (supervisor first-handshake race)...`,
         );
         await deleteSandbox(containerName);
         await Bun.sleep(1000);
@@ -389,12 +400,16 @@ async function createSession(
     }
     if (!createdOk) {
       throw new Error(
-        `openshell sandbox create exited early with code ${lastExitCode} after ${MAX_CREATE_ATTEMPTS} attempts`,
+        `openshell sandbox create failed with code ${lastExitCode} after ${MAX_CREATE_ATTEMPTS} attempts`,
       );
     }
 
-    await waitForStagingUploaded(containerName, staging);
+    // The canonical main process (setupCmd) is now waiting on the upload
+    // marker. Upload staging, then drop the marker — strictly in that order.
     await waitForSandboxReady(name);
+    await uploadStagingToSandbox(containerName, staging);
+    await markStagingUploaded(containerName);
+    await waitForSetupComplete(containerName);
 
     const meta: SessionMeta = {
       id,
@@ -442,40 +457,6 @@ async function createSession(
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
-}
-
-// openshell sandbox create uploads --upload contents asynchronously; the
-// staging tmp dir is removed in finally once createSession returns. Without
-// this wait the rmSync races the upload and openshell errors with
-// "local path does not exist". Empty staging short-circuits (nothing to wait for).
-async function waitForStagingUploaded(
-  containerName: string,
-  stagingDir: string,
-  timeoutMs = 30_000,
-): Promise<void> {
-  const entries = readdirSync(stagingDir);
-  if (entries.length === 0) return;
-  const sentinel = entries[0]!;
-  const deadline = Date.now() + timeoutMs;
-  const cli = await getCliInvocation();
-  const argv = buildOpenshellExecArgv(
-    cli.argv,
-    containerName,
-    ["test", "-e", `/sandbox/.openlock/${sentinel}`],
-    { tty: "off" },
-  );
-  while (Date.now() < deadline) {
-    const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
-    if ((await proc.exited) === 0) return;
-    // Fail fast with the real cause if the container has already died (e.g.
-    // supervisor policy-fetch failure) instead of spending the rest of this
-    // timeout only to fall through to the misleading warning below.
-    await assertSandboxNotExited(containerName);
-    await Bun.sleep(200);
-  }
-  console.warn(
-    `staging upload to /sandbox/.openlock/${sentinel} not visible within ${timeoutMs}ms`,
-  );
 }
 
 async function syncBackToHost(

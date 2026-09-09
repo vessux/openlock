@@ -218,7 +218,6 @@ export async function execCmd(
 export interface OpenshellCreateArgs {
   sessionName: string;
   imageTag: string;
-  uploadDir: string;
   policy: string;
   providerId: ProviderId;
   command: string[];
@@ -249,6 +248,15 @@ export interface OpenshellHandle {
   exited: Promise<number>;
 }
 
+// Fork v0.9.0 (upstream v0.0.116, #2726 "canonical main process"): the
+// trailing command IS the sandbox's supervised main process, and `--upload`
+// is rejected alongside it ("uploads complete after the canonical process
+// starts"). So create no longer uploads; `uploadStagingToSandbox` does that
+// after the sandbox is Ready, and the setup script (buildSetupCmd) waits for
+// the marker `markStagingUploaded` drops once the upload has landed.
+// `--detach` makes create return as soon as the sandbox exists instead of
+// attaching to the main process; the container's lifetime is owned by the
+// canonical main process (our `exec sleep infinity`), not by this CLI child.
 export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
   return [
     "sandbox",
@@ -257,9 +265,6 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
     args.sessionName,
     "--from",
     args.imageTag,
-    "--upload",
-    `${args.uploadDir}:/sandbox/`,
-    "--no-git-ignore",
     "--policy",
     args.policy,
     "--provider",
@@ -269,15 +274,99 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
     ...(args.cpu !== undefined ? ["--cpu", args.cpu] : []),
     ...(args.memory !== undefined ? ["--memory", args.memory] : []),
     "--no-tty",
+    "--detach",
     ...(args.volumeArgs ?? []),
     "--",
     ...args.command,
   ];
 }
 
+/** Marker the setup script waits for before touching anything under /sandbox/.openlock. */
+export const STAGING_UPLOADED_MARKER = "/sandbox/.openlock/.openlock-upload-complete";
+/** Marker the setup script drops once it has finished (bundles cloned, config in place). */
+export const SETUP_COMPLETE_MARKER = "/sandbox/.openlock/.openlock-setup-complete";
+
 /**
- * Stdio for a child that OUTLIVES the openlock CLI — the persistent sandbox
- * tether (`… exec sleep infinity`).
+ * `openshell sandbox upload <name> <local> <dest> --no-git-ignore` — the same
+ * helper create's `--upload SRC:DST` used (a directory lands as a SUBDIR of
+ * dest, so the staging dir named `.openlock` uploaded to `/sandbox/` lands at
+ * `/sandbox/.openlock`). `--no-git-ignore`: staging holds bundles and dotfiles
+ * that a .gitignore walk would drop.
+ */
+export function buildOpenshellUploadArgv(
+  cliPrefix: readonly string[],
+  name: string,
+  localPath: string,
+  dest: string,
+): string[] {
+  return [...cliPrefix, "sandbox", "upload", name, localPath, dest, "--no-git-ignore"];
+}
+
+export async function uploadStagingToSandbox(name: string, stagingDir: string): Promise<void> {
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellUploadArgv(cli.argv, name, stagingDir, "/sandbox/");
+  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "pipe" });
+  const stderr = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(
+      `openshell sandbox upload ${stagingDir} -> /sandbox/ failed (exit ${code}): ${filterOpenshellStderr(stderr).trim()}`,
+    );
+  }
+}
+
+/**
+ * Polls for SETUP_COMPLETE_MARKER via `sandbox exec`. The setup script (the
+ * canonical main process) clones the workspace bundle only after the upload
+ * marker lands, so without this wait `openlock sandbox` could return — and a
+ * harness could attach — before /sandbox/repo exists (observed as a flaky
+ * "MISSING /sandbox/repo/.git" in the create-flow live test).
+ */
+export async function waitForSetupComplete(name: string, timeoutMs = 120_000): Promise<void> {
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellExecArgv(cli.argv, name, ["test", "-e", SETUP_COMPLETE_MARKER], {
+    tty: "off",
+  });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
+    if ((await proc.exited) === 0) return;
+    // A dead container never completes setup; fail with the real cause.
+    await assertSandboxNotExited(name);
+    await Bun.sleep(300);
+  }
+  throw new Error(
+    `sandbox ${name}: setup script did not finish within ${timeoutMs}ms (no ${SETUP_COMPLETE_MARKER}); ` +
+      "check `openlock logs` for the setup script's output",
+  );
+}
+
+/**
+ * Drops STAGING_UPLOADED_MARKER via `sandbox exec` once the staging upload has
+ * fully landed. A separate exec (not a file inside the upload) so the marker
+ * can never be observed before the rest of the upload is on disk.
+ */
+export async function markStagingUploaded(name: string): Promise<void> {
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellExecArgv(cli.argv, name, ["touch", STAGING_UPLOADED_MARKER], {
+    tty: "off",
+  });
+  const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "pipe" });
+  const stderr = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(
+      `marking staging upload complete in ${name} failed (exit ${code}): ${filterOpenshellStderr(stderr).trim()}`,
+    );
+  }
+}
+
+/**
+ * Stdio for a child that may OUTLIVE the openlock CLI. Historically this was
+ * the persistent sandbox tether (`sandbox create … exec sleep infinity`, which
+ * stayed attached for the container's lifetime); since fork v0.9.0 create runs
+ * with `--detach` and exits once the sandbox exists, but the rule below is
+ * still the safe default for any long-lived openshell child.
  *
  * INVARIANT (openlock-sqw): a child that survives the CLI must NEVER set
  * stdout/stderr to `"inherit"`. A detached create (`openlock sandbox

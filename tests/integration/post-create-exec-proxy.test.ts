@@ -22,32 +22,14 @@ import { join, resolve } from "node:path";
 import { buildOpenshellExecArgv } from "../../src/sandbox/container";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
-import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 import { teardownGatewayState } from "./helpers/gateway-teardown";
+import { createDetachedSandbox, spawnAndCapture } from "./helpers/sandbox-lifecycle";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const PROVIDER_NAME = "openlock-test-hnp";
 const SECRET_VALUE = "post-create-secret-12345";
 const FIXTURE_POLICY = resolve(__dirname, "../fixtures/policies/test-harness-mechanism.yaml");
-
-async function spawnAndCapture(
-  argv: string[],
-  cwd?: string,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-  });
-  const [code, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code, stdout, stderr };
-}
 
 async function gitInit(dir: string): Promise<void> {
   const init = await spawnAndCapture(["git", "init", "-q", "-b", "main"], dir);
@@ -71,58 +53,24 @@ async function gitInit(dir: string): Promise<void> {
   if (cfg.code !== 0) throw new Error(`git commit failed: ${cfg.stderr}`);
 }
 
-async function waitForSandboxReady(
-  cliPrefix: readonly string[],
-  cliCwd: string | undefined,
-  sessionName: string,
-  timeoutMs = 60_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    // Probe via a no-op exec; the gateway rejects with "not ready" until the
-    // supervisor finishes provisioning. /bin/true is a cheap success marker.
-    const r = await spawnAndCapture(
-      [...cliPrefix, "sandbox", "exec", "--name", sessionName, "--no-tty", "--", "/bin/true"],
-      cliCwd,
-    );
-    if (r.code === 0) return;
-    await Bun.sleep(500);
-  }
-  throw new Error(`sandbox ${sessionName} did not reach Ready state within ${timeoutMs}ms`);
-}
-
-/** Best-effort reap of the detached `sandbox create` child (openlock-18c) —
- * split out of `afterAll` purely to keep that hook's cognitive complexity
- * under biome's limit. Tolerates the process already being dead. */
-async function reapLiveProc(proc: ReturnType<typeof Bun.spawn> | null): Promise<void> {
-  if (proc === null) return;
-  try {
-    proc.kill();
-    await proc.exited;
-  } catch {
-    // Already dead — fine.
-  }
-}
-
 describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
   // openlock-18c: see harness-binary-cred-inject.test.ts for the full
   // mechanism writeup (bun test timeout runs afterEach/afterAll but not an
   // in-body try/finally). Also fixes the same second bug as its siblings:
   // `removeContainer` did a raw `podman rm -f`, never `sandbox delete`,
   // leaving the gateway's own sandbox record behind even on a clean run.
-  // Additionally tracks the detached `sandbox create` (foreground "sleep
-  // infinity") child process: a timeout mid-test used to leave it running
-  // forever, since the in-body `createProc.kill()` never ran either.
-  // NOT a prefix sweep — only the exact name(s) this run registers are ever
-  // deleted; this suite runs against the real dev gateway.
+  // Fork v0.9.0 (#2726): `sandbox create --detach` returns once the sandbox
+  // exists rather than staying attached to a foreground command, so unlike
+  // the pre-#2726 world there is no longer a long-lived `create` child
+  // process for this suite to track/reap — `createDetachedSandbox` (below)
+  // owns the whole create-then-wait-for-Ready sequence and returns once it's
+  // done. NOT a prefix sweep — only the exact name(s) this run registers are
+  // ever deleted; this suite runs against the real dev gateway.
   let registeredSandbox: string | null = null;
   let registeredProvider: string | null = null;
-  let liveCreateProc: ReturnType<typeof Bun.spawn> | null = null;
 
   afterAll(
     async () => {
-      await reapLiveProc(liveCreateProc);
-      liveCreateProc = null;
       if (registeredSandbox === null && registeredProvider === null) return;
       const cli = await getCliInvocation();
       await teardownGatewayState(cli, registeredSandbox, registeredProvider);
@@ -143,10 +91,6 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
       const repoDir = join(tmp, "repo");
       mkdirSync(repoDir);
       await gitInit(repoDir);
-
-      const staging = join(tmp, "staging", ".openlock");
-      mkdirSync(staging, { recursive: true });
-      await createBundle(repoDir, join(staging, "repo.bundle"));
 
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
@@ -183,43 +127,22 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
           tagPrefix: "openlock-base-it",
         });
 
-        // Create a long-running sandbox: the supervisor (PID 1 in container)
-        // sleeps; the foreground command we exec post-create is the actual
-        // network-emitting process. This mirrors the openlock attach path.
-        const createArgv = [
-          ...argvHead,
-          "sandbox",
-          "create",
-          "--name",
-          sessionName,
-          "--from",
-          image.tag,
-          "--upload",
-          `${join(tmp, "staging")}:/sandbox/`,
-          "--no-git-ignore",
-          "--policy",
-          FIXTURE_POLICY,
-          "--provider",
-          PROVIDER_NAME,
-          "--no-tty",
-          "--",
-          "/bin/sh",
-          "-c",
-          "exec sleep infinity",
-        ];
-
-        const createProc = Bun.spawn(createArgv, {
-          cwd: cli.cwd,
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "ignore",
-        });
-        // Registered for afterAll (openlock-18c): don't await createProc.exited
-        // here — it only returns when the container foreground exits (i.e.
-        // never, since we sleep) — but a timeout or early throw below must
-        // still be able to reap it.
-        liveCreateProc = createProc;
-        await waitForSandboxReady(argvHead, cli.cwd, sessionName);
+        // Create a long-running sandbox: the main process (fork v0.9.0
+        // #2726's canonical main process) sleeps; the command we exec
+        // post-create is the actual network-emitting process. This mirrors
+        // the openlock attach path. `createDetachedSandbox` runs `sandbox
+        // create --detach` (returns once the sandbox exists, not once the
+        // main process exits) and polls until Ready.
+        await createDetachedSandbox(
+          argvHead,
+          {
+            name: sessionName,
+            image: image.tag,
+            policy: FIXTURE_POLICY,
+            providers: [PROVIDER_NAME],
+          },
+          cli.cwd,
+        );
 
         // The fix under test: post-create exec via openshell sandbox exec.
         // If openlock-hnp regressed (raw podman exec), curl would talk to
@@ -255,7 +178,6 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
         const result = await spawnAndCapture(execArgv, cli.cwd);
         const jsonStart = result.stdout.indexOf("{");
         if (jsonStart === -1) {
-          createProc.kill();
           throw new Error(
             `no JSON in stdout (code=${result.code}); stdout=${result.stdout}; stderr=${result.stderr}`,
           );
@@ -271,16 +193,10 @@ describe("post-create harness exec routes via proxy (openlock-hnp)", () => {
         expect(xTestEcho && headers[xTestEcho]).toBe(SECRET_VALUE);
         const xOriginal = headerKeys.find((k) => k.toLowerCase() === "x-original-header");
         expect(xOriginal).toBeUndefined();
-
-        createProc.kill();
-        // Reap to free the supervisor SSH session + gateway slot before the
-        // next test runs (sibling integration tests share the same gateway).
-        await createProc.exited;
-        liveCreateProc = null;
       } finally {
-        // Gateway-side cleanup (createProc, sandbox, provider) lives in the
-        // describe's `afterAll` above, which survives a timeout this
-        // `finally` would not — see openlock-18c comment there.
+        // Gateway-side cleanup (sandbox, provider) lives in the describe's
+        // `afterAll` above, which survives a timeout this `finally` would
+        // not — see openlock-18c comment there.
         rmSync(tmp, { recursive: true, force: true });
       }
     },

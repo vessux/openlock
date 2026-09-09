@@ -5,13 +5,16 @@
 // requester — `/usr/bin/curl` becomes the matched binary, the harness
 // binary entry in the policy is decorative.
 //
-// Here the foreground command IS the claude binary. /usr/local/bin/claude
-// resolves through symlinks to claude.exe — the proxy resolves these
-// symlinks at sandbox boot (see "Resolved policy binary symlink" log
-// lines) so the policy's binary list matches the actual executable.
-// Assertion is on the proxy's OCSF log, fetched via the openshell `logs`
-// RPC after the sandbox exits: at least one HTTP ALLOWED event tied to
-// our test policy proves the L7 path (and thus cred_inject) ran.
+// Here the command run post-create (via `sandbox exec`, since fork v0.9.0
+// / #2726 makes create's trailing command the sandbox's canonical main
+// process rather than a one-shot foreground probe) IS the claude binary.
+// /usr/local/bin/claude resolves through symlinks to claude.exe — the proxy
+// resolves these symlinks at sandbox boot (see "Resolved policy binary
+// symlink" log lines) so the policy's binary list matches the actual
+// executable. Assertion is on the proxy's OCSF log, fetched via the
+// openshell `logs` RPC before sandbox teardown: at least one HTTP ALLOWED
+// event tied to our test policy proves the L7 path (and thus cred_inject)
+// ran.
 //
 // Opencode is intentionally not covered here. Its boot needs reachable
 // models.dev + github.com before issuing /v1/messages; synthetic echo
@@ -34,33 +37,15 @@ import { join, resolve } from "node:path";
 import { computeBaseTag, GHCR_BASE_PREFIX } from "../../src/sandbox/ensure-base";
 import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
-import { createBundle } from "../../src/sandbox/git-sync";
 import { BASE_CONTAINERFILE, ensureSandbox } from "../../src/sandbox/image-build";
 import { seedContainerfile } from "../../src/sandbox/seed-containerfile";
 import { teardownGatewayState } from "./helpers/gateway-teardown";
+import { createDetachedSandbox, execInSandbox, spawnAndCapture } from "./helpers/sandbox-lifecycle";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const SECRET_VALUE = "smoke-value-harness-binary";
 const FIXTURE_POLICY = resolve(__dirname, "../fixtures/policies/test-harness-binary-trigger.yaml");
 const POLICY_NAME = "claude_harness_test";
-
-async function spawnAndCapture(
-  argv: string[],
-  cwd?: string,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-  });
-  const [code, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code, stdout, stderr };
-}
 
 async function gitInit(dir: string): Promise<void> {
   const init = await spawnAndCapture(["git", "init", "-q", "-b", "main"], dir);
@@ -132,10 +117,6 @@ describe("harness binary triggers cred_inject (live integration)", () => {
       mkdirSync(repoDir);
       await gitInit(repoDir);
 
-      const staging = join(tmp, "staging", ".openlock");
-      mkdirSync(staging, { recursive: true });
-      await createBundle(repoDir, join(staging, "repo.bundle"));
-
       const cli = await getCliInvocation();
       const argvHead = cli.argv;
       const removeProvider = async (): Promise<void> => {
@@ -186,29 +167,21 @@ describe("harness binary triggers cred_inject (live integration)", () => {
         const innerCmd =
           'for i in 1 2 3; do ANTHROPIC_API_KEY=fake-key /usr/local/bin/claude --print "hi" && break; sleep 1; done || true';
 
-        const sandboxArgv = [
-          ...argvHead,
-          "sandbox",
-          "create",
-          "--name",
-          sessionName,
-          "--from",
-          imageTag,
-          "--upload",
-          `${join(tmp, "staging")}:/sandbox/`,
-          "--no-git-ignore",
-          "--policy",
-          FIXTURE_POLICY,
-          "--provider",
-          providerName,
-          "--no-tty",
-          "--",
-          "/bin/bash",
-          "-c",
-          innerCmd,
-        ];
+        await createDetachedSandbox(
+          argvHead,
+          {
+            name: sessionName,
+            image: imageTag,
+            policy: FIXTURE_POLICY,
+            providers: [providerName],
+          },
+          cli.cwd,
+        );
 
-        await spawnAndCapture(sandboxArgv, cli.cwd);
+        // Fork v0.9.0 (#2726): create's main process is the placeholder
+        // `sleep infinity`; the claude harness invocation that emits the L7
+        // traffic we assert on below runs post-create via `sandbox exec`.
+        await execInSandbox(argvHead, sessionName, ["/bin/bash", "-c", innerCmd], cli.cwd);
 
         // Fetch sandbox logs (OCSF shorthand) before sandbox cleanup.
         const logsResult = await spawnAndCapture(
