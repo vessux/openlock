@@ -14,6 +14,18 @@ import {
 } from "./session";
 
 describe("buildSetupCmd", () => {
+  // Fork v0.9.0: the script is the canonical main process and starts before
+  // the staging upload lands, so it must block on the upload marker first and
+  // fail (non-zero) rather than proceed without it.
+  it("waits for the staging-upload marker before touching /sandbox and still ends in exec sleep infinity", () => {
+    const cmd = buildSetupCmd([], undefined);
+    const markerIdx = cmd.indexOf("/sandbox/.openlock/.openlock-upload-complete");
+    expect(markerIdx).toBeGreaterThan(-1);
+    expect(markerIdx).toBeLessThan(cmd.indexOf("cd /sandbox"));
+    expect(cmd).toContain("exit 1");
+    expect(cmd.endsWith("exec sleep infinity")).toBe(true);
+  });
+
   it("single-quotes mount targets so they cannot inject shell commands", async () => {
     const dir = mkdtempSync(join(tmpdir(), "setup-inj-"));
     const marker = join(dir, "PWNED");
@@ -29,9 +41,15 @@ describe("buildSetupCmd", () => {
       // target were interpolated unquoted, the `$(touch ...)` / backticks would
       // fire during the `[ -d ... ]` test regardless of git; the marker proves
       // it did not.
+      // Also drop the leading upload-marker wait (fork v0.9.0): on the host
+      // the marker never appears and the loop would block for ~120s.
       const runnable = cmd
         .split(" ; ")
-        .filter((l) => !l.startsWith("exec sleep"))
+        .filter(
+          (l) =>
+            !l.startsWith("exec sleep") &&
+            !l.includes("/sandbox/.openlock/.openlock-upload-complete"),
+        )
         .join(" ; ");
       const proc = Bun.spawn(["bash", "-c", runnable], { stdout: "ignore", stderr: "ignore" });
       await proc.exited;

@@ -60,7 +60,7 @@ mounts:
     readOnly: true
 ```
 
-Note: avoid binding under `/sandbox/.openlock/` — that prefix is openlock's `--upload` destination and a bind there collides with the staging upload.
+Note: avoid binding under `/sandbox/.openlock/` — that prefix is where openlock uploads its staging directory right after the sandbox is created, and a bind there collides with that upload.
 
 #### Example — no workdir mount (in-container clone / scratch)
 

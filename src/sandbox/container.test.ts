@@ -8,6 +8,7 @@ import {
   buildHarnessExecArgv,
   buildOpenshellCreateArgv,
   buildOpenshellExecArgv,
+  buildOpenshellUploadArgv,
   buildSandboxDeleteArgv,
   buildSandboxDownloadArgv,
   buildSandboxEnv,
@@ -812,7 +813,6 @@ describe("buildOpenshellCreateArgv", () => {
   const base = {
     sessionName: "s",
     imageTag: "img",
-    uploadDir: "/tmp/staging",
     policy: "/tmp/policy.yaml",
     providerId: "anthropic" as const,
     command: ["/bin/bash"],
@@ -861,7 +861,6 @@ describe("buildOpenshellCreateArgv", () => {
     const argv = buildOpenshellCreateArgv({
       sessionName: "s",
       imageTag: "img",
-      uploadDir: "/tmp/u",
       policy: "/p.yaml",
       providerId: "anthropic",
       command: ["/bin/true"],
@@ -878,7 +877,6 @@ describe("buildOpenshellCreateArgv", () => {
     const argv = buildOpenshellCreateArgv({
       sessionName: "s",
       imageTag: "img",
-      uploadDir: "/tmp/u",
       policy: "/p.yaml",
       providerId: "anthropic",
       command: ["/bin/true"],
@@ -922,16 +920,39 @@ describe("buildOpenshellCreateArgv", () => {
       "s",
       "--from",
       "img",
-      "--upload",
-      "/tmp/staging:/sandbox/",
-      "--no-git-ignore",
       "--policy",
       "/tmp/policy.yaml",
       "--provider",
       "anthropic",
       "--no-tty",
+      "--detach",
       "--",
       "/bin/bash",
+    ]);
+  });
+
+  // Fork v0.9.0 / upstream v0.0.116 (#2726): `--upload` is rejected together
+  // with a trailing main command, and a non-interactive create must detach.
+  // Both live CI legs failed on exactly this argv before the change.
+  it("never emits --upload and always detaches (upstream v0.0.116 contract)", () => {
+    const argv = buildOpenshellCreateArgv(base);
+    expect(argv).not.toContain("--upload");
+    expect(argv).not.toContain("--no-git-ignore");
+    expect(argv).toContain("--detach");
+    expect(argv.indexOf("--")).toBeGreaterThan(argv.indexOf("--detach"));
+  });
+});
+
+describe("buildOpenshellUploadArgv", () => {
+  it("uploads the staging dir to /sandbox/ unfiltered via the standalone subcommand", () => {
+    expect(buildOpenshellUploadArgv(["openshell"], "ol-x", "/tmp/.openlock", "/sandbox/")).toEqual([
+      "openshell",
+      "sandbox",
+      "upload",
+      "ol-x",
+      "/tmp/.openlock",
+      "/sandbox/",
+      "--no-git-ignore",
     ]);
   });
 });
