@@ -24,7 +24,12 @@ import { startGateway } from "../../src/sandbox/ensure-gateway";
 import { getCliInvocation } from "../../src/sandbox/fork-binaries";
 import { BASE_CONTAINERFILE, ensureImage } from "../../src/sandbox/image-build";
 import { teardownGatewayState } from "./helpers/gateway-teardown";
-import { createDetachedSandbox, execInSandbox, spawnAndCapture } from "./helpers/sandbox-lifecycle";
+import {
+  createDetachedSandbox,
+  dumpProxyLog,
+  execInSandbox,
+  spawnAndCapture,
+} from "./helpers/sandbox-lifecycle";
 
 const LIVE = process.env.OPENLOCK_LIVE_INTEGRATION === "1";
 const PROVIDER_NAME = "openlock-test-openrouter";
@@ -167,6 +172,7 @@ describe("openrouter cred_inject mechanism (live integration)", () => {
         );
         const jsonStart = result.stdout.indexOf("{");
         if (jsonStart === -1) {
+          await dumpProxyLog(argvHead, sessionName, cli.cwd);
           throw new Error(
             `no JSON in stdout (code=${result.code}); stdout=${result.stdout}; stderr=${result.stderr}`,
           );

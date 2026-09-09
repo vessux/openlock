@@ -162,3 +162,29 @@ export async function execInSandbox(
   ];
   return spawnAndCapture(argv, cwd);
 }
+
+/**
+ * Diagnostic: dump the in-container proxy's OCSF log (the ONLY place egress
+ * decisions and their reasons live — not the gateway log) to stderr. Call it
+ * from a failure path so a CI run states WHY the proxy denied a request
+ * instead of leaving a bare curl exit code.
+ */
+export async function dumpProxyLog(
+  argvHead: readonly string[],
+  name: string,
+  cwd?: string,
+): Promise<void> {
+  const r = await execInSandbox(
+    argvHead,
+    name,
+    [
+      "/bin/sh",
+      "-c",
+      'ls -la /var/log/ 2>&1; for f in /var/log/openshell*.log; do echo "== $f"; tail -c 30000 "$f"; done 2>&1',
+    ],
+    cwd,
+  );
+  console.error(
+    `--- proxy log dump for ${name} (exit ${r.code}) ---\n${r.stdout}\n${r.stderr}\n--- end dump ---`,
+  );
+}
