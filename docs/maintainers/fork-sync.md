@@ -221,6 +221,17 @@ on a release line instead of `main`.
 After a sync, before trusting it, smoke-test on a real host with a fresh gateway (stop and restart
 it). Changes to the sandbox-to-gateway contract — auth, proto shape, policy evaluation — surface
 only at runtime; the unit test suite says nothing about them no matter how many tests pass.
+The cheapest real host is the openlock pin-bump PR itself: its podman and docker live legs create
+a sandbox with the freshly released binaries and drive cred_inject through the moat.
+
+Before that, diff the **CLI argument surface** openlock drives, not just the gRPC one: every clap
+attribute on `sandbox create` / `exec` / `upload` in `crates/openshell-cli/src/main.rs`
+(`conflicts_with`, `requires`, `last = true` positionals, new defaults) against the
+`buildOpenshell*Argv` builders in openlock's `src/sandbox/container.ts`. A new conflict is a hard
+exit 2 at create with zero unit-test signal. The 0.9 sync hit this: upstream #2726 made the
+trailing command the sandbox's canonical main process and rejected `--upload` next to it, while
+openlock passed both and its setup script read the upload — the fix was create `--detach`, then
+`sandbox upload`, then a marker the setup script waits on (see `buildOpenshellCreateArgv`).
 
 When a sync does surface an integration gap, **fix it on the openlock side, not with a fork
 patch.** Every line of fork delta is conflict surface for the next sync; a mandatory new
