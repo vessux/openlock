@@ -283,6 +283,8 @@ export function buildOpenshellCreateArgv(args: OpenshellCreateArgs): string[] {
 
 /** Marker the setup script waits for before touching anything under /sandbox/.openlock. */
 export const STAGING_UPLOADED_MARKER = "/sandbox/.openlock/.openlock-upload-complete";
+/** Marker the setup script drops once it has finished (bundles cloned, config in place). */
+export const SETUP_COMPLETE_MARKER = "/sandbox/.openlock/.openlock-setup-complete";
 
 /**
  * `openshell sandbox upload <name> <local> <dest> --no-git-ignore` — the same
@@ -311,6 +313,32 @@ export async function uploadStagingToSandbox(name: string, stagingDir: string): 
       `openshell sandbox upload ${stagingDir} -> /sandbox/ failed (exit ${code}): ${filterOpenshellStderr(stderr).trim()}`,
     );
   }
+}
+
+/**
+ * Polls for SETUP_COMPLETE_MARKER via `sandbox exec`. The setup script (the
+ * canonical main process) clones the workspace bundle only after the upload
+ * marker lands, so without this wait `openlock sandbox` could return — and a
+ * harness could attach — before /sandbox/repo exists (observed as a flaky
+ * "MISSING /sandbox/repo/.git" in the create-flow live test).
+ */
+export async function waitForSetupComplete(name: string, timeoutMs = 120_000): Promise<void> {
+  const cli = await getCliInvocation();
+  const argv = buildOpenshellExecArgv(cli.argv, name, ["test", "-e", SETUP_COMPLETE_MARKER], {
+    tty: "off",
+  });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const proc = Bun.spawn(argv, { cwd: cli.cwd, stdout: "ignore", stderr: "ignore" });
+    if ((await proc.exited) === 0) return;
+    // A dead container never completes setup; fail with the real cause.
+    await assertSandboxNotExited(name);
+    await Bun.sleep(300);
+  }
+  throw new Error(
+    `sandbox ${name}: setup script did not finish within ${timeoutMs}ms (no ${SETUP_COMPLETE_MARKER}); ` +
+      "check `openlock logs` for the setup script's output",
+  );
 }
 
 /**

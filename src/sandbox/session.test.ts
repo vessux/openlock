@@ -23,7 +23,10 @@ describe("buildSetupCmd", () => {
     expect(markerIdx).toBeGreaterThan(-1);
     expect(markerIdx).toBeLessThan(cmd.indexOf("cd /sandbox"));
     expect(cmd).toContain("exit 1");
-    expect(cmd.endsWith("exec sleep infinity")).toBe(true);
+    // Completion marker is the LAST step before handing PID over to sleep.
+    const lines = cmd.split(" ; ");
+    expect(lines.at(-1)).toBe("exec sleep infinity");
+    expect(lines.at(-2)).toBe("touch '/sandbox/.openlock/.openlock-setup-complete'");
   });
 
   it("single-quotes mount targets so they cannot inject shell commands", async () => {
@@ -48,7 +51,8 @@ describe("buildSetupCmd", () => {
         .filter(
           (l) =>
             !l.startsWith("exec sleep") &&
-            !l.includes("/sandbox/.openlock/.openlock-upload-complete"),
+            !l.includes("/sandbox/.openlock/.openlock-upload-complete") &&
+            !l.includes("/sandbox/.openlock/.openlock-setup-complete"),
         )
         .join(" ; ");
       const proc = Bun.spawn(["bash", "-c", runnable], { stdout: "ignore", stderr: "ignore" });

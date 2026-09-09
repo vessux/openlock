@@ -23,10 +23,12 @@ import {
   getSandboxState,
   markStagingUploaded,
   openshellSandboxCreateAsync,
+  SETUP_COMPLETE_MARKER,
   STAGING_UPLOADED_MARKER,
   startSandbox,
   uploadStagingToSandbox,
   waitForSandboxReady,
+  waitForSetupComplete,
 } from "./container";
 import { resolveCredentialValues } from "./credentials";
 import {
@@ -290,6 +292,10 @@ export function buildSetupCmd(bundleMounts: readonly Mount[], branch: string | u
       `[ -d ${shq(bm.target)}/.git ] || git clone ${branchFlag}${shq(`.openlock/bundles/${bundleName}`)} ${shq(bm.target)}`,
     );
   }
+  // Signal completion BEFORE handing PID over to sleep: openlock's
+  // waitForSetupComplete polls for this marker so `openlock sandbox` only
+  // returns (and a harness only attaches) once the workspace is in place.
+  setupLines.push(`touch ${shq(SETUP_COMPLETE_MARKER)}`);
   setupLines.push("exec sleep infinity");
   return setupLines.join(" ; ");
 }
@@ -403,6 +409,7 @@ async function createSession(
     await waitForSandboxReady(name);
     await uploadStagingToSandbox(containerName, staging);
     await markStagingUploaded(containerName);
+    await waitForSetupComplete(containerName);
 
     const meta: SessionMeta = {
       id,

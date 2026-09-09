@@ -189,6 +189,7 @@ describe("openlock sandbox create -> upload -> marker -> setup script (live inte
       const probeCmd = [
         "for f in",
         "/sandbox/.openlock/.openlock-upload-complete",
+        "/sandbox/.openlock/.openlock-setup-complete",
         "/sandbox/repo/.git",
         "/sandbox/repo/README",
         "; do",
@@ -228,6 +229,7 @@ describe("openlock sandbox create -> upload -> marker -> setup script (live inte
       expect(execResult.code).toBe(0);
       expect(execResult.stdout).not.toMatch(/^MISSING /m);
       expect(execResult.stdout).toMatch(/^OK \/sandbox\/\.openlock\/\.openlock-upload-complete$/m);
+      expect(execResult.stdout).toMatch(/^OK \/sandbox\/\.openlock\/\.openlock-setup-complete$/m);
       expect(execResult.stdout).toMatch(/^OK \/sandbox\/repo\/\.git$/m);
       expect(execResult.stdout).toMatch(/^OK \/sandbox\/repo\/README$/m);
     },
